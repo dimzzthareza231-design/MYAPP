@@ -1,8 +1,8 @@
 import express from 'express';
 import http from 'http';
+import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import {
   executeResilientGemini,
@@ -24,16 +24,21 @@ import { registerEmployeePortalGateway } from './src/server/employeePortalGatewa
 
 dotenv.config();
 
-async function startServer() {
+// Membangun kedua Express app tanpa listen; dipakai server lokal/Docker (startServer) dan Vercel Function (api/index.ts).
+export async function createApps() {
+  // Aplikasi inti (SIMK/RME + API /api/v1, /api/ai, /api/gateway) dan web publik pasien
+  // (/api/public, /api/patient) dilayani oleh dua Express app di dua port berbeda.
+  // Keduanya satu proses agar tetap berbagi data store in-memory di bawah.
+  // shortcut: satu proses = data bersama; pecah jadi dua layanan setelah data pindah ke database.
   const app = express();
-  const httpServer = http.createServer(app);
-  const PORT = 3000;
+  const publicApp = express();
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  for (const target of [app, publicApp]) {
+  target.use(express.json({ limit: '50mb' }));
+  target.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Security Headers Middleware
-  app.use((req, res, next) => {
+  target.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('X-XSS-Protection', '1; mode=block');
@@ -41,16 +46,18 @@ async function startServer() {
   });
 
   // Request Performance & Access Logger Middleware
-  app.use((req, res, next) => {
+  const logTag = target === publicApp ? 'PUBLIC-API' : 'SIMK-API';
+  target.use((req, res, next) => {
     const startTime = Date.now();
     res.on('finish', () => {
       const duration = Date.now() - startTime;
       if (req.path.startsWith('/api')) {
-        console.log(`[SIMK-API] ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`);
+        console.log(`[${logTag}] ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`);
       }
     });
     next();
   });
+  }
 
   // =========================================================================
   // 🏥 IN-MEMORY KLINIK DATA STORE (Simulated Enterprise SIMK State)
@@ -2098,8 +2105,8 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
     });
   });
 
-  // Register Public Hospital Portal & Patient Mobile App Routes
-  registerPatientPortalRoutes(app, {
+  // Register Public Hospital Portal & Patient Mobile App Routes (hanya di web publik)
+  registerPatientPortalRoutes(publicApp, {
     patientsStore: patientsStore as any,
     appointmentsStore: appointmentsStore as any,
     bedsStore: bedsStore as any,
@@ -2129,50 +2136,82 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
     }
   });
 
-  // Vite middleware for development vs static serving in production
-  const isProd = process.env.NODE_ENV === 'production';
-  if (isProd) {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'), (err) => {
-        if (err && !res.headersSent) {
-          res.status(500).send("Gagal memuat index.html. Silakan build ulang aplikasi.");
-        }
-      });
-    });
-  } else {
-    try {
-      const vite = await createViteServer({
-        server: {
-          middlewareMode: true,
-          hmr: { server: httpServer },
-          watch: process.env.DISABLE_HMR === 'true' ? null : {},
-        },
-        appType: 'spa',
-      });
-      app.use(vite.middlewares);
-    } catch (err) {
-      console.error('Vite dev server failed to start, falling back to static:', err);
-      const distPath = path.join(process.cwd(), 'dist');
-      app.use(express.static(distPath));
-      app.get('*', (req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
-    }
-  }
+  return { app, publicApp };
+}
 
-  // Global Error Handler
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+export function addErrorHandler(target: express.Application) {
+  target.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('Global Server Error:', err);
     if (!res.headersSent) {
       res.status(500).json({ error: err?.message || 'Terjadi kesalahan pada server.' });
     }
   });
+}
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log("Server running on port " + PORT);
+async function startServer() {
+  const { app, publicApp } = await createApps();
+  const httpServer = http.createServer(app);
+  const publicHttpServer = http.createServer(publicApp);
+  const CORE_PORT = Number(process.env.CORE_PORT) || 3001;
+  const PUBLIC_PORT = Number(process.env.PUBLIC_PORT) || Number(process.env.PORT) || 3000;
+
+  // Frontend: tiap app hanya menyajikan bundel miliknya sendiri.
+  const isProd = process.env.NODE_ENV === 'production';
+  const mountFrontend = async (target: express.Application, server: http.Server, appTarget: 'core' | 'public') => {
+    const htmlFile = appTarget === 'public' ? 'public.html' : 'index.html';
+    const distPath = path.join(process.cwd(), 'dist', appTarget);
+    const serveStatic = () => {
+      target.use(express.static(distPath, { index: false }));
+      target.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, htmlFile), (err) => {
+          if (err && !res.headersSent) {
+            res.status(500).send(`Gagal memuat ${htmlFile}. Silakan build ulang aplikasi.`);
+          }
+        });
+      });
+    };
+    if (isProd) return serveStatic();
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        configFile: path.join(process.cwd(), appTarget === 'public' ? 'vite.public.config.ts' : 'vite.config.ts'),
+        server: {
+          middlewareMode: true,
+          hmr: { server },
+          watch: process.env.DISABLE_HMR === 'true' ? null : {},
+        },
+        appType: 'custom',
+      });
+      target.use(vite.middlewares);
+      target.get('*', async (req, res, next) => {
+        try {
+          const raw = await fs.promises.readFile(path.join(process.cwd(), htmlFile), 'utf-8');
+          res.status(200).set({ 'Content-Type': 'text/html' }).end(await vite.transformIndexHtml(req.originalUrl, raw));
+        } catch (e) {
+          next(e);
+        }
+      });
+    } catch (err) {
+      console.error(`Vite dev server (${appTarget}) failed to start, falling back to static:`, err);
+      serveStatic();
+    }
+  };
+  await mountFrontend(app, httpServer, 'core');
+  await mountFrontend(publicApp, publicHttpServer, 'public');
+
+  // Global Error Handler
+  addErrorHandler(app);
+  addErrorHandler(publicApp);
+
+  httpServer.listen(CORE_PORT, '0.0.0.0', () => {
+    console.log("Aplikasi inti (SIMK/RME) running on port " + CORE_PORT);
+  });
+  publicHttpServer.listen(PUBLIC_PORT, '0.0.0.0', () => {
+    console.log("Web publik pasien running on port " + PUBLIC_PORT);
   });
 }
 
-startServer().catch(console.error);
+// Di Vercel, server tidak listen sendiri; request masuk lewat api/index.ts.
+if (!process.env.VERCEL) {
+  startServer().catch(console.error);
+}

@@ -2540,7 +2540,11 @@ export const PublicHospitalPortal: React.FC = () => {
               </span>
               <button
                 type="button"
-                onClick={() => navigate('/staff/login')}
+                onClick={() => {
+                  // Aplikasi inti berjalan di origin terpisah. shortcut: default port 3001 hanya cocok untuk lokal/Docker, set VITE_CORE_APP_URL di produksi.
+                  const coreUrl = import.meta.env.VITE_CORE_APP_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+                  window.location.href = `${coreUrl}/staff/login`;
+                }}
                 title="Tanda Khusus Masuk Aplikasi Inti Klinik (/staff/login)"
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-amber-400/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 hover:text-white font-mono text-[11px] font-semibold tracking-wider transition cursor-pointer"
               >

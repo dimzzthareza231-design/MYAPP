@@ -4,12 +4,22 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(() => {
-  return {
+export type AppTarget = 'core' | 'public';
+
+// Dua aplikasi dari satu codebase: 'public' (portal pasien, public.html) dan 'core' (SIMK/RME, index.html).
+export function makeConfig(target: AppTarget) {
+  const isPublic = target === 'public';
+  return defineConfig({
+    build: {
+      outDir: isPublic ? 'dist/public' : 'dist/core',
+      emptyOutDir: true,
+      rollupOptions: { input: path.resolve(__dirname, isPublic ? 'public.html' : 'index.html') },
+    },
     plugins: [
       react(),
       tailwindcss(),
-      VitePWA({
+      // PWA hanya untuk aplikasi pasien.
+      isPublic && VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'logo-myitaru.png', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
@@ -45,6 +55,7 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          navigateFallback: 'public.html',
           maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
           runtimeCaching: [
@@ -110,5 +121,7 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
-  };
-});
+  });
+}
+
+export default makeConfig('core');

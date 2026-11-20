@@ -16,8 +16,6 @@ import ModuleLayout from './layouts/ModuleLayout';
 import { GenericModuleContent } from './components/GenericModuleContent';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Login } from './components/Login';
-import { PublicHospitalPortal } from './components/Portal/PublicHospitalPortal';
-import { PatientMobileApp } from './components/Mobile/PatientMobileApp';
 import { EmployeeAppLanding } from './components/Employee/EmployeeAppLanding';
 import { EmployeePortal } from './components/Employee/EmployeePortal';
 import { EmployeeMobileApp } from './components/Employee/EmployeeMobileApp';
@@ -111,10 +109,8 @@ function AppContent() {
       <main className="flex-1 flex flex-col min-w-0 relative w-full scroll-smooth">
         <ErrorBoundary>
           <Routes>
-            {/* 1. Portal Publik Pasien (Khusus Pendaftaran Online & Cek Nomor Antrean) + App Mobile Pasien */}
-            <Route path="/" element={<ErrorBoundary><PublicHospitalPortal /></ErrorBoundary>} />
-            <Route path="/portal" element={<ErrorBoundary><PublicHospitalPortal /></ErrorBoundary>} />
-            <Route path="/mobile/*" element={<ErrorBoundary><PatientMobileApp /></ErrorBoundary>} />
+            {/* 1. Portal Publik Pasien & App Mobile Pasien dipisah ke aplikasi web publik (PublicApp.tsx / public.html) */}
+            <Route path="/" element={<Navigate to={currentUser ? '/dashboard' : '/staff/login'} replace />} />
 
             {/* 2. Aplikasi Karyawan (HRIS & 34 Divisi, App Download Landing & Mobile Karyawan) */}
             <Route path="/portal-karyawan" element={<ErrorBoundary><EmployeePortal /></ErrorBoundary>} />

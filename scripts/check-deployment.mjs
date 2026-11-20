@@ -51,6 +51,10 @@ const criticalFiles = [
   'server.ts',
   'vite.config.ts',
   'index.html',
+  'public.html',
+  'vite.public.config.ts',
+  'src/PublicApp.tsx',
+  'src/main.public.tsx',
   'src/App.tsx',
   'src/main.tsx',
   'Dockerfile'
