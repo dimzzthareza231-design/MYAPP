@@ -1,41 +1,18 @@
-# ==========================================
-# Multi-stage Production Dockerfile for MYITARU SIMRS
-# ==========================================
-
-# Stage 1: Build
-FROM node:20-alpine AS builder
-
+# bun.lock is the canonical lockfile; package-lock.json is legacy and unused.
+FROM oven/bun:1.4.5 AS builder
 WORKDIR /app
-
-# Copy dependency manifests
-COPY package*.json ./
-
-# Install all dependencies (including devDependencies for TypeScript & Vite build)
-RUN npm ci
-
-# Copy full application source code
+COPY package.json bun.lock .npmrc ./
+RUN bun install --frozen-lockfile
 COPY . .
+RUN bun run build
 
-# Run production build (Vite + esbuild server bundle to dist/server.cjs)
-RUN npm run build
-
-# Stage 2: Production Runner
-FROM node:20-alpine AS runner
-
+FROM oven/bun:1.4.5-slim AS runner
 WORKDIR /app
-
-ENV NODE_ENV=production
-ENV PORT=3000
-
-# Copy package manifests and install runtime dependencies
-COPY package*.json ./
-RUN npm ci --only=production
-
-# Copy compiled dist folder from builder stage
-COPY --from=builder /app/dist ./dist
-
-# Expose container port
+ENV NODE_ENV=production PORT=3000
+COPY package.json bun.lock .npmrc ./
+RUN bun install --frozen-lockfile --production --ignore-scripts
+COPY --from=builder --chown=bun:bun /app/dist/main ./dist/main
+COPY --from=builder --chown=bun:bun /app/dist/server ./dist/server
+USER bun
 EXPOSE 3000
-
-# Run production server
-CMD ["node", "dist/server.cjs"]
+CMD ["bun", "dist/server/index.cjs"]
