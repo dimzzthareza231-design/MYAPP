@@ -20,7 +20,6 @@ import {
   ArrowRight,
   UserCheck,
   AlertCircle,
-  Lock,
   BedDouble,
   ChevronLeft,
   ChevronRight,
@@ -564,7 +563,7 @@ export const PublicHospitalPortal: React.FC = () => {
             </button>
 
             {/* Zone 2: Concise Patient Navigation Links */}
-            <nav className="hidden lg:flex items-center gap-6 text-sm font-semibold text-slate-700">
+            <nav className="hidden xl:flex items-center gap-6 text-sm font-semibold text-slate-700">
               <button
                 type="button"
                 onClick={() => scrollToWorkspace('daftar', 'portal-workspace')}
@@ -617,7 +616,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 type="button"
                 onClick={() => setMobileMenuOpen((v) => !v)}
                 aria-label="Menu Navigasi"
-                className="lg:hidden p-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
+                className="xl:hidden p-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
               >
                 {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </button>
@@ -632,7 +631,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.25, ease: EASE_OUT_EXPO }}
-                className="lg:hidden overflow-hidden bg-white border-t border-slate-200"
+                className="xl:hidden overflow-hidden bg-white border-t border-slate-200"
               >
                 <div className="px-4 py-4 space-y-1.5">
                   <button
@@ -2441,7 +2440,7 @@ export const PublicHospitalPortal: React.FC = () => {
           </div>
         </section>
 
-        {/* Patient-Only Corporate Footer + Discrete SIMK-INTI Special Access Mark */}
+        {/* Patient-Only Corporate Footer (tanpa tautan ke aplikasi inti) */}
         <footer className="bg-[#07265C] text-white pt-14 pb-10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-10 border-b border-white/10">
@@ -2538,19 +2537,6 @@ export const PublicHospitalPortal: React.FC = () => {
               <span>
                 © {new Date().getFullYear()} Klinik Tarumanagara (MYITARU SIMK) · Portal Publik Layanan Pasien
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  // Aplikasi inti berjalan di origin terpisah. shortcut: default port 3001 hanya cocok untuk lokal/Docker, set VITE_CORE_APP_URL di produksi.
-                  const coreUrl = import.meta.env.VITE_CORE_APP_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
-                  window.location.href = `${coreUrl}/staff/login`;
-                }}
-                title="Tanda Khusus Masuk Aplikasi Inti Klinik (/staff/login)"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-amber-400/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 hover:text-white font-mono text-[11px] font-semibold tracking-wider transition cursor-pointer"
-              >
-                <Lock className="w-3 h-3 text-amber-300" />
-                <span>SIMK-INTI</span>
-              </button>
             </div>
           </div>
         </footer>

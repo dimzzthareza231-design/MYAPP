@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type express from 'express';
+import { createSignedStore } from './signedStore';
 import {
   HOSPITAL_DIVISIONS,
   CORE_EMPLOYEE_MODULES,
@@ -170,8 +171,9 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     lastHrisSync: new Date().toISOString()
   }));
 
-  const mfaChallenges = new Map<string, MfaChallenge>();
-  const sessions = new Map<string, GatewaySession>();
+  // Tantangan MFA & sesi = token bertanda tangan (stateless) agar login tetap jalan di serverless multi-instance.
+  const mfaChallenges = createSignedStore<MfaChallenge>('mfa_', 'challengeId', 10 * 60 * 1000);
+  const sessions = createSignedStore<GatewaySession>('emp_', 'token', 12 * 60 * 60 * 1000);
   const idempotencyCache = new Map<string, { status: number; body: unknown; createdAt: number }>();
   const rateLimitMap = new Map<string, number[]>();
 
@@ -923,9 +925,8 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const needsMfa = abacPolicies.mfaRequiredForClinicalAndAdmin && (user.isClinical || user.isAdminCapable);
 
     if (needsMfa) {
-      const challengeId = 'mfa-' + crypto.randomUUID().slice(0, 8);
-      mfaChallenges.set(challengeId, {
-        challengeId,
+      const challengeId = mfaChallenges.issue({
+        challengeId: '',
         userId: user.id,
         otp: DEFAULT_DEMO_OTP,
         authType: authType === 'google' ? 'google' : 'nip',
@@ -963,7 +964,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
 
     // Standard role direct issue (MFA optional)
-    const token = 'emp_' + crypto.randomBytes(16).toString('hex');
+    let token = '';
     const session: GatewaySession = {
       token,
       userId: user.id,
@@ -988,7 +989,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       },
       createdAt: new Date().toISOString()
     };
-    sessions.set(token, session);
+    token = sessions.issue(session);
 
     appendSiemLog({
       actorNip: user.nip,
@@ -1045,7 +1046,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
 
     mfaChallenges.delete(challenge.challengeId);
-    const token = 'emp_' + crypto.randomBytes(16).toString('hex');
+    let token = '';
     const deviceFingerprint = `BND-${user.nip.slice(-3)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
     const session: GatewaySession = {
@@ -1073,7 +1074,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       createdAt: new Date().toISOString()
     };
 
-    sessions.set(token, session);
+    token = sessions.issue(session);
 
     appendSiemLog({
       actorNip: user.nip,

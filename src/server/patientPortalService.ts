@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type express from 'express';
+import { createSignedStore } from './signedStore';
 import { MASTER_POLIKLINIK, SEMUA_DOKTER } from '../data/seedData';
 import {
   generateAllPatientsWithResumes,
@@ -212,8 +213,8 @@ export function registerPatientPortalRoutes(
     ['dimzzthareza231@gmail.com', 'RM-260101-0001']
   ]);
 
-  // Active verified patient session tokens
-  const patientSessions = new Map<string, PatientSession>();
+  // Sesi pasien = token bertanda tangan (stateless), tetap valid di semua instance serverless.
+  const patientSessions = createSignedStore<PatientSession>('pat_', 'token', 12 * 60 * 60 * 1000);
 
   const doctorServedBoost = new Map<string, number>();
 
@@ -614,15 +615,14 @@ export function registerPatientPortalRoutes(
   }
 
   function issueSession(no_rm: string, authMethod: 'rm_dob' | 'google', email?: string): PatientSession {
-    const token = 'pat_' + crypto.randomBytes(20).toString('hex');
     const session: PatientSession = {
-      token,
+      token: '',
       no_rm: normalizeRm(no_rm),
       authMethod,
       email,
       verifiedAt: new Date().toISOString()
     };
-    patientSessions.set(token, session);
+    patientSessions.issue(session);
     return session;
   }
 
