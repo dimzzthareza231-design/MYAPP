@@ -657,35 +657,63 @@ export function auditBpjsClaimDeterministic(input: {
   sepNo?: string;
 }) {
   const items = Array.isArray(input.items) ? input.items : [];
-  const diagnosisStr = JSON.stringify(input.diagnosis || '').toLowerCase();
+  const diagnosisStr = JSON.stringify(input.diagnosis || '').toLowerCase().replace(/^"|"$/g, '');
+  const sep = String(input.sepNo || '').trim();
 
-  const findings: string[] = [
-    'Nomor Surat Eligibilitas Peserta (SEP) elektronik valid dan aktif di bridging V-Claim BPJS.',
-    'Diagnosis ICD-10 primer sesuai dengan standar pengelompokan INA-CBGs Kemenkes RI.',
-    'Tidak ditemukan duplikasi peresepan obat atau klaim ganda pada episode perawatan ini.'
-  ];
+  // Mesin aturan ini hanya memeriksa kelengkapan & format berkas; keaktifan SEP tetap harus dicek lewat V-Claim.
+  const findings: string[] = [];
+  const problems: string[] = [];
+  let score = 100;
 
-  let potentialReason = '';
-  let score = 96;
-  let status = 'valid';
-
-  // Cross check items
-  const hasLab = items.some((it: any) => (it.kategori || '').toLowerCase().includes('lab'));
-  const hasMed = items.some((it: any) => (it.kategori || '').toLowerCase().includes('farmasi') || (it.deskripsi || '').toLowerCase().includes('obat'));
-
-  if (!hasMed && items.length > 2) {
-    findings.push('Peringatan: Berkas tindakan medis tanpa peresepan obat pulang atau pemakaian alkes.');
-    score = 88;
-    status = 'warning';
+  if (!sep) {
+    problems.push('Nomor SEP belum diisi.');
+    score -= 35;
+  } else if (!/^[0-9A-Z]{19}$/i.test(sep)) {
+    problems.push(`Format nomor SEP "${sep}" tidak sesuai (harus 19 karakter alfanumerik).`);
+    score -= 25;
+  } else {
+    findings.push('Format nomor SEP sesuai (19 karakter). Keaktifan SEP perlu dikonfirmasi melalui V-Claim BPJS.');
   }
 
+  if (!diagnosisStr || diagnosisStr === '""') {
+    problems.push('Diagnosis utama (ICD-10) belum diisi.');
+    score -= 35;
+  } else {
+    findings.push('Diagnosis utama tercantum pada berkas klaim.');
+  }
+
+  if (items.length === 0) {
+    problems.push('Rincian tagihan/tindakan belum dilampirkan.');
+    score -= 20;
+  } else {
+    const sum = items.reduce((acc: number, it: any) => acc + (Number(it.harga ?? it.tarif ?? it.jumlah ?? 0) || 0), 0);
+    if (input.totalBill != null && sum > 0 && Math.abs(sum - Number(input.totalBill)) > 1) {
+      problems.push(`Total tagihan (Rp ${Number(input.totalBill).toLocaleString('id-ID')}) tidak sama dengan jumlah rincian (Rp ${sum.toLocaleString('id-ID')}).`);
+      score -= 15;
+    } else {
+      findings.push('Total tagihan sesuai dengan jumlah rincian tindakan.');
+    }
+    const hasMed = items.some((it: any) => (it.kategori || '').toLowerCase().includes('farmasi') || `${it.deskripsi || ''} ${it.nama || ''}`.toLowerCase().includes('obat'));
+    if (!hasMed && items.length > 2) {
+      problems.push('Berkas tindakan medis tanpa peresepan obat pulang atau pemakaian alkes; pastikan memang tidak ada.');
+      score -= 8;
+    }
+  }
+
+  score = Math.max(0, score);
+  const status = problems.some((p) => p.includes('belum diisi') || p.includes('tidak sesuai (harus')) ? 'invalid' : problems.length ? 'warning' : 'valid';
+  const isHt = /hipertensi|\bi1[0-5]/.test(diagnosisStr);
+  const isDm = /diabetes|\be1[0-4]/.test(diagnosisStr);
+
   return {
-    score: score,
-    status: status,
-    findings: findings,
-    recommendation: 'Berkas klaim siap dikirim ke verifikator BPJS Kesehatan tanpa risiko dispute.',
-    inacbgGroup: diagnosisStr.includes('hipertensi') ? 'I-4-10-I (Hipertensi Ringan)' : (diagnosisStr.includes('diabetes') ? 'E-4-10-I (Diabetes Melitus Ringan)' : 'Z-3-19-I (Pemeriksaan / Konsultasi Rawat Jalan)'),
-    potentialPendingReason: potentialReason || 'Klaim memenuhi seluruh syarat verifikasi klinis.'
+    score,
+    status,
+    findings: [...findings, ...problems.map((p) => 'Perlu perbaikan: ' + p)],
+    recommendation: status === 'valid'
+      ? 'Kelengkapan berkas memenuhi pemeriksaan otomatis. Lakukan verifikasi akhir oleh petugas klaim sebelum dikirim.'
+      : 'Lengkapi butir yang ditandai sebelum berkas dikirim ke verifikator BPJS Kesehatan.',
+    inacbgGroup: isHt ? 'I-4-10-I (Hipertensi Ringan)' : isDm ? 'E-4-10-I (Diabetes Melitus Ringan)' : 'Z-3-19-I (Pemeriksaan / Konsultasi Rawat Jalan)',
+    potentialPendingReason: problems.length ? problems.join(' ') : 'Tidak ditemukan alasan pending pada pemeriksaan otomatis.'
   };
 }
 
@@ -835,7 +863,8 @@ export function auditDocumentCompletenessDeterministic(input: {
   }
 
   // 4. Autentikasi TTE
-  if (sigs.dpjpSigned !== false) {
+  // Hanya dianggap lengkap bila tanda tangan benar-benar dikirim; sebelumnya ketiadaan data dianggap sudah ditandatangani.
+  if (sigs.dpjpSigned === true) {
     positive.push('Autentikasi tenaga medis (TTE & timestamp) memenuhi standar Permenkes No. 24/2022.');
   } else {
     missing.push('Tanda tangan elektronik DPJP/perawat pemeriksa belum dibubuhkan.');
