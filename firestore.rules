@@ -2,74 +2,83 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function verified() { return request.auth != null && request.auth.token.email_verified == true; }
-    function userPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
-    function active() { return verified() && exists(userPath()) && get(userPath()).data.aktif == true; }
-    function role() { return get(userPath()).data.roleId; }
-    function admin() { return active() && role() in ['super_admin', 'admin']; }
-    function staff() { return active() && role() in ['super_admin', 'admin', 'direksi', 'dokter', 'perawat', 'bidan', 'apoteker', 'kasir', 'pendaftaran', 'rekam_medis', 'laboran', 'radiografer', 'manajemen_mutu', 'gizi', 'rehab_medik', 'it_support']; }
-    function clinical() { return active() && role() in ['super_admin', 'admin', 'dokter', 'perawat', 'bidan', 'rekam_medis']; }
-    function registration() { return clinical() || (active() && role() == 'pendaftaran'); }
-    function validId(id) { return id is string && id.size() > 0 && id.size() <= 128; }
-    function ownPatient(data) {
-      return active() && role() in ['patient', 'viewer'] &&
-        get(userPath()).data.no_rm is string && get(userPath()).data.no_rm.size() > 0 &&
-        data.no_rm == get(userPath()).data.no_rm;
-    }
-    function userValid(data) {
-      return data.keys().hasOnly(['id','uid','username','nama','email','photoURL','roleId','aktif','dibuatPada','isGoogleAuth','updatedAt','no_rm']) &&
-        data.keys().hasAll(['nama','roleId','aktif']) && data.nama is string && data.nama.size() > 0 && data.nama.size() <= 160 &&
-        data.aktif is bool && data.roleId in ['super_admin','admin','direksi','dokter','perawat','bidan','apoteker','kasir','pendaftaran','rekam_medis','laboran','radiografer','manajemen_mutu','gizi','rehab_medik','it_support','patient','viewer'] &&
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function active() { return verified() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && profile().aktif == true; }
+    function admin() { return active() && profile().roleId in ['super_admin', 'admin']; }
+    function staff() { return active() && profile().roleId in ['super_admin', 'admin', 'direksi', 'dokter', 'perawat', 'bidan', 'apoteker', 'kasir', 'pendaftaran', 'rekam_medis', 'laboran', 'radiografer', 'manajemen_mutu', 'gizi', 'rehab_medik', 'it_support']; }
+    function clinical() { return active() && profile().roleId in ['super_admin', 'admin', 'dokter', 'perawat', 'bidan', 'rekam_medis']; }
+    function owner() { return active() && profile().roleId in ['patient', 'viewer'] && profile().no_rm is string && resource.data.no_rm == profile().no_rm; }
+    function validId(id) { return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function validProfile(data) {
+      return data.keys().hasAll(['nama', 'roleId', 'aktif']) && data.keys().hasOnly(['id', 'uid', 'username', 'nama', 'email', 'photoURL', 'roleId', 'aktif', 'no_rm', 'dibuatPada', 'isGoogleAuth', 'updatedAt']) &&
+        data.nama is string && data.nama.size() > 0 && data.nama.size() <= 160 && data.aktif is bool &&
+        data.roleId in ['super_admin', 'admin', 'direksi', 'dokter', 'perawat', 'bidan', 'apoteker', 'kasir', 'pendaftaran', 'rekam_medis', 'laboran', 'radiografer', 'manajemen_mutu', 'gizi', 'rehab_medik', 'it_support', 'viewer', 'patient'] &&
         (!('no_rm' in data) || (data.no_rm is string && data.no_rm.size() <= 40));
     }
-    function patientValid(data) {
-      return data.keys().hasAll(['nama','no_rm']) &&
-        data.keys().hasOnly(['id','no_rm','nik','nama','tanggal_lahir','tgl_lahir','jenis_kelamin','alamat','telepon','no_hp','golongan_darah','penjamin','status','keluhan_utama','diagnosa_primer','alergi','tanda_vital','resume_medis','soap','updatedAt']) &&
-        data.nama is string && data.nama.size() > 0 && data.nama.size() <= 160 &&
-        data.no_rm is string && data.no_rm.size() > 0 && data.no_rm.size() <= 40 &&
-        (!('nik' in data) || (data.nik is string && data.nik.matches('^[0-9]{16}$')));
+    function validPatient(data) {
+      return data.keys().hasAll(['nama', 'no_rm']) && data.keys().hasOnly(['id', 'no_rm', 'nik', 'nama', 'tanggal_lahir', 'tgl_lahir', 'jenis_kelamin', 'alamat', 'telepon', 'no_hp', 'golongan_darah', 'penjamin', 'status', 'keluhan_utama', 'diagnosa_primer', 'alergi', 'tanda_vital', 'resume_medis', 'soap', 'updatedAt']) &&
+        data.nama is string && data.nama.size() > 0 && data.nama.size() <= 160 && data.no_rm is string && data.no_rm.size() > 0 && data.no_rm.size() <= 40 &&
+        (!('nik' in data) || (data.nik is string && data.nik.size() <= 32)) && (!('alamat' in data) || (data.alamat is string && data.alamat.size() <= 500));
     }
+    // No hardcoded administrator email and no self-assigned roles or RM links.
+    // Initial administrator provisioning is an explicit Firebase Console step.
     match /users/{uid} {
       allow get: if verified() && (request.auth.uid == uid || admin());
       allow list: if admin();
-      // Bootstrap/identity provisioning occurs through a trusted administrator.
-      // No self-created administrator, hard-coded email override, or password field.
-      allow create: if validId(uid) && admin() && userValid(request.resource.data);
-      allow update: if validId(uid) && userValid(request.resource.data) && (
-        admin() || (active() && request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nama','username','photoURL','updatedAt']))
-      );
+      allow create: if admin() && validId(uid) && validProfile(request.resource.data);
+      allow update: if validId(uid) && validProfile(request.resource.data) && (admin() ||
+        (active() && request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nama', 'photoURL', 'username', 'updatedAt'])));
       allow delete: if false;
     }
     match /pasien/{id} {
-      allow get, list: if staff() || ownPatient(resource.data);
-      allow create: if validId(id) && registration() && patientValid(request.resource.data);
-      allow update: if validId(id) && registration() && patientValid(request.resource.data) && request.resource.data.no_rm == resource.data.no_rm;
+      allow get, list: if staff() || owner();
+      allow create: if validId(id) && (clinical() || (active() && profile().roleId == 'pendaftaran')) && validPatient(request.resource.data);
+      allow update: if validId(id) && validPatient(request.resource.data) && (clinical() ||
+        (active() && profile().roleId == 'pendaftaran' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nama', 'nik', 'tanggal_lahir', 'tgl_lahir', 'jenis_kelamin', 'alamat', 'telepon', 'no_hp', 'golongan_darah', 'penjamin', 'updatedAt'])));
       allow delete: if false;
     }
     match /kunjungan/{id} {
-      allow get, list: if staff() || ownPatient(resource.data);
-      allow create, update: if validId(id) && registration() && request.resource.data.keys().hasAll(['pasien_id','tanggal','status']) && request.resource.data.pasien_id is string && request.resource.data.tanggal is string && request.resource.data.status is string;
+      allow get, list: if staff() || owner();
+      allow create: if validId(id) && staff() && request.resource.data.keys().hasAll(['pasien_id', 'tanggal', 'status']) && request.resource.data.pasien_id is string && request.resource.data.tanggal is string && request.resource.data.status is string;
+      allow update: if validId(id) && staff() && request.resource.data.pasien_id == resource.data.pasien_id;
       allow delete: if false;
     }
-    match /dokter/{id} { allow read: if staff(); allow create, update: if admin() && validId(id); allow delete: if false; }
-    match /perawat/{id} { allow read: if staff(); allow create, update: if admin() && validId(id); allow delete: if false; }
-    match /hospital_settings/{id} { allow read: if staff(); allow create, update: if admin() && validId(id); allow delete: if false; }
-    // Arbitrary legacy JSON blobs are never readable by a patient/viewer.
-    match /system_data/{id} { allow read, create, update: if admin() && validId(id); allow delete: if false; }
+    match /dokter/{id} {
+      allow read: if staff();
+      allow create, update: if validId(id) && admin() && request.resource.data.nama is string;
+      allow delete: if false;
+    }
+    match /perawat/{id} {
+      allow read: if staff();
+      allow create, update: if validId(id) && admin() && request.resource.data.nama is string;
+      allow delete: if false;
+    }
+    match /hospital_settings/{id} {
+      allow read: if staff();
+      allow create, update: if validId(id) && admin();
+      allow delete: if false;
+    }
+    match /system_data/{id} {
+      // Legacy arbitrary JSON collections are administrator-only until migrated.
+      allow read: if admin();
+      allow create, update: if validId(id) && admin() && request.resource.data.keys().hasOnly(['key', 'data', 'updatedAt']) && request.resource.data.key == id && request.resource.data.data is string && request.resource.data.data.size() < 950000;
+      allow delete: if false;
+    }
     match /activity_logs/{id} {
-      allow read: if admin() || (active() && resource.data.user.uid == request.auth.uid);
-      allow create: if active() && validId(id) && request.resource.data.user.uid == request.auth.uid;
+      allow get, list: if admin() || (active() && resource.data.user.uid == request.auth.uid);
+      allow create: if validId(id) && active() && request.resource.data.user.uid == request.auth.uid && request.resource.data.keys().hasAll(['id', 'category', 'action', 'target', 'status', 'timestamp', 'user', 'details']);
       allow update, delete: if false;
     }
     match /fcm_tokens/{id} {
-      allow read: if admin() || (active() && resource.data.uid == request.auth.uid);
-      allow create: if active() && request.resource.data.uid == request.auth.uid && ownPatient(request.resource.data);
-      allow update: if active() && resource.data.uid == request.auth.uid && request.resource.data.uid == resource.data.uid && request.resource.data.no_rm == resource.data.no_rm && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['token','platform','userAgent','queueAlertsEnabled','labAlertsEnabled','active','updatedAt']);
+      allow get, list: if admin() || (active() && resource.data.uid == request.auth.uid);
+      allow create: if validId(id) && active() && request.resource.data.uid == request.auth.uid && request.resource.data.no_rm == profile().no_rm;
+      allow update: if active() && resource.data.uid == request.auth.uid && request.resource.data.uid == resource.data.uid && request.resource.data.no_rm == resource.data.no_rm;
       allow delete: if active() && resource.data.uid == request.auth.uid;
     }
     match /patient_notifications/{id} {
-      allow read: if admin() || (active() && resource.data.recipientUid == request.auth.uid);
+      allow get, list: if clinical() || (active() && resource.data.recipientUid == request.auth.uid);
       allow create: if clinical();
-      allow update: if active() && resource.data.recipientUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) && request.resource.data.read is bool;
+      allow update: if clinical() || (active() && resource.data.recipientUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']));
       allow delete: if false;
     }
     match /test/{id} { allow get: if active(); allow list, write: if false; }
