@@ -24,9 +24,8 @@ jobs:
       - run: bun run test
       - run: bun run build:main
       - run: bun run build:server
-  legacy-typecheck:
+  full-typecheck:
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
