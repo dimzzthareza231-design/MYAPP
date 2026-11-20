@@ -698,12 +698,12 @@ export function checkDrugInteractionsDeterministic(medications: any[], patientCo
 
   // Check known drug interaction pairs
   const checkPair = (drug1: string, drug2: string, severity: any, mechanism: string, action: string) => {
-    const has1 = medNames.some(m => m.includes(drug1));
-    const has2 = medNames.some(m => m.includes(drug2));
-    if (has1 && has2) {
+    // Nama obat boleh berisi alias dipisah '|' (ejaan Inggris dan Indonesia, mis. 'amlodipine|amlodipin').
+    const matches = (aliases: string) => aliases.split('|').some(a => medNames.some(m => m.includes(a)));
+    if (matches(drug1) && matches(drug2)) {
       interactions.push({
-        drugA: drug1.toUpperCase(),
-        drugB: drug2.toUpperCase(),
+        drugA: drug1.split('|')[0].toUpperCase(),
+        drugB: drug2.split('|')[0].toUpperCase(),
         severity: severity,
         mechanism: mechanism,
         action: action
@@ -712,11 +712,13 @@ export function checkDrugInteractionsDeterministic(medications: any[], patientCo
   };
 
   // Pair checks
-  checkPair('amlodipine', 'simvastatin', 'Mayor', 'Amlodipine menghambat CYP3A4, meningkatkan konsentrasi serum Simvastatin dan risiko rhabdomyolisis.', 'Batasi dosis Simvastatin maksimal 20 mg/hari atau ganti dengan Atorvastatin / Rosuvastatin.');
-  checkPair('captopril', 'spironolactone', 'Mayor', 'Kombinasi ACE-inhibitor dan Diuretik Hemat Kalium meningkatkan risiko hiperkalemia fatal.', 'Pantau kalium serum dan fungsi ginjal berkala; hindari suplemen kalium tambahan.');
-  checkPair('ciprofloxacin', 'antasida', 'Moderat', 'Kation divalen/trivalen pada antasida mengkelat Ciprofloxacin sehingga menurunkan absorpsinya hingga 80%.', 'Beri jarak konsumsi minimal 2 jam sebelum atau 4 jam setelah antasida.');
+  checkPair('amlodipine|amlodipin', 'simvastatin', 'Mayor', 'Amlodipine menghambat CYP3A4, meningkatkan konsentrasi serum Simvastatin dan risiko rhabdomyolisis.', 'Batasi dosis Simvastatin maksimal 20 mg/hari atau ganti dengan Atorvastatin / Rosuvastatin.');
+  checkPair('captopril|kaptopril', 'spironolactone|spironolakton', 'Mayor', 'Kombinasi ACE-inhibitor dan Diuretik Hemat Kalium meningkatkan risiko hiperkalemia fatal.', 'Pantau kalium serum dan fungsi ginjal berkala; hindari suplemen kalium tambahan.');
+  checkPair('ciprofloxacin|siprofloksasin', 'antasida|antacid', 'Moderat', 'Kation divalen/trivalen pada antasida mengkelat Ciprofloxacin sehingga menurunkan absorpsinya hingga 80%.', 'Beri jarak konsumsi minimal 2 jam sebelum atau 4 jam setelah antasida.');
   checkPair('metformin', 'kontras', 'Mayor', 'Zat kontras iodinasi dapat memicu penurunan fungsi ginjal akut dan asidosis laktat akibat akumulasi metformin.', 'Hentikan Metformin 48 jam sebelum prosedur kontras dan lanjutkan 48 jam setelah fungsi ginjal terkonfirmasi normal.');
-  checkPair('aspirin', 'ibuprofen', 'Mayor', 'Ibuprofen mengantagonis efek antiplatelet irreversibel Aspirin kardioprotektif serta meningkatkan risiko perdarahan GI.', 'Gunakan Paracetamol untuk analgesik alternatif atau berikan Aspirin minimal 2 jam sebelum Ibuprofen.');
+  checkPair('warfarin', 'aspirin|asetosal|asam asetilsalisilat', 'Mayor', 'Aspirin menambah efek antikoagulan Warfarin melalui hambatan agregasi trombosit sehingga risiko perdarahan meningkat bermakna.', 'Hindari kombinasi kecuali ada indikasi kuat (mis. katup mekanik); bila diberikan, pantau INR ketat dan tanda perdarahan.');
+  checkPair('warfarin', 'ibuprofen|natrium diklofenak|diclofenac|meloxicam|meloksikam', 'Mayor', 'OAINS meningkatkan risiko perdarahan saluran cerna dan dapat menaikkan efek antikoagulan Warfarin.', 'Gunakan Paracetamol sebagai analgesik; bila OAINS terpaksa diberikan, pantau INR dan tanda perdarahan.');
+  checkPair('aspirin|asetosal|asam asetilsalisilat', 'ibuprofen', 'Mayor', 'Ibuprofen mengantagonis efek antiplatelet irreversibel Aspirin kardioprotektif serta meningkatkan risiko perdarahan GI.', 'Gunakan Paracetamol untuk analgesik alternatif atau berikan Aspirin minimal 2 jam sebelum Ibuprofen.');
 
   const hasCritical = interactions.some(i => i.severity === 'Kontraindikasi' || i.severity === 'Mayor');
   const safetyIndex = hasCritical ? 72 : (interactions.length > 0 ? 86 : 98);
