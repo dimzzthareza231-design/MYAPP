@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client"] },
+  "include": ["server.ts", "src/server/app.ts", "src/server/security.ts", "src/server/middleware.ts", "src/server/firestoreRepository.ts", "apps/main/vite.config.ts", "apps/public/vite.config.ts", "vite-env.d.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
+}
