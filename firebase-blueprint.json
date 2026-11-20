@@ -1,0 +1,225 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Hospital staff and user profiles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 64 },
+        "nama": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "maxLength": 160 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "roleId": { "type": "string", "maxLength": 40 },
+        "aktif": { "type": "boolean" },
+        "dibuatPada": { "type": "string", "maxLength": 32 },
+        "isGoogleAuth": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["nama", "roleId"]
+    },
+    "Pasien": {
+      "title": "Pasien",
+      "description": "Hospital patient demographic and medical records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "no_rm": { "type": "string", "maxLength": 40 },
+        "nik": { "type": "string", "maxLength": 32 },
+        "nama": { "type": "string", "maxLength": 160 },
+        "tanggal_lahir": { "type": "string", "maxLength": 32 },
+        "tgl_lahir": { "type": "string", "maxLength": 32 },
+        "jenis_kelamin": { "type": "string", "maxLength": 20 },
+        "alamat": { "type": "string", "maxLength": 500 },
+        "telepon": { "type": "string", "maxLength": 40 },
+        "no_hp": { "type": "string", "maxLength": 40 },
+        "golongan_darah": { "type": "string", "maxLength": 10 },
+        "penjamin": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "maxLength": 40 },
+        "keluhan_utama": { "type": "string", "maxLength": 1000 },
+        "diagnosa_primer": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["nama", "no_rm"]
+    },
+    "Kunjungan": {
+      "title": "Kunjungan",
+      "description": "Outpatient, inpatient, and emergency patient visits",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "pasien_id": { "type": "string", "maxLength": 128 },
+        "tanggal": { "type": "string", "maxLength": 32 },
+        "poli_id": { "type": "string", "maxLength": 64 },
+        "dokter_id": { "type": "string", "maxLength": 64 },
+        "penjamin_id": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 40 },
+        "tipe": { "type": "string", "maxLength": 40 },
+        "nomor_antrian": { "type": "string", "maxLength": 32 },
+        "keluhan_utama": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["pasien_id", "tanggal", "status"]
+    },
+    "Dokter": {
+      "title": "Dokter",
+      "description": "Medical doctors and specialists master data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "nama": { "type": "string", "maxLength": 160 },
+        "spesialisasi": { "type": "string", "maxLength": 120 },
+        "poli_id": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["nama"]
+    },
+    "Perawat": {
+      "title": "Perawat",
+      "description": "Nurses master data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "nip": { "type": "string", "maxLength": 64 },
+        "nama": { "type": "string", "maxLength": 160 },
+        "jabatan": { "type": "string", "maxLength": 100 },
+        "unit": { "type": "string", "maxLength": 100 },
+        "shift": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["nama"]
+    },
+    "HospitalSettings": {
+      "title": "HospitalSettings",
+      "description": "Hospital general metadata and settings",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 160 },
+        "nama": { "type": "string", "maxLength": 160 },
+        "address": { "type": "string", "maxLength": 500 },
+        "alamat": { "type": "string", "maxLength": 500 },
+        "city": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 60 },
+        "email": { "type": "string", "maxLength": 160 },
+        "website": { "type": "string", "maxLength": 200 },
+        "logoUrl": { "type": "string", "maxLength": 100000 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["name"]
+    },
+    "SystemData": {
+      "title": "SystemData",
+      "description": "Module state persistence",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "maxLength": 128 },
+        "data": { "type": "string", "maxLength": 950000 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["key"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Security audit logs for Firebase authentication and database access attempts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "enum": ["auth", "database", "security", "ai"], "maxLength": 32 },
+        "action": { "type": "string", "maxLength": 80 },
+        "target": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["SUCCESS", "FAILED", "DENIED", "WARNING"], "maxLength": 20 },
+        "user": { "type": "object" },
+        "details": { "type": "object" },
+        "timestamp": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "category", "action", "status", "timestamp"]
+    },
+    "FcmDeviceToken": {
+      "title": "FcmDeviceToken",
+      "description": "Firebase Cloud Messaging device registration tokens for patient real-time alerts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "no_rm": { "type": "string", "maxLength": 40 },
+        "token": { "type": "string", "maxLength": 512 },
+        "platform": { "type": "string", "enum": ["web", "pwa", "android", "ios"], "maxLength": 20 },
+        "userAgent": { "type": "string", "maxLength": 300 },
+        "queueAlertsEnabled": { "type": "boolean" },
+        "labAlertsEnabled": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "uid", "no_rm", "token", "platform", "active", "updatedAt"]
+    },
+    "PatientNotification": {
+      "title": "PatientNotification",
+      "description": "Real-time FCM and in-app notifications for patient queue calls and lab results",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "no_rm": { "type": "string", "maxLength": 40 },
+        "recipientUid": { "type": "string", "maxLength": 128 },
+        "type": "string",
+        "title": { "type": "string", "maxLength": 160 },
+        "body": { "type": "string", "maxLength": 500 },
+        "poli": { "type": "string", "maxLength": 120 },
+        "nomor_antrian": { "type": "string", "maxLength": 32 },
+        "lab_order_id": { "type": "string", "maxLength": 64 },
+        "channel": { "type": "string", "enum": ["fcm_push", "fcm_foreground", "sse_realtime", "firestore_realtime"], "maxLength": 32 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "no_rm", "recipientUid", "type", "title", "body", "read", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/activity_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Real-time security and database activity logs"
+    },
+    "/fcm_tokens/{tokenId}": {
+      "schema": "FcmDeviceToken",
+      "description": "Patient FCM push registration tokens and alert preferences"
+    },
+    "/patient_notifications/{notifId}": {
+      "schema": "PatientNotification",
+      "description": "Real-time patient notifications for queue calls and lab availability"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/pasien/{pasienId}": {
+      "schema": "Pasien",
+      "description": "Patient records"
+    },
+    "/kunjungan/{kunjunganId}": {
+      "schema": "Kunjungan",
+      "description": "Encounter records"
+    },
+    "/dokter/{dokterId}": {
+      "schema": "Dokter",
+      "description": "Doctor master records"
+    },
+    "/perawat/{perawatId}": {
+      "schema": "Perawat",
+      "description": "Nurse master records"
+    },
+    "/hospital_settings/{settingId}": {
+      "schema": "HospitalSettings",
+      "description": "Hospital configuration"
+    },
+    "/system_data/{dataId}": {
+      "schema": "SystemData",
+      "description": "Generic persistent module documents"
+    },
+    "/test/{docId}": {
+      "schema": "SystemData",
+      "description": "Health check and connection validation document"
+    }
+  }
+}
