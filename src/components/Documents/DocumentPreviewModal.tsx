@@ -168,7 +168,7 @@ export function DocumentPreviewModal({
   // 4. INTELLIGENT TEXT SUMMARY GENERATOR
   const generateTextSummary = (): string => {
     if (!doc) return '';
-    const h = doc.hospitalInfo || { name: 'KLINIK TARUMANAGARA' };
+    const h = doc.hospitalInfo || { name: 'MYITARU' };
 
     let specificSection = '';
     if (doc.type === 'hasil_laboratorium') {

@@ -193,12 +193,12 @@ function DisplayMonitorTab() {
       {/* Header Display */}
       <div className="flex justify-between items-center pb-4 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <BrandLogo alt="Klinik Tarumanagara" className="w-10 h-10 rounded-xl object-cover border border-white/15 shrink-0" />
+          <BrandLogo alt="MYITARU" className="w-10 h-10 rounded-xl object-cover border border-white/15 shrink-0" />
           <div>
             <h2 className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-teal-300">
-              DISPLAY INFORMASI ANTREAN POLIKLINIK · KLINIK TARUMANAGARA
+              DISPLAY INFORMASI ANTREAN POLIKLINIK · MYITARU
             </h2>
-            <p className="text-xs text-slate-400">Klinik Tarumanagara (MYITARU SIMK) - Gedung Pelayanan Rawat Jalan Terpadu</p>
+            <p className="text-xs text-slate-400">MYITARU SIMK - Gedung Pelayanan Rawat Jalan Terpadu</p>
           </div>
         </div>
         <div className="text-right font-mono text-sm text-sky-400 font-bold">

@@ -351,7 +351,7 @@ export function PatientQRCodeModal({
 
                   <div className="text-right border-l border-cyan-200 pl-3">
                     <div className="text-[10px] font-bold uppercase text-cyan-800">
-                      {hospitalSettings?.name || 'KLINIK TARUMANAGARA'}
+                      {hospitalSettings?.name || 'MYITARU'}
                     </div>
                     <div className="text-[8px] text-slate-500 font-mono">GELANG IDENTITAS PASIEN</div>
                     <div className="text-[8px] text-slate-400 mt-1">EMR Verified</div>
@@ -367,7 +367,7 @@ export function PatientQRCodeModal({
                       <BrandLogo alt="Logo Klinik" className="w-7 h-7 rounded-lg object-cover shrink-0" />
                       <div>
                         <div className="font-extrabold text-xs uppercase tracking-wider text-cyan-900 leading-tight">
-                          {hospitalSettings?.name || 'KLINIK TARUMANAGARA'}
+                          {hospitalSettings?.name || 'MYITARU'}
                         </div>
                         <div className="text-[8px] text-slate-500 font-medium">KARTU BEROBAT & REKAM MEDIS</div>
                       </div>
@@ -413,7 +413,7 @@ export function PatientQRCodeModal({
                   <div className="text-center border-b-2 border-slate-900 pb-3">
                     <BrandLogo alt="Logo Klinik" className="w-10 h-10 rounded-xl object-cover mx-auto mb-1.5" />
                     <h2 className="font-black text-sm uppercase tracking-wider text-slate-900">
-                      {hospitalSettings?.name || 'KLINIK TARUMANAGARA'}
+                      {hospitalSettings?.name || 'MYITARU'}
                     </h2>
                     <p className="text-[9px] text-slate-600">{hospitalSettings?.address || 'Jl. Kesehatan No. 10 Jakarta Pusat'}</p>
                     <div className="mt-2 inline-block px-3 py-1 bg-slate-900 text-white font-extrabold text-xs uppercase tracking-widest rounded">

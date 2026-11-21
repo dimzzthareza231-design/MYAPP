@@ -109,13 +109,13 @@ interface HeroSlide {
 const HERO_SLIDES: HeroSlide[] = [
   {
     id: 'slide-main',
-    eyebrow: 'KLINIK TARUMANAGARA (MYITARU SIMK) · LAYANAN MEDIS 24 JAM',
+    eyebrow: 'MYITARU SIMK · LAYANAN MEDIS 24 JAM',
     titlePrefix: 'Pelayanan Kesehatan Terpadu dengan',
     titleHighlight: 'Akses Pendaftaran & Antrean Digital.',
     description:
       'Pilih jadwal dokter spesialis, daftar poliklinik secara online tanpa antre di loket, dan pantau giliran nomor antrean Anda secara real-time.',
     image: heroHospitalImg,
-    imageAlt: 'Atrium Utama Klinik Tarumanagara',
+    imageAlt: 'Atrium Utama MYITARU',
     tabLabel: 'Layanan Utama 24 Jam',
     primaryActionLabel: 'Pendaftaran Online',
     primaryActionMode: 'daftar',
@@ -129,7 +129,7 @@ const HERO_SLIDES: HeroSlide[] = [
     description:
       'Ditangani oleh dokter spesialis rehabilitasi medik & fisioterapis bersertifikat untuk nyeri punggung, cedera olahraga, hingga pemulihan pascastroke.',
     image: physiotherapyImg,
-    imageAlt: 'Pusat Fisioterapi dan Rehabilitasi Medik Klinik Tarumanagara',
+    imageAlt: 'Pusat Fisioterapi dan Rehabilitasi Medik MYITARU',
     tabLabel: 'Fisioterapi & Home Care',
     primaryActionLabel: 'Jadwalkan Fisioterapi',
     primaryActionMode: 'daftar',
@@ -144,7 +144,7 @@ const HERO_SLIDES: HeroSlide[] = [
     description:
       'Lima pilihan kelas kamar rawat inap modern dilengkapi pemantauan tanda vital berkelanjutan, gizi klinis terukur, serta fasilitas pendamping keluarga.',
     image: inpatientSuiteImg,
-    imageAlt: 'Kamar Rawat Inap Executive Suite Klinik Tarumanagara',
+    imageAlt: 'Kamar Rawat Inap Executive Suite MYITARU',
     tabLabel: 'Fasilitas Rawat Inap',
     primaryActionLabel: 'Lihat Kelas Kamar',
     primaryActionMode: 'daftar',
@@ -556,9 +556,9 @@ export const PublicHospitalPortal: React.FC = () => {
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <BrandLogo alt="Klinik Tarumanagara" className="w-9 h-9 rounded-xl shadow-xs object-cover" />
+              <BrandLogo alt="MYITARU" className="w-9 h-9 rounded-xl shadow-xs object-cover" />
               <span className="text-lg sm:text-xl font-extrabold tracking-tight text-[#0B3D91]">
-                Klinik <span className="font-semibold text-slate-700">Tarumanagara</span>
+                MYITARU
               </span>
             </button>
 
@@ -1713,7 +1713,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 <div className="group relative rounded-2xl overflow-hidden border border-slate-200 shadow-md bg-white aspect-[4/3]">
                   <img
                     src={excellenceSuiteImg}
-                    alt="Ruang Diagnostik CT-Scan dan Kardiologi Klinik Tarumanagara"
+                    alt="Ruang Diagnostik CT-Scan dan Kardiologi MYITARU"
                     className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                   />
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#061A3D]/85 via-[#061A3D]/35 to-transparent p-5 pt-12">
@@ -1803,7 +1803,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 <div className="group relative rounded-2xl overflow-hidden border border-slate-200 shadow-md flex-1 min-h-[280px]">
                   <img
                     src={inpatientSuiteImg}
-                    alt="Kamar Rawat Inap Executive Suite Klinik Tarumanagara"
+                    alt="Kamar Rawat Inap Executive Suite MYITARU"
                     className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                   />
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#061A3D]/90 via-[#061A3D]/40 to-transparent p-5 pt-12">
@@ -1965,7 +1965,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 <div className="lg:col-span-5 aspect-[4/3] lg:aspect-auto lg:h-full overflow-hidden">
                   <img
                     src={physiotherapyImg}
-                    alt="Layanan Fisioterapi Eksklusif dan Home Care Klinik Tarumanagara"
+                    alt="Layanan Fisioterapi Eksklusif dan Home Care MYITARU"
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -2190,7 +2190,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 <div className="group relative rounded-2xl overflow-hidden border border-white/20 shadow-2xl aspect-square max-w-md mx-auto">
                   <img
                     src={mobileLifestyleImg}
-                    alt="Pasien mengakses antrean dan layanan Klinik Tarumanagara lewat ponsel"
+                    alt="Pasien mengakses antrean dan layanan MYITARU lewat ponsel"
                     className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                   />
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#051430]/90 via-[#051430]/40 to-transparent p-5 pt-12">
@@ -2292,7 +2292,7 @@ export const PublicHospitalPortal: React.FC = () => {
                   <div className="sm:col-span-5 aspect-[4/3] rounded-xl overflow-hidden">
                     <img
                       src={doctorConsultImg}
-                      alt="Konsultasi Dokter Spesialis Klinik Tarumanagara"
+                      alt="Konsultasi Dokter Spesialis MYITARU"
                       className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                     />
                   </div>
@@ -2446,9 +2446,9 @@ export const PublicHospitalPortal: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-10 border-b border-white/10">
               <div className="md:col-span-5 space-y-3">
                 <div className="flex items-center gap-2.5">
-                  <BrandLogo alt="Klinik Tarumanagara" className="w-9 h-9 rounded-xl object-cover" />
+                  <BrandLogo alt="MYITARU" className="w-9 h-9 rounded-xl object-cover" />
                   <span className="font-extrabold text-lg tracking-tight">
-                    Klinik Tarumanagara (MYITARU SIMK)
+                    MYITARU SIMK
                   </span>
                 </div>
                 <p className="text-xs sm:text-sm text-blue-200 leading-relaxed max-w-md">
@@ -2535,7 +2535,7 @@ export const PublicHospitalPortal: React.FC = () => {
 
             <div className="pt-6 flex flex-wrap items-center justify-between gap-3 text-[11px] text-blue-200/80">
               <span>
-                © {new Date().getFullYear()} Klinik Tarumanagara (MYITARU SIMK) · Portal Publik Layanan Pasien
+                © {new Date().getFullYear()} MYITARU SIMK · Portal Publik Layanan Pasien
               </span>
             </div>
           </div>

@@ -160,7 +160,7 @@ export function RadiologyTab({ patientData }: { patientData: any }) {
       orderId,
       orderNumber,
       no_rm: patientData?.no_rm || 'RM-000000',
-      nama_pasien: patientData?.nama || patientData?.nama_pasien || 'Pasien Klinik Tarumanagara',
+      nama_pasien: patientData?.nama || patientData?.nama_pasien || 'Pasien MYITARU',
       nik: patientData?.nik,
       umur: typeof patientData?.umur === 'number' ? patientData.umur : 35,
       jenis_kelamin: patientData?.jenis_kelamin === 'P' ? 'P' : 'L',

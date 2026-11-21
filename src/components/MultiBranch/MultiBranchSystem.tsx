@@ -49,9 +49,9 @@ export default function MultiBranchSystem() {
         {activeTab === 'maps' && (
           <div className="space-y-4">
             <GoogleMapsHealthLocator
-              initialQuery="Jaringan Klinik Tarumanagara dan Mitra Kesehatan Terdekat"
+              initialQuery="Jaringan MYITARU dan Mitra Kesehatan Terdekat"
               defaultCategory="hospital"
-              title="Peta Interaktif Jaringan Klinik Tarumanagara & Cabang"
+              title="Peta Interaktif Jaringan MYITARU & Cabang"
               subtitle="Pemetaan lokasi geografis seluruh cabang faskes, jarak antar-unit, dan rute transfer ambulans"
             />
           </div>

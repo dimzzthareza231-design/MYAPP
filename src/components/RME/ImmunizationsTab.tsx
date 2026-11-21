@@ -28,8 +28,8 @@ export function ImmunizationsTab({ patientData }: { patientData: any }) {
     { id: '6', vaccineName: 'DPT-HB-Hib 3 + Polio 4 + IPV', targetAge: '4 Bulan', category: 'Wajib Dasar', dateGiven: '25 Jul 1991', batchNumber: 'IPV-330', administeredBy: 'dr. Anak', facility: 'Klinik Swasta', status: 'Sudah Diberikan' },
     { id: '7', vaccineName: 'Campak Rubella (MR)', targetAge: '9 Bulan', category: 'Wajib Dasar', dateGiven: '15 Des 1991', batchNumber: 'MR-900', administeredBy: 'Puskesmas', facility: 'Puskesmas', status: 'Sudah Diberikan' },
     { id: '8', vaccineName: 'DPT-HB-Hib Lanjutan', targetAge: '18 Bulan', category: 'Lanjutan', dateGiven: '15 Sep 1992', batchNumber: 'DPT-602', administeredBy: 'Puskesmas', facility: 'Puskesmas', status: 'Sudah Diberikan' },
-    { id: '9', vaccineName: 'COVID-19 Primer (Dosis 1 & 2)', targetAge: 'Dewasa', category: 'Dewasa / Khusus', dateGiven: '10 Jun 2021', batchNumber: 'COV-8812', administeredBy: 'Sentra Vaksinasi Klinik', facility: 'Klinik Tarumanagara', status: 'Sudah Diberikan' },
-    { id: '10', vaccineName: 'COVID-19 Booster 1', targetAge: 'Dewasa', category: 'Dewasa / Khusus', dateGiven: '15 Jan 2022', batchNumber: 'BST-110', administeredBy: 'Sentra Vaksinasi Klinik', facility: 'Klinik Tarumanagara', status: 'Sudah Diberikan' },
+    { id: '9', vaccineName: 'COVID-19 Primer (Dosis 1 & 2)', targetAge: 'Dewasa', category: 'Dewasa / Khusus', dateGiven: '10 Jun 2021', batchNumber: 'COV-8812', administeredBy: 'Sentra Vaksinasi Klinik', facility: 'MYITARU', status: 'Sudah Diberikan' },
+    { id: '10', vaccineName: 'COVID-19 Booster 1', targetAge: 'Dewasa', category: 'Dewasa / Khusus', dateGiven: '15 Jan 2022', batchNumber: 'BST-110', administeredBy: 'Sentra Vaksinasi Klinik', facility: 'MYITARU', status: 'Sudah Diberikan' },
     { id: '11', vaccineName: 'Influenza Kuadrivalen Tahunan', targetAge: 'Dewasa Rutin', category: 'Dewasa / Khusus', status: 'Terjadwal', notes: 'Dianjurkan setiap 1 tahun sekali' },
     { id: '12', vaccineName: 'Pneumokokus (PCV13 / PPSV23)', targetAge: 'Dewasa Komorbid', category: 'Dewasa / Khusus', status: 'Terjadwal', notes: 'Dianjurkan untuk pasien DM & Hipertensi' },
   ]);
@@ -41,7 +41,7 @@ export function ImmunizationsTab({ patientData }: { patientData: any }) {
     dateGiven: new Date().toISOString().split('T')[0],
     batchNumber: '',
     administeredBy: 'dr. Budi Santoso',
-    facility: 'Klinik Tarumanagara (MYITARU SIMK)',
+    facility: 'MYITARU SIMK',
     notes: ''
   });
 
@@ -73,7 +73,7 @@ export function ImmunizationsTab({ patientData }: { patientData: any }) {
       dateGiven: new Date().toISOString().split('T')[0],
       batchNumber: '',
       administeredBy: 'dr. Budi Santoso',
-      facility: 'Klinik Tarumanagara (MYITARU SIMK)',
+      facility: 'MYITARU SIMK',
       notes: ''
     });
     toast.success('Catatan imunisasi berhasil ditambahkan');

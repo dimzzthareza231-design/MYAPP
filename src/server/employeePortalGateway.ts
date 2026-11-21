@@ -141,7 +141,7 @@ function mapPortalRole(div: DivisionDefinition): EmployeeUserRecord['portalRole'
 export function registerEmployeePortalGateway(app: express.Application, deps: GatewayDependencies = {}) {
   // Klinik Campus Reference Coordinate (MYITARU Medical Center - Jakarta)
   const HOSPITAL_GEOFENCE = {
-    name: 'Kampus Utama Klinik Tarumanagara Jakarta',
+    name: 'Kampus Utama MYITARU Jakarta',
     lat: -6.229728,
     lng: 106.829518,
     radiusMeters: 200
@@ -153,7 +153,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   const usersStore: EmployeeUserRecord[] = HOSPITAL_DIVISIONS.map((div, index) => ({
     id: `emp-${div.id}`,
     nip: div.defaultNip,
-    email: `${div.id.replace(/[^a-z0-9]/g, '')}@tarumanagara-klinik.id`,
+    email: `${div.id.replace(/[^a-z0-9]/g, '')}@myitaru.id`,
     name: div.defaultStaffName,
     divisionId: div.id,
     divisionName: div.name,
@@ -1412,7 +1412,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       distanceMeters,
       withinGeofence,
       biometricVerified: Boolean(biometricVerified ?? true),
-      note: String(note || (withinGeofence ? 'Area Kampus Klinik Tarumanagara' : 'Koreksi / Tugas Luar')),
+      note: String(note || (withinGeofence ? 'Area Kampus MYITARU' : 'Koreksi / Tugas Luar')),
       idempotencyKey: typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'] : undefined
     };
 
@@ -1764,7 +1764,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         { label: 'Service Desk TI / SIMK (24 Jam)', phone: 'Ext. 1100 / 0811-900-1100', sla: 'Respon < 15 Menit (P1)' },
         { label: 'HR Helpdesk & Payroll', phone: 'Ext. 1205', sla: 'Hari Kerja 08:00 - 16:30' },
         { label: 'Code Blue / Kegawatdaruratan Internal', phone: 'Ext. 911', sla: 'Segera < 3 Menit' },
-        { label: 'Data Protection Officer (UU PDP)', phone: 'dpo@tarumanagara-klinik.id', sla: 'Eskalasi Keamanan Data' }
+        { label: 'Data Protection Officer (UU PDP)', phone: 'dpo@myitaru.id', sla: 'Eskalasi Keamanan Data' }
       ],
       faqs: [
         { q: 'Bagaimana jika kode OTP MFA tidak diterima saat login?', a: 'Pada lingkungan demo gunakan kode 123456, atau klik "Buat Tiket TI" bila perangkat baru belum terikat.' },
@@ -2017,7 +2017,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       const newUser: EmployeeUserRecord = {
         id: 'emp-' + Date.now(),
         nip: String(nip),
-        email: `${String(nip).toLowerCase().replace(/[^a-z0-9]/g, '')}@tarumanagara-klinik.id`,
+        email: `${String(nip).toLowerCase().replace(/[^a-z0-9]/g, '')}@myitaru.id`,
         name: String(name),
         divisionId: div.id,
         divisionName: div.name,

@@ -339,7 +339,7 @@ export function KwitansiTab({
                       <BrandLogo alt="Logo Klinik" className="w-12 h-12 rounded-xl object-cover shadow-sm shrink-0" />
                       <div>
                         <h2 className="text-xl font-black text-slate-900 uppercase">Kwitansi Pembayaran</h2>
-                        <p className="text-xs text-slate-500">Klinik Tarumanagara (MYITARU SIMK)</p>
+                        <p className="text-xs text-slate-500">MYITARU SIMK</p>
                       </div>
                     </div>
                     <div className="text-right">

@@ -175,7 +175,7 @@ export function HakPasienTab({ patientData }: { patientData?: any }) {
   const [eduCompleted, setEduCompleted] = useState(true);
 
   const rights = [
-    'Memperoleh informasi mengenai tata tertib dan peraturan yang berlaku di Klinik Tarumanagara.',
+    'Memperoleh informasi mengenai tata tertib dan peraturan yang berlaku di MYITARU.',
     'Memperoleh layanan yang manusiawi, adil, jujur, dan tanpa diskriminasi.',
     'Memperoleh layanan kesehatan yang bermutu sesuai dengan standar profesi dan standar prosedur operasional.',
     'Memperoleh layanan yang efektif dan efisien sehingga pasien terhindar dari kerugian fisik dan materi.',

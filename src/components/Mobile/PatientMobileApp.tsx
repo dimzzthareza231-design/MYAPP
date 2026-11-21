@@ -373,7 +373,7 @@ export const PatientMobileApp: React.FC = () => {
       unsubscribeForeground = await subscribeForegroundFcm((payload) => {
         const data = (payload.data || {}) as Record<string, string>;
         const title =
-          payload.notification?.title || data.title || 'Notifikasi Klinik Tarumanagara';
+          payload.notification?.title || data.title || 'Notifikasi MYITARU';
         const body =
           payload.notification?.body || data.body || 'Pembaruan antrean atau hasil lab tersedia.';
         const notifType =
@@ -783,8 +783,8 @@ export const PatientMobileApp: React.FC = () => {
           </button>
 
           <div className="flex items-center gap-2">
-            <BrandLogo alt="Klinik Tarumanagara" className="w-7 h-7 rounded-lg object-cover" />
-            <span className="font-extrabold text-[#0B3D91] text-sm">Klinik Tarumanagara Mobile</span>
+            <BrandLogo alt="MYITARU" className="w-7 h-7 rounded-lg object-cover" />
+            <span className="font-extrabold text-[#0B3D91] text-sm">MYITARU Mobile</span>
           </div>
 
           <PWAInstallButton variant="subtle" label="Pasang App" showAlwaysGuide />
@@ -793,9 +793,9 @@ export const PatientMobileApp: React.FC = () => {
         <main className="flex-1 flex items-center justify-center p-4 sm:p-6">
           <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-200 p-6 sm:p-8 space-y-6">
             <div className="text-center space-y-2">
-              <BrandLogo alt="Klinik Tarumanagara" className="w-14 h-14 rounded-2xl mx-auto shadow-md object-cover" />
+              <BrandLogo alt="MYITARU" className="w-14 h-14 rounded-2xl mx-auto shadow-md object-cover" />
               <h1 className="text-2xl font-extrabold text-slate-900">
-                Aplikasi Pasien Klinik Tarumanagara
+                Aplikasi Pasien MYITARU
               </h1>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
                 Cek nomor antrean poli, jadwal dokter, hasil laboratorium &amp; radiologi, serta tagihan langsung dari ponsel.
@@ -953,7 +953,7 @@ export const PatientMobileApp: React.FC = () => {
                 ) : (
                   <div className="space-y-4 py-2">
                     <p className="text-xs text-slate-600 text-center leading-relaxed">
-                      Masuk sekali ketuk dengan Akun Google Anda yang terhubung dengan rekam medis Klinik Tarumanagara (MYITARU SIMK).
+                      Masuk sekali ketuk dengan Akun Google Anda yang terhubung dengan rekam medis MYITARU SIMK.
                     </p>
                     <button
                       type="button"

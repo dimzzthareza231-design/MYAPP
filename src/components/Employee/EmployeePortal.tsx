@@ -248,7 +248,7 @@ export const EmployeePortal: React.FC = () => {
           password: loginPassword,
           divisionId: divOverride || (loginIdentifier.trim() ? undefined : selectedLoginDivId),
           authType,
-          googleEmail: authType === 'google' ? 'pegawai@tarumanagara-klinik.id' : undefined,
+          googleEmail: authType === 'google' ? 'pegawai@myitaru.id' : undefined,
           deviceInfo: navigator.userAgent.slice(0, 60)
         })
       });
@@ -429,7 +429,7 @@ export const EmployeePortal: React.FC = () => {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="space-y-1">
               <p className="text-xs font-bold uppercase tracking-wider text-[#0B3D91] dark:text-sky-400">
-                PORTAL KEPEGAWAIAN &amp; HRIS · KLINIK TARUMANAGARA (MYITARU SIMK)
+                PORTAL KEPEGAWAIAN &amp; HRIS · MYITARU SIMK
               </p>
               <div className="flex flex-wrap items-center gap-2.5">
                 <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
@@ -460,7 +460,7 @@ export const EmployeePortal: React.FC = () => {
                 <>
                   <div>
                     <p className="text-xs font-bold uppercase tracking-wider text-[#0B3D91] dark:text-sky-400">
-                      SINGLE SIGN-ON KARYAWAN KLINIK TARUMANAGARA
+                      SINGLE SIGN-ON KARYAWAN MYITARU
                     </p>
                     <h2 className="text-2xl font-extrabold mt-1">Masuk Portal Karyawan</h2>
                     <p className="text-xs text-slate-500 mt-1">
@@ -582,7 +582,7 @@ export const EmployeePortal: React.FC = () => {
             {/* Right: 34 Divisions Instant Access Matrix */}
             <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-sm">
               <div>
-                <h2 className="text-lg font-extrabold">Akses Cepat Seluruh 34 Divisi &amp; Jabatan Klinik Tarumanagara</h2>
+                <h2 className="text-lg font-extrabold">Akses Cepat Seluruh 34 Divisi &amp; Jabatan MYITARU</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Klik salah satu divisi di bawah untuk langsung login &amp; melihat modul inti + modul spesifik RBAC/ABAC divisi tersebut.
                 </p>
@@ -784,7 +784,7 @@ export const EmployeePortal: React.FC = () => {
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs text-slate-500 whitespace-nowrap">
               <span className="font-medium text-slate-600 dark:text-slate-300">
-                Klinik Tarumanagara
+                MYITARU
               </span>
               <span>/</span>
               <span>Portal Karyawan</span>
@@ -1768,7 +1768,7 @@ export const EmployeePortal: React.FC = () => {
                 </form>
 
                 <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-2.5">
-                  <h3 className="font-bold text-sm">Pengumuman Resmi Klinik Tarumanagara</h3>
+                  <h3 className="font-bold text-sm">Pengumuman Resmi MYITARU</h3>
                   {sbarData.announcements.map((a: any) => (
                     <div key={a.id} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs space-y-1">
                       <p className="font-bold">{a.title}</p>

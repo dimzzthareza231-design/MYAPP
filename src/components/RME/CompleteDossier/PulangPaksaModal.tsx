@@ -67,7 +67,7 @@ export function PulangPaksaModal({ isOpen, onClose, patient }: PulangPaksaModalP
             <div className="text-xs text-amber-800 dark:text-amber-200">
               <p className="font-bold">PELEPASAN TANGGUNG JAWAB MEDIS & HUKUM (DAMA):</p>
               <p className="mt-1">
-                Dengan menandatangani dokumen ini, pasien/keluarga menyatakan menghentikan pengobatan rawat inap atas kehendak sendiri tanpa persetujuan dokter dan membebaskan pihak Klinik Tarumanagara serta seluruh staf medis dari segala tuntutan hukum atas risiko perburukan kondisi kesehatan di masa depan.
+                Dengan menandatangani dokumen ini, pasien/keluarga menyatakan menghentikan pengobatan rawat inap atas kehendak sendiri tanpa persetujuan dokter dan membebaskan pihak MYITARU serta seluruh staf medis dari segala tuntutan hukum atas risiko perburukan kondisi kesehatan di masa depan.
               </p>
             </div>
           </div>

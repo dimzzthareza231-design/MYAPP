@@ -678,7 +678,7 @@ export function registerPatientPortalRoutes(
     }
 
     res.json({
-      hospitalName: 'Klinik Tarumanagara (MYITARU SIMK)',
+      hospitalName: 'MYITARU SIMK',
       emergencyHotline: '1-500-911',
       poliklinik: MASTER_POLIKLINIK,
       doctors,
@@ -1282,7 +1282,7 @@ export function registerPatientPortalRoutes(
         appointmentsStore.unshift({
           id: `apt-call-${Date.now()}`,
           pasien_id: dossier?.patient.id || targetRm,
-          pasien_nama: dossier?.patient.nama || 'Pasien Klinik Tarumanagara',
+          pasien_nama: dossier?.patient.nama || 'Pasien MYITARU',
           no_rm: targetRm,
           poli,
           dokter,

@@ -34,7 +34,7 @@ function SpecialAction({ moduleId, activeTab }: { moduleId?: string, activeTab: 
             onChange={(e) => setInput(e.target.value)}
             className="flex-1 p-2.5 rounded-lg bg-white dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm focus:border-amber-500 focus:outline-none" />
           <button onClick={() => {
-            setResult({ nama: 'BUDI SANTOSO', status: 'AKTIF', kelas: '2', faskes: 'Klinik Tarumanagara' });
+            setResult({ nama: 'BUDI SANTOSO', status: 'AKTIF', kelas: '2', faskes: 'MYITARU' });
             toast.success('✅ Cek Eligibilitas Berhasil');
           }} className="bg-amber-600 text-white px-5 py-2.5 rounded-lg text-sm hover:bg-amber-500 font-bold shadow-lg shadow-amber-900/20 transition-colors">
             🔍 Cek Sekarang

@@ -1713,7 +1713,7 @@ Berdasarkan pencarian: **"${q}"** (Area sekitar koordinat ${userLat.toFixed(4)},
         : '';
 
       const prompt = `
-Anda adalah MY ITARU AI, Asisten Kecerdasan Medis Klinis (Clinical Decision Support System) terintegrasi pada sistem Klinik Tarumanagara (MYITARU SIMK).
+Anda adalah MY ITARU AI, Asisten Kecerdasan Medis Klinis (Clinical Decision Support System) terintegrasi pada sistem MYITARU SIMK.
 Bantu dokter, perawat, atau staf klinik dengan jawaban klinis presisi, empati profesional, dan berbasis bukti medis dalam Bahasa Indonesia.
 
 ${context ? `Konteks Klinis Saat Ini:\n${JSON.stringify(context, null, 2)}\n` : ''}
@@ -1754,7 +1754,7 @@ Panduan:
       const { billingId, patientName, diagnosis, items, totalBill, sepNo } = req.body;
 
       const prompt = `
-Anda adalah Auditor Ahli Casemix & AI INA-CBGs Validator pada Klinik Tarumanagara (MYITARU SIMK).
+Anda adalah Auditor Ahli Casemix & AI INA-CBGs Validator pada MYITARU SIMK.
 Evaluasi kelayakan klaim BPJS Kesehatan berdasarkan rincian berikut:
 
 Nama Pasien: ${patientName || 'Pasien BPJS'}
@@ -1806,7 +1806,7 @@ Tugas Anda:
       const { examinationName, modality, clinicalDiagnosis, patientAge, gender } = req.body;
 
       const prompt = `
-Anda adalah AI Radiologist Assistant & Computer Vision Diagnostic Engine pada Klinik Tarumanagara (MYITARU SIMK).
+Anda adalah AI Radiologist Assistant & Computer Vision Diagnostic Engine pada MYITARU SIMK.
 Lakukan analisis temuan radiologis terstruktur berdasarkan data pemeriksaan:
 
 Nama Pemeriksaan: ${examinationName || 'Foto Thorax PA'}
@@ -1861,7 +1861,7 @@ Berikan:
       }
 
       const prompt = `
-Anda adalah AI Clinical Pharmacologist pada Klinik Tarumanagara (MYITARU SIMK).
+Anda adalah AI Clinical Pharmacologist pada MYITARU SIMK.
 Analisis keamanan resep dan potensi interaksi obat berikut:
 
 Daftar Obat Resep:
@@ -1925,7 +1925,7 @@ Evaluasi:
       const effectiveNotes = medicalNotes || fields || {};
 
       const prompt = `
-Anda adalah Auditor Mutu Rekam Medis Elektronik (RME) dan Tim Verifikasi Akreditasi Fasilitas Kesehatan (KARS/LAM-KPRS) Klinik Tarumanagara (MYITARU SIMK) berdasarkan Permenkes No. 24 Tahun 2022.
+Anda adalah Auditor Mutu Rekam Medis Elektronik (RME) dan Tim Verifikasi Akreditasi Fasilitas Kesehatan (KARS/LAM-KPRS) MYITARU SIMK berdasarkan Permenkes No. 24 Tahun 2022.
 Evaluasi kelengkapan berkas rekam medis berikut:
 
 Jenis Berkas: ${documentType || 'Resume Medis / Asesmen Rawat Inap'}
@@ -1976,7 +1976,7 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
       const { patientName, noRm, diagnosis, vitalSigns, treatments, labs, stayDuration } = req.body;
 
       const prompt = `
-Anda adalah AI Clinical Scribe dan Asisten DPJP Klinik Tarumanagara (MYITARU SIMK).
+Anda adalah AI Clinical Scribe dan Asisten DPJP MYITARU SIMK.
 Susun draf Resume Medis Pulang (Discharge Summary) resmi yang komprehensif dalam Bahasa Indonesia medis:
 
 Nama Pasien: ${patientName || 'Pasien Anonim'} (No. RM: ${noRm || '-'})

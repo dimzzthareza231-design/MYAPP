@@ -183,7 +183,7 @@ function DataFasilitasTab() {
         </div>
         <div>
           <span className="text-slate-400 block mb-0.5">Nama Resmi Faskes</span>
-          <span className="font-bold text-slate-800 dark:text-white">Klinik Tarumanagara (MYITARU SIMK)</span>
+          <span className="font-bold text-slate-800 dark:text-white">MYITARU SIMK</span>
         </div>
         <div>
           <span className="text-slate-400 block mb-0.5">Klasifikasi Faskes</span>

@@ -20,7 +20,7 @@ messaging.onBackgroundMessage((payload) => {
   const title =
     notification.title ||
     data.title ||
-    'Klinik Tarumanagara (MYITARU SIMK)';
+    'MYITARU SIMK';
 
   const body =
     notification.body ||

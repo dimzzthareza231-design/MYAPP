@@ -26,9 +26,9 @@ export function makeConfig(target: AppTarget) {
         includeAssets: ['favicon.ico', 'logo-myitaru.png', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
           id: '/',
-          name: 'Klinik Tarumanagara (MYITARU SIMK) · App Pasien',
-          short_name: 'Klinik Tarumanagara',
-          description: 'Portal resmi layanan kesehatan Klinik Tarumanagara (MYITARU SIMK) dan aplikasi mobile pasien untuk cek antrean, jadwal dokter, hasil lab, dan rekam medis.',
+          name: 'MYITARU SIMK · App Pasien',
+          short_name: 'MYITARU',
+          description: 'Portal resmi layanan kesehatan MYITARU SIMK dan aplikasi mobile pasien untuk cek antrean, jadwal dokter, hasil lab, dan rekam medis.',
           theme_color: '#0B3D91',
           background_color: '#ffffff',
           display: 'standalone',

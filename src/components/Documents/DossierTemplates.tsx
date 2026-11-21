@@ -352,7 +352,7 @@ export function DossierTemplateRenderer({
     return (
       <div className="printable-hospital-doc bg-white text-slate-900 shadow-2xl mx-auto my-0 p-8 sm:p-12 relative overflow-hidden font-sans border border-slate-300" style={containerStyle}>
         {renderWatermark()}
-        {renderHeader('SURAT KELUAR KLINIK TARUMANAGARA', 'PULANG ATAS PERMINTAAN SENDIRI')}
+        {renderHeader('SURAT KELUAR MYITARU', 'PULANG ATAS PERMINTAAN SENDIRI')}
         <div className="text-center my-3 border-b-2 border-slate-900 pb-2">
           <h2 className="text-base sm:text-lg font-black uppercase text-slate-950">{document.judulDokumen}</h2>
           <p className="text-xs font-semibold text-slate-600">Pelepasan Tanggung Jawab Hukum & Edukasi Risiko Penghentian Perawatan Medis</p>
@@ -366,7 +366,7 @@ export function DossierTemplateRenderer({
           <div className="p-3 bg-white border border-slate-300 rounded space-y-1">
             <span className="font-bold text-slate-900 uppercase">Pernyataan Pembebasan Tanggung Jawab:</span>
             <p className="text-slate-700 leading-normal">{data.edukasiDiberikan}</p>
-            <p className="text-slate-700 font-medium pt-1">Dengan ini membebaskan pihak Klinik Tarumanagara dan Dokter dari segala tuntutan hukum, kecacatan atau akibat fatal yang terjadi akibat keputusan ini.</p>
+            <p className="text-slate-700 font-medium pt-1">Dengan ini membebaskan pihak MYITARU dan Dokter dari segala tuntutan hukum, kecacatan atau akibat fatal yang terjadi akibat keputusan ini.</p>
           </div>
           <div className="grid grid-cols-2 gap-4 pt-2 text-center">
             <div className="p-2 border border-slate-200 rounded">
@@ -465,7 +465,7 @@ export function DossierTemplateRenderer({
     return (
       <div className="printable-hospital-doc bg-white text-slate-900 shadow-2xl mx-auto my-0 p-8 sm:p-12 relative overflow-hidden font-sans border-2 border-slate-900" style={containerStyle}>
         {renderWatermark()}
-        {renderHeader('SURAT RESMI KLINIK TARUMANAGARA', 'SURAT KETERANGAN KEMATIAN')}
+        {renderHeader('SURAT RESMI MYITARU', 'SURAT KETERANGAN KEMATIAN')}
         <div className="text-center my-3 border-b-2 border-slate-900 pb-2">
           <h2 className="text-base sm:text-lg font-black uppercase text-slate-950">{document.judulDokumen}</h2>
           <p className="text-xs font-semibold text-slate-600">Nomor: {data.noSurat} • Standar ICD-10 WHO Cause of Death</p>

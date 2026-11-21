@@ -20,13 +20,13 @@ export function LembarHasilPrint({ item, onClose }: LembarHasilPrintProps) {
             <BrandLogo alt="Logo Klinik" className="w-16 h-16 rounded-xl object-cover shadow shrink-0" />
             <div>
               <h1 className="text-xl font-extrabold tracking-tight text-slate-950">
-                KLINIK TARUMANAGARA (MYITARU SIMK)
+                MYITARU SIMK
               </h1>
               <p className="text-xs text-slate-600 mt-1 font-medium">
                 Jl. TB Simatupang & Jl. Raya Cilandak KKO No.1, Jakarta Selatan 12550
               </p>
               <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                Telp: (021) 56958723 | Email: info@tarumanagara-klinik.id | Izin: 445/1029/DINKES/2024
+                Telp: (021) 56958723 | Email: info@myitaru.id | Izin: 445/1029/DINKES/2024
               </p>
             </div>
           </div>

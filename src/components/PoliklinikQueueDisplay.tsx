@@ -136,7 +136,7 @@ export function PoliklinikQueueDisplay({
               </span>
             </div>
             <p className="text-[11px] text-slate-400">
-              Klinik Tarumanagara (MYITARU SIMK) • Gedung Pelayanan Rawat Jalan Terpadu (Lantai 1 & 2)
+              MYITARU SIMK • Gedung Pelayanan Rawat Jalan Terpadu (Lantai 1 & 2)
             </p>
           </div>
         </div>

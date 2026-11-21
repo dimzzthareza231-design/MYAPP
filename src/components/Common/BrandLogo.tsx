@@ -11,7 +11,7 @@ export const OFFICIAL_LOGO_URL = '/logo-myitaru.png';
 
 export const BrandLogo: React.FC<BrandLogoProps> = ({
   src,
-  alt = 'Klinik Tarumanagara',
+  alt = 'MYITARU',
   className = 'w-9 h-9 rounded-xl object-cover shrink-0',
 }) => {
   const { hospitalSettings } = useHospital();

@@ -67,7 +67,7 @@ export function HospitalDocumentSheet({ document, watermark = true }: HospitalDo
               {hospital.name}
             </h1>
             <p className="text-xs font-bold text-blue-900 tracking-wider uppercase mt-1">
-              {customSub || hospital.subname || 'KLINIK UTAMA & RUMAH SAKIT PENDIDIKAN TARUMANAGARA'}
+              {customSub || hospital.subname || 'KLINIK UTAMA & RUMAH SAKIT PENDIDIKAN MYITARU'}
             </p>
             <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">
               {hospital.address}
@@ -165,7 +165,7 @@ export function HospitalDocumentSheet({ document, watermark = true }: HospitalDo
       style={{ opacity: 0.03 }}
     >
       <div className="transform -rotate-45 text-center">
-        <p className="text-8xl font-black tracking-widest text-slate-900">KLINIK TARUMANAGARA</p>
+        <p className="text-8xl font-black tracking-widest text-slate-900">MYITARU</p>
         <p className="text-4xl font-bold tracking-widest text-slate-800 uppercase mt-2">OFFICIAL ELECTRONIC MEDICAL RECORD</p>
         <p className="text-2xl font-mono text-slate-700 mt-1">PERMENKES NO. 24 TAHUN 2022</p>
       </div>
@@ -1153,7 +1153,7 @@ export function HospitalDocumentSheet({ document, watermark = true }: HospitalDo
       statusKepegawaian: 'Pegawai Tetap',
       tglMasuk: '01 Januari 2022',
       kontak: subject.telepon || subject.no_hp || '0812-3456-7890',
-      email: 'staf@tarumanagara.ac.id',
+      email: 'staf@myitaru.id',
       alamat: subject.alamat || subject.alamat_ktp || '-'
     };
 

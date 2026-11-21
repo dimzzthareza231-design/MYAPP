@@ -59,10 +59,10 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
           <span>GERBANG KHUSUS: SIMK-INTI</span>
         </div>
         <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-          <BrandLogo alt="Logo Klinik Tarumanagara" className="w-full h-full object-cover" />
+          <BrandLogo alt="Logo MYITARU" className="w-full h-full object-cover" />
         </div>
         <h2 className="text-xl font-extrabold text-slate-900 dark:text-white leading-tight">
-          {hospitalSettings?.name || 'KLINIK TARUMANAGARA'}
+          {hospitalSettings?.name || 'MYITARU'}
         </h2>
         <p className="text-xs font-semibold text-[#0B3D91] dark:text-sky-400 mt-1 flex items-center justify-center gap-1">
           <ShieldCheck className="w-4 h-4" /> MYITARU SIMK · Aplikasi Inti &amp; RME Klinis
@@ -196,7 +196,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
         </div>
 
         <p className="text-center text-[10px] text-slate-400 mt-5 font-semibold tracking-widest uppercase opacity-70">
-          KLINIK TARUMANAGARA · MYITARU SIMK
+          MYITARU · MYITARU SIMK
         </p>
       </div>
   );
@@ -213,7 +213,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 font-mono font-bold tracking-wider">
               <Stethoscope className="w-3.5 h-3.5" /> SIMK-INTI
             </span>
-            <span>Aplikasi Inti Operasional Klinis &amp; RME · Klinik Tarumanagara</span>
+            <span>Aplikasi Inti Operasional Klinis &amp; RME · MYITARU</span>
           </span>
           <span className="font-mono text-sky-200 text-[11px]">/staff/login</span>
         </div>

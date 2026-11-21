@@ -28,7 +28,7 @@ export function PengaturanRS() {
     directorName: hospitalSettings.directorName || DEFAULT_HOSPITAL_INFO.directorName || 'dr. H. Hendra, MARS, Sp.PK',
     directorNip: hospitalSettings.directorNip || DEFAULT_HOSPITAL_INFO.directorNip || '197508122002121001',
     hospitalType: hospitalSettings.hospitalType || DEFAULT_HOSPITAL_INFO.hospitalType || 'Klinik Umum (Kelas B Pendidikan)',
-    ownership: hospitalSettings.ownership || DEFAULT_HOSPITAL_INFO.ownership || 'Yayasan Tarumanagara',
+    ownership: hospitalSettings.ownership || DEFAULT_HOSPITAL_INFO.ownership || 'Yayasan MYITARU',
     emergencyHotline: hospitalSettings.emergencyHotline || DEFAULT_HOSPITAL_INFO.emergencyHotline || '(021) 56958999',
     faxNumber: hospitalSettings.faxNumber || DEFAULT_HOSPITAL_INFO.faxNumber || '(021) 56958724',
   });
@@ -229,7 +229,7 @@ export function PengaturanRS() {
                       name="name"
                       value={formData.name}
                       onChange={handleInputChange}
-                      placeholder="Contoh: KLINIK TARUMANAGARA"
+                      placeholder="Contoh: MYITARU"
                       className="w-full p-2.5 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold"
                     />
                   </div>
@@ -243,7 +243,7 @@ export function PengaturanRS() {
                       name="subname"
                       value={formData.subname}
                       onChange={handleInputChange}
-                      placeholder="Contoh: KLINIK UMUM PENDIDIKAN TARUMANAGARA"
+                      placeholder="Contoh: MYITARU"
                       className="w-full p-2.5 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                     />
                   </div>

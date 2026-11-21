@@ -78,7 +78,7 @@ function NotificationBell() {
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-bold text-xs text-white uppercase tracking-wider flex items-center gap-2">
                 <Bell className="w-3.5 h-3.5 text-[#E8D49E]" />
-                Notifikasi Klinik Tarumanagara
+                Notifikasi MYITARU
               </h3>
               {unreadCount > 0 && (
                 <span className="text-[10px] bg-[#C9A94E]/20 text-[#E8D49E] border border-[#C9A94E]/40 px-2 py-0.5 rounded-full font-bold font-mono">
