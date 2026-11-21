@@ -161,7 +161,22 @@ function AppContent() {
                 )
               }
             />
-            <Route path="/modul" element={currentUser ? <ModuleLayout /> : <Navigate to="/staff/login" replace />}>
+            <Route
+              path="/modul"
+              element={
+                // Tunggu sesi selesai dimuat; tanpa ini refresh/tautan langsung ke modul terlempar ke login lalu dasbor.
+                loading ? (
+                  <div className="min-h-screen bg-[#07265C] flex flex-col items-center justify-center p-4">
+                    <div className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin mb-4" />
+                    <p className="text-white font-semibold text-sm">Memuat Modul SIMK...</p>
+                  </div>
+                ) : currentUser ? (
+                  <ModuleLayout />
+                ) : (
+                  <Navigate to="/staff/login" replace />
+                )
+              }
+            >
               <Route path="pendaftaran" element={<ErrorBoundary><ProtectedRoute moduleId="pendaftaran"><Registration /></ProtectedRoute></ErrorBoundary>} />
               <Route path="rekam-medis" element={<ErrorBoundary><ProtectedRoute moduleId="rekam-medis"><MedicalRecords /></ProtectedRoute></ErrorBoundary>} />
               <Route path="igd" element={<ErrorBoundary><ProtectedRoute moduleId="igd"><Emergency /></ProtectedRoute></ErrorBoundary>} />

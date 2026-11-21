@@ -10,6 +10,8 @@ export type AppTarget = 'core' | 'public';
 export function makeConfig(target: AppTarget) {
   const isPublic = target === 'public';
   return defineConfig({
+    // Dua server Vite dev berjalan bersamaan; cache terpisah agar optimasi dependensi tidak saling membatalkan (504 Outdated Optimize Dep).
+    cacheDir: isPublic ? 'node_modules/.vite-public' : 'node_modules/.vite',
     build: {
       outDir: isPublic ? 'dist/public' : 'dist/core',
       emptyOutDir: true,
@@ -56,6 +58,7 @@ export function makeConfig(target: AppTarget) {
         },
         workbox: {
           navigateFallback: 'public.html',
+          navigateFallbackDenylist: [/^\/api\//],
           maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
           runtimeCaching: [
