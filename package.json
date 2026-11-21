@@ -1,7 +1,15 @@
 {
-  "name": "react-example",
+  "name": "myitaru",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "MYITARU: sistem informasi manajemen klinik dan rekam medis elektronik berbasis AI, terdiri atas web publik pasien dan aplikasi inti SIMK/RME.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dimzzthareza231-design/MYAPP.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "check:deploy": "node scripts/check-deployment.mjs",
@@ -13,7 +21,9 @@
     "vercel-build:core": "vite build",
     "vercel-build:public": "vite build -c vite.public.config.ts && node -e \"require('fs').copyFileSync('dist/public/public.html','dist/public/index.html')\"",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^3.3.0",

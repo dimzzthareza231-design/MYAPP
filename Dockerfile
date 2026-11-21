@@ -8,7 +8,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy dependency manifests
-COPY package*.json ./
+COPY package*.json .npmrc ./
 
 # Install all dependencies (including devDependencies for TypeScript & Vite build)
 RUN npm ci
@@ -29,8 +29,8 @@ ENV PUBLIC_PORT=3000
 ENV CORE_PORT=3001
 
 # Copy package manifests and install runtime dependencies
-COPY package*.json ./
-RUN npm ci --only=production
+COPY package*.json .npmrc ./
+RUN npm ci --omit=dev
 
 # Copy compiled dist folder from builder stage
 COPY --from=builder /app/dist ./dist
