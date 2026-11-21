@@ -464,26 +464,8 @@ export const EmployeePortal: React.FC = () => {
                     </p>
                     <h2 className="text-2xl font-extrabold mt-1">Masuk Portal Karyawan</h2>
                     <p className="text-xs text-slate-500 mt-1">
-                      Autentikasi NIP/Email HRIS atau akun Google. Role Klinis &amp; Admin wajib verifikasi MFA 6-digit.
+                      Autentikasi NIP/Email HRIS. Role Klinis &amp; Admin wajib verifikasi MFA 6-digit.
                     </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={authLoading}
-                    onClick={() => executeGatewayLogin('google')}
-                    className="w-full py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 font-bold text-xs flex items-center justify-center gap-2.5 cursor-pointer"
-                  >
-                    <ShieldCheck className="w-4 h-4 text-[#0B3D91] dark:text-sky-400" />
-                    <span>Masuk dengan SSO Akun Google Institusi</span>
-                  </button>
-
-                  <div className="relative flex items-center justify-center">
-                    <span className="border-t border-slate-200 dark:border-slate-800 w-full" />
-                    <span className="bg-white dark:bg-slate-900 px-3 text-[11px] text-slate-400 font-semibold whitespace-nowrap">
-                      atau Login NIP / Divisi
-                    </span>
-                    <span className="border-t border-slate-200 dark:border-slate-800 w-full" />
                   </div>
 
                   <form

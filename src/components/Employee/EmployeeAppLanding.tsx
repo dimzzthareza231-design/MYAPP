@@ -466,8 +466,8 @@ export const EmployeeAppLanding: React.FC = () => {
                 },
                 {
                   step: '02',
-                  title: 'Login NIP / Email Staf atau Google',
-                  body: 'Masuk menggunakan NIP kepegawaian HRIS atau akun Google institusi yang sudah terdaftar di unit kerja Anda.'
+                  title: 'Login NIP / Email Staf',
+                  body: 'Masuk menggunakan NIP kepegawaian HRIS atau email staf yang sudah terdaftar di unit kerja Anda.'
                 },
                 {
                   step: '03',
