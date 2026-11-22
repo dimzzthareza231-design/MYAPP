@@ -369,12 +369,12 @@ export async function registerFcmForPatient(params: {
 
   const message =
     mode === 'fcm_web_push'
-      ? 'Firebase Cloud Messaging (FCM) Web Push aktif untuk antrean & hasil lab.'
+      ? 'Notifikasi aktif untuk panggilan antrean & hasil lab.'
       : permission === 'granted'
-      ? 'Notifikasi Real-Time SIMK & Browser aktif (tambahkan VITE_FIREBASE_VAPID_KEY untuk push saat tab tertutup).'
+      ? 'Notifikasi aktif selama aplikasi terbuka.'
       : permission === 'denied'
-      ? 'Izin notifikasi browser diblokir. Notifikasi real-time tetap aktif di dalam aplikasi.'
-      : 'Channel notifikasi real-time dalam aplikasi aktif.';
+      ? 'Izin notifikasi browser diblokir. Notifikasi tetap tampil di dalam aplikasi.'
+      : 'Notifikasi dalam aplikasi aktif.';
 
   return {
     success: true,

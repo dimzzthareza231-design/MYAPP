@@ -42,6 +42,10 @@ import {
   PATIENT_STORIES,
   getPublicPoliklinik,
   getPublicDoctors,
+  NATIONAL_EMERGENCY_NUMBERS,
+  PRIMARY_EMERGENCY_PHONE,
+  toTelHref,
+  toWhatsAppHref,
   type HealthArticle
 } from '../../data/hospitalPublicCatalog';
 import { type Doctor } from '../../data/seedData';
@@ -68,29 +72,26 @@ interface PoliQueueSnapshot {
   id: string;
   kode: string;
   nama: string;
-  sedangDipanggil: string;
+  sedangDipanggil: string | null;
   totalMenunggu: number;
 }
 
+// Hasil cek antrean publik: sengaja TIDAK memuat No. RM, nama, atau ID pasien.
 interface QueueLookupMatch {
-  id: string;
   nomor_antrian: string;
-  no_rm: string;
-  pasien_nama_masked: string;
   poli: string;
   dokter: string;
   tanggal: string;
   jam_praktek: string;
   status: string;
   tipe: string;
-  sedang_dipanggil: string;
+  sedang_dipanggil: string | null;
   antrean_di_depan: number;
   estimasi_menit: number;
 }
 
 interface RecentTicketSummary {
   nomor_antrian: string;
-  no_rm: string;
   poli: string;
   dokter: string;
   tanggal: string;
@@ -215,6 +216,23 @@ const HERO_SLIDES: HeroSlide[] = [
 ];
 
 const RECENT_TICKETS_KEY = 'myitaru_public_recent_tickets';
+
+/** Jadwal praktik dokter apa adanya; tidak mengarang jam bila data kosong. */
+function formatDoctorSchedule(doc: Pick<LiveDoctor, 'hari' | 'jam'>): string {
+  const parts = [doc.hari, doc.jam].map((v) => (v || '').trim()).filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : 'Jadwal belum tersedia';
+}
+
+/** Sisa kuota hanya dari data server/katalog; null bila tidak diketahui. */
+function getQuotaLeft(doc: LiveDoctor): number | null {
+  if (typeof doc.kuota_tersisa === 'number' && Number.isFinite(doc.kuota_tersisa)) {
+    return Math.max(0, doc.kuota_tersisa);
+  }
+  if (typeof doc.kuota === 'number' && typeof doc.pasien_terlayani === 'number') {
+    return Math.max(0, doc.kuota - doc.pasien_terlayani);
+  }
+  return null;
+}
 const EASE_OUT_EXPO = [0.16, 1, 0.3, 1] as const;
 const VIEWPORT_CONFIG = { once: true, amount: 0.14 } as const;
 
@@ -239,16 +257,11 @@ export const PublicHospitalPortal: React.FC = () => {
 
   // Catalog & Live Poli Queues
   const [doctors, setDoctors] = useState<LiveDoctor[]>(fallbackDoctors);
-  const [poliQueues, setPoliQueues] = useState<PoliQueueSnapshot[]>(() =>
-    poliklinikList.slice(0, 12).map((pol) => ({
-      id: pol.id,
-      kode: pol.kode,
-      nama: pol.nama,
-      sedangDipanggil: `${pol.kode}-001`,
-      totalMenunggu: 2
-    }))
-  );
+  // Ringkasan antrean hanya diisi dari server; tidak ada angka karangan saat data belum ada.
+  const [poliQueues, setPoliQueues] = useState<PoliQueueSnapshot[]>([]);
   const [queueUpdatedAt, setQueueUpdatedAt] = useState<string>('');
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
   // Doctor Filter State
   const [doctorSearch, setDoctorSearch] = useState('');
@@ -263,9 +276,8 @@ export const PublicHospitalPortal: React.FC = () => {
   const [selectedDoctor, setSelectedDoctor] = useState<LiveDoctor>(() => fallbackDoctors[0]);
   const [bookingForm, setBookingForm] = useState({
     isExistingPatient: false,
-    no_rm: '',
     nama: '',
-    tanggal_lahir: '1990-05-15',
+    tanggal_lahir: '',
     no_hp: '',
     tanggal: new Date().toISOString().split('T')[0],
     penjamin: 'Umum / Mandiri',
@@ -300,12 +312,6 @@ export const PublicHospitalPortal: React.FC = () => {
   const [queueSearching, setQueueSearching] = useState(false);
   const [queueSearchedQuery, setQueueSearchedQuery] = useState('');
   const [queueMatches, setQueueMatches] = useState<QueueLookupMatch[]>([]);
-  const [sampleTickets, setSampleTickets] = useState<
-    Array<{ nomor_antrian: string; no_rm: string; poli: string }>
-  >([
-    { nomor_antrian: 'PD-001', no_rm: 'RM-260101-0001', poli: 'Poli Penyakit Dalam' },
-    { nomor_antrian: 'IGD-004', no_rm: 'RM-260103-0003', poli: 'Instalasi Gawat Darurat (IGD)' }
-  ]);
 
   // Auto-advance hero showcase slides softly every 7 seconds
   useEffect(() => {
@@ -315,38 +321,44 @@ export const PublicHospitalPortal: React.FC = () => {
     return () => window.clearInterval(timer);
   }, []);
 
-  const fetchCatalogAndQueues = useCallback(async (queryText = '') => {
+  const fetchCatalogAndQueues = useCallback(async () => {
+    setCatalogLoading(true);
+    const problems: string[] = [];
     try {
-      const [catalogRes, queueRes] = await Promise.all([
+      const [catalogRes, queueRes] = await Promise.allSettled([
         fetch('/api/public/hospital-catalog'),
-        fetch(`/api/public/queue-status${queryText ? `?q=${encodeURIComponent(queryText)}` : ''}`)
+        fetch('/api/public/queue-status')
       ]);
 
-      if (catalogRes.ok) {
-        const catData = await catalogRes.json();
+      if (catalogRes.status === 'fulfilled' && catalogRes.value.ok) {
+        const catData = await catalogRes.value.json();
         if (Array.isArray(catData?.doctors) && catData.doctors.length > 0) {
           setDoctors(catData.doctors);
         }
+      } else {
+        problems.push('jadwal dokter');
       }
 
-      if (queueRes.ok) {
-        const qData = await queueRes.json();
+      if (queueRes.status === 'fulfilled' && queueRes.value.ok) {
+        const qData = await queueRes.value.json();
         if (Array.isArray(qData?.poliQueues)) {
           setPoliQueues(qData.poliQueues);
-        }
-        if (Array.isArray(qData?.sampleTickets) && qData.sampleTickets.length > 0) {
-          setSampleTickets(qData.sampleTickets);
         }
         if (qData?.updatedAt) {
           setQueueUpdatedAt(qData.updatedAt);
         }
-        if (queryText) {
-          setQueueMatches(Array.isArray(qData?.matches) ? qData.matches : []);
-          setQueueSearchedQuery(qData?.query || queryText.toUpperCase());
-        }
+      } else {
+        problems.push('status antrean');
       }
     } catch {
-      // Retain deterministic seed catalog seamlessly
+      problems.push('jadwal dokter', 'status antrean');
+    } finally {
+      setCatalogError(
+        problems.length > 0
+          ? `Gagal memuat ${Array.from(new Set(problems)).join(' dan ')} terbaru. Data yang ditampilkan mungkin tidak terbaru.`
+          : null
+      );
+      setCatalogLoading(false);
     }
   }, []);
 
@@ -431,8 +443,9 @@ export const PublicHospitalPortal: React.FC = () => {
       toast.error('Silakan pilih poliklinik dan dokter tujuan.');
       return;
     }
-    if (bookingForm.isExistingPatient && !bookingForm.no_rm.trim()) {
-      toast.error('Masukkan Nomor Rekam Medis (No. RM) Anda.');
+    if (bookingForm.isExistingPatient) {
+      // Pasien lama mendaftar melalui Aplikasi Pasien (butuh sesi terverifikasi).
+      navigate('/mobile');
       return;
     }
     if (!bookingForm.isExistingPatient && !bookingForm.nama.trim()) {
@@ -447,7 +460,6 @@ export const PublicHospitalPortal: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           nama: bookingForm.nama,
-          no_rm: bookingForm.isExistingPatient ? bookingForm.no_rm : undefined,
           tanggal_lahir: bookingForm.tanggal_lahir,
           no_hp: bookingForm.no_hp,
           poli_id: selectedDoctor.poli_id,
@@ -455,7 +467,7 @@ export const PublicHospitalPortal: React.FC = () => {
           dokter_id: selectedDoctor.id,
           dokter_nama: selectedDoctor.nama,
           tanggal: bookingForm.tanggal,
-          jam_praktek: selectedDoctor.jam || '08:00 - 13:00 WIB',
+          jam_praktek: selectedDoctor.jam || '',
           penjamin: bookingForm.penjamin,
           keluhan: bookingForm.keluhan
         })
@@ -469,7 +481,6 @@ export const PublicHospitalPortal: React.FC = () => {
 
       const ticket: RecentTicketSummary = {
         nomor_antrian: data.booking.nomor_antrian,
-        no_rm: data.booking.no_rm,
         poli: data.booking.poli,
         dokter: data.booking.dokter,
         tanggal: data.booking.tanggal,
@@ -500,7 +511,7 @@ export const PublicHospitalPortal: React.FC = () => {
   const handleQueueLookup = async (overrideQuery?: string) => {
     const q = (overrideQuery ?? queueQuery).trim();
     if (!q) {
-      toast.error('Masukkan Nomor Antrean (mis. PD-001) atau No. RM.');
+      toast.error('Masukkan kode tiket / nomor antrean Anda secara lengkap.');
       return;
     }
     if (overrideQuery !== undefined) {
@@ -570,15 +581,29 @@ export const PublicHospitalPortal: React.FC = () => {
         <div className="bg-[#082B6B] text-white text-xs py-2 px-4 sm:px-6 lg:px-8 border-b border-white/10">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-4">
-              <a
-                href="tel:1500911"
-                className="inline-flex items-center gap-2 font-semibold text-white hover:text-red-200 transition whitespace-nowrap shrink-0"
-              >
+              <span className="inline-flex items-center gap-2 font-semibold text-white whitespace-nowrap shrink-0">
                 <span className="inline-flex items-center gap-1 bg-[#DC2626] px-2 py-0.5 rounded font-bold tracking-wide">
-                  <PhoneCall className="w-3 h-3" /> IGD 24 JAM
+                  <PhoneCall className="w-3 h-3" /> DARURAT
                 </span>
-                <span className="font-mono tabular-nums font-bold">1-500-911</span>
-              </a>
+                {PRIMARY_EMERGENCY_PHONE && (
+                  <a
+                    href={toTelHref(PRIMARY_EMERGENCY_PHONE)}
+                    className="font-mono tabular-nums font-bold hover:text-red-200 transition"
+                  >
+                    IGD {PRIMARY_EMERGENCY_PHONE}
+                  </a>
+                )}
+                {NATIONAL_EMERGENCY_NUMBERS.map((em) => (
+                  <a
+                    key={em.number}
+                    href={toTelHref(em.number)}
+                    title={em.label}
+                    className="font-mono tabular-nums font-bold hover:text-red-200 transition"
+                  >
+                    {em.number}
+                  </a>
+                ))}
+              </span>
               <span className="hidden md:inline text-blue-200">
                 Jam Besuk Rawat Inap: {VISITING_HOURS_INFO.morningSession} &amp;{' '}
                 {VISITING_HOURS_INFO.eveningSession}
@@ -1006,6 +1031,38 @@ export const PublicHospitalPortal: React.FC = () => {
               </div>
             </motion.div>
 
+            {catalogLoading && !catalogError && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-600"
+              >
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#0B3D91]" />
+                <span>Memuat jadwal dokter dan status antrean terbaru...</span>
+              </div>
+            )}
+
+            {catalogError && (
+              <div
+                role="alert"
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3"
+              >
+                <div className="flex items-start gap-2.5 text-sm text-amber-900">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <span>{catalogError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fetchCatalogAndQueues()}
+                  disabled={catalogLoading}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer disabled:opacity-60 self-start sm:self-auto shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${catalogLoading ? 'animate-spin' : ''}`} />
+                  <span>{catalogLoading ? 'Memuat ulang...' : 'Coba Lagi'}</span>
+                </button>
+              </div>
+            )}
+
             <AnimatePresence mode="wait">
               {activeMode === 'daftar' ? (
                 <motion.div
@@ -1067,10 +1124,7 @@ export const PublicHospitalPortal: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {visibleDoctors.map((doc, idx) => {
                             const isSelected = selectedDoctor?.id === doc.id;
-                            const quotaLeft =
-                              doc.kuota_tersisa !== undefined
-                                ? doc.kuota_tersisa
-                                : Math.max(2, (doc.kuota || 25) - (doc.pasien_terlayani || 8));
+                            const quotaLeft = getQuotaLeft(doc);
 
                             const initials = doc.nama
                               .replace(/^(dr\.|drg\.)\s*/i, '')
@@ -1124,7 +1178,7 @@ export const PublicHospitalPortal: React.FC = () => {
                                     <div className="flex items-center gap-2">
                                       <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                                       <span className="font-mono tabular-nums">
-                                        {doc.hari || 'Senin - Jumat'} · {doc.jam || '08:00 - 13:00 WIB'}
+                                        {formatDoctorSchedule(doc)}
                                       </span>
                                     </div>
                                   </div>
@@ -1133,11 +1187,11 @@ export const PublicHospitalPortal: React.FC = () => {
                                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                                   <div className="text-xs">
                                     <span className="font-semibold text-emerald-700">
-                                      {doc.status_jaga || 'Berpraktik'}
+                                      {doc.status_jaga || doc.status || 'Status belum tersedia'}
                                     </span>
                                     <span className="text-slate-300 mx-1.5">·</span>
                                     <span className="font-mono tabular-nums text-slate-600">
-                                      Sisa {quotaLeft}
+                                      {quotaLeft === null ? 'Kuota belum tersedia' : `Sisa ${quotaLeft}`}
                                     </span>
                                   </div>
                                   <button
@@ -1284,7 +1338,7 @@ export const PublicHospitalPortal: React.FC = () => {
                               <p className="text-slate-600">
                                 {selectedDoctor?.poli} ·{' '}
                                 <span className="font-mono tabular-nums">
-                                  {selectedDoctor?.jam || '08:00 - 13:00 WIB'}
+                                  {selectedDoctor ? formatDoctorSchedule(selectedDoctor) : 'Jadwal belum tersedia'}
                                 </span>
                               </p>
                             </div>
@@ -1315,18 +1369,25 @@ export const PublicHospitalPortal: React.FC = () => {
                             </div>
 
                             {bookingForm.isExistingPatient ? (
-                              <div>
-                                <label className="block text-xs font-bold text-slate-700 mb-1">
-                                  Nomor Rekam Medis (No. RM) *
-                                </label>
-                                <input
-                                  type="text"
-                                  value={bookingForm.no_rm}
-                                  onChange={(e) => setBookingForm((p) => ({ ...p, no_rm: e.target.value }))}
-                                  placeholder="Contoh: RM-260101-0001"
-                                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono uppercase focus:border-[#0B3D91] outline-none"
-                                  required
-                                />
+                              // Pasien lama wajib masuk ke Aplikasi Pasien (sesi terverifikasi) sebelum
+                              // membuat janji temu dengan No. RM; server menolak No. RM tanpa sesi pasien.
+                              <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 space-y-3 text-sm">
+                                <div className="flex items-start gap-2.5 text-slate-700">
+                                  <ShieldCheck className="w-5 h-5 text-[#0B3D91] shrink-0 mt-0.5" />
+                                  <p>
+                                    Demi keamanan rekam medis, pendaftaran untuk pasien yang sudah memiliki No. RM
+                                    dilakukan setelah masuk ke <strong>Aplikasi Pasien MYITARU</strong>. Silakan masuk
+                                    terlebih dahulu, lalu buat janji temu dari aplikasi.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate('/mobile')}
+                                  className="w-full py-3 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm transition cursor-pointer flex items-center justify-center gap-2 min-h-[48px]"
+                                >
+                                  <Smartphone className="w-4 h-4" />
+                                  <span>Masuk ke Aplikasi Pasien untuk Mendaftar</span>
+                                </button>
                               </div>
                             ) : (
                               <div>
@@ -1344,6 +1405,8 @@ export const PublicHospitalPortal: React.FC = () => {
                               </div>
                             )}
 
+                            {!bookingForm.isExistingPatient && (
+                              <>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div>
                                 <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1430,6 +1493,8 @@ export const PublicHospitalPortal: React.FC = () => {
                                   : 'Daftar & Ambil Nomor Antrean'}
                               </span>
                             </motion.button>
+                              </>
+                            )}
                           </motion.form>
                         )}
                       </AnimatePresence>
@@ -1460,7 +1525,9 @@ export const PublicHospitalPortal: React.FC = () => {
                           type="text"
                           value={queueQuery}
                           onChange={(e) => setQueueQuery(e.target.value)}
-                          placeholder="Masukkan Nomor Antrean (mis. PD-001) atau No. RM (RM-260101-0001)..."
+                          placeholder="Ketik kode tiket / nomor antrean Anda (sesuai bukti pendaftaran)"
+                          aria-label="Kode tiket atau nomor antrean"
+                          autoComplete="off"
                           className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-[#0B3D91] font-mono text-sm uppercase outline-none"
                         />
                       </div>
@@ -1474,29 +1541,26 @@ export const PublicHospitalPortal: React.FC = () => {
                       </button>
                     </form>
 
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-semibold text-slate-500">Cek Cepat:</span>
-                      {recentTickets.map((t) => (
-                        <button
-                          key={t.nomor_antrian}
-                          type="button"
-                          onClick={() => handleQueueLookup(t.nomor_antrian)}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-mono font-bold hover:bg-emerald-100 cursor-pointer"
-                        >
-                          {t.nomor_antrian} · Tiket Anda
-                        </button>
-                      ))}
-                      {sampleTickets.map((s) => (
-                        <button
-                          key={s.nomor_antrian}
-                          type="button"
-                          onClick={() => handleQueueLookup(s.nomor_antrian)}
-                          className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 font-mono font-semibold hover:bg-slate-200 cursor-pointer"
-                        >
-                          {s.nomor_antrian} ({s.no_rm})
-                        </button>
-                      ))}
-                    </div>
+                    <p className="text-xs text-slate-500 -mt-3">
+                      Demi privasi, status antrean hanya dapat dilihat dengan mengetik kode tiket lengkap yang
+                      tercantum pada bukti pendaftaran Anda. Pencarian dengan No. RM atau nama tidak tersedia.
+                    </p>
+
+                    {recentTickets.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-semibold text-slate-500">Tiket di perangkat ini:</span>
+                        {recentTickets.map((t) => (
+                          <button
+                            key={t.nomor_antrian}
+                            type="button"
+                            onClick={() => handleQueueLookup(t.nomor_antrian)}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-mono font-bold hover:bg-emerald-100 cursor-pointer"
+                          >
+                            {t.nomor_antrian} · Tiket Anda
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     {queueSearchedQuery && (
                       <div className="pt-4 border-t border-slate-200">
@@ -1505,10 +1569,10 @@ export const PublicHospitalPortal: React.FC = () => {
                             <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                             <div className="text-sm">
                               <p className="font-bold text-amber-900">
-                                Nomor antrean atau No. RM “{queueSearchedQuery}” belum ditemukan hari ini.
+                                Kode tiket “{queueSearchedQuery}” tidak ditemukan.
                               </p>
                               <p className="text-xs text-amber-800 mt-1">
-                                Pastikan kode antrean benar atau buat pendaftaran poliklinik online terlebih dahulu.
+                                Pastikan kode tiket diketik lengkap sesuai bukti pendaftaran, atau buat pendaftaran poliklinik online terlebih dahulu.
                               </p>
                             </div>
                           </div>
@@ -1516,7 +1580,7 @@ export const PublicHospitalPortal: React.FC = () => {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {queueMatches.map((m, idx) => (
                               <motion.div
-                                key={m.id}
+                                key={`${m.nomor_antrian}-${m.tanggal}-${idx}`}
                                 initial={{ opacity: 0, y: 12 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.3, delay: idx * 0.05, ease: EASE_OUT_EXPO }}
@@ -1530,12 +1594,6 @@ export const PublicHospitalPortal: React.FC = () => {
                                     </p>
                                     <p className="text-3xl font-extrabold font-mono tabular-nums text-[#0B3D91]">
                                       {m.nomor_antrian}
-                                    </p>
-                                    <p className="text-xs text-slate-600 mt-0.5 flex items-center gap-1.5">
-                                      <UserCheck className="w-3.5 h-3.5 text-slate-400" />
-                                      <span>{m.pasien_nama_masked}</span>
-                                      <span className="text-slate-400">·</span>
-                                      <span className="font-mono">{m.no_rm}</span>
                                     </p>
                                   </div>
                                   <span
@@ -1555,7 +1613,7 @@ export const PublicHospitalPortal: React.FC = () => {
                                   <div>
                                     <p className="text-[11px] text-slate-500">Sedang Dipanggil</p>
                                     <p className="font-mono tabular-nums font-extrabold text-sm text-[#0B3D91] mt-0.5">
-                                      {m.sedang_dipanggil}
+                                      {m.sedang_dipanggil || '—'}
                                     </p>
                                   </div>
                                   <div className="border-x border-slate-200">
@@ -1577,7 +1635,7 @@ export const PublicHospitalPortal: React.FC = () => {
                                     <strong className="text-slate-900">{m.poli}</strong> · {m.dokter}
                                   </p>
                                   <p className="font-mono tabular-nums text-slate-500">
-                                    {m.tanggal} · {m.jam_praktek}
+                                    {m.tanggal} · {m.jam_praktek || 'Jadwal belum tersedia'}
                                   </p>
                                 </div>
                               </motion.div>
@@ -1602,13 +1660,28 @@ export const PublicHospitalPortal: React.FC = () => {
                       <motion.button
                         type="button"
                         whileTap={{ scale: 0.97 }}
-                        onClick={() => fetchCatalogAndQueues(queueSearchedQuery)}
+                        onClick={() => {
+                          fetchCatalogAndQueues();
+                          if (queueSearchedQuery) handleQueueLookup(queueSearchedQuery);
+                        }}
+                        disabled={catalogLoading}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 cursor-pointer self-start sm:self-auto"
                       >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Perbarui Status</span>
+                        <RefreshCw className={`w-3.5 h-3.5 ${catalogLoading ? 'animate-spin' : ''}`} />
+                        <span>{catalogLoading ? 'Memuat...' : 'Perbarui Status'}</span>
                       </motion.button>
                     </div>
+
+                    <p className="text-[11px] text-slate-500">
+                      Ringkasan agregat per poliklinik (nomor yang sedang dipanggil dan jumlah pasien menunggu), tanpa
+                      identitas pasien.
+                    </p>
+
+                    {poliQueues.length === 0 && (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600 text-center">
+                        {catalogLoading ? 'Memuat ringkasan antrean...' : 'Data antrean belum tersedia.'}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
                       {poliQueues.slice(0, 12).map((pq, idx) => (
@@ -1629,7 +1702,7 @@ export const PublicHospitalPortal: React.FC = () => {
                           <div className="text-right shrink-0">
                             <p className="text-[10px] font-semibold uppercase text-slate-400">Dipanggil</p>
                             <p className="font-mono tabular-nums font-extrabold text-base text-[#0B3D91]">
-                              {pq.sedangDipanggil}
+                              {pq.sedangDipanggil || '—'}
                             </p>
                           </div>
                         </motion.div>
@@ -2490,11 +2563,50 @@ export const PublicHospitalPortal: React.FC = () => {
                   </p>
                   <div className="pt-3 border-t border-slate-100 space-y-1.5 text-xs text-slate-600">
                     <p>{branch.hours}</p>
-                    <p className="font-mono tabular-nums font-semibold text-slate-900">
-                      Janji Temu: {branch.appointmentPhone} · WhatsApp: {branch.whatsappPhone}
-                    </p>
+                    {(branch.appointmentPhone || branch.whatsappPhone) && (
+                      <p className="font-mono tabular-nums font-semibold text-slate-900">
+                        {branch.appointmentPhone && (
+                          <>
+                            Janji Temu:{' '}
+                            <a href={toTelHref(branch.appointmentPhone)} className="underline hover:text-[#0B3D91]">
+                              {branch.appointmentPhone}
+                            </a>
+                          </>
+                        )}
+                        {branch.appointmentPhone && branch.whatsappPhone && ' · '}
+                        {branch.whatsappPhone && (
+                          <>
+                            WhatsApp:{' '}
+                            <a
+                              href={toWhatsAppHref(branch.whatsappPhone)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline hover:text-emerald-700"
+                            >
+                              {branch.whatsappPhone}
+                            </a>
+                          </>
+                        )}
+                      </p>
+                    )}
+                    {branch.emergencyPhone && (
+                      <p className="font-mono tabular-nums font-bold text-[#DC2626]">
+                        IGD &amp; Ambulans 24 Jam:{' '}
+                        <a href={toTelHref(branch.emergencyPhone)} className="underline">
+                          {branch.emergencyPhone}
+                        </a>
+                      </p>
+                    )}
                     <p className="font-mono tabular-nums font-bold text-[#DC2626]">
-                      IGD &amp; Ambulans 24 Jam: {branch.emergencyPhone}
+                      Darurat nasional:{' '}
+                      {NATIONAL_EMERGENCY_NUMBERS.map((em, emIdx) => (
+                        <React.Fragment key={em.number}>
+                          {emIdx > 0 && ' / '}
+                          <a href={toTelHref(em.number)} className="underline" title={em.label}>
+                            {em.number}
+                          </a>
+                        </React.Fragment>
+                      ))}
                     </p>
                   </div>
                 </motion.div>
@@ -2587,11 +2699,42 @@ export const PublicHospitalPortal: React.FC = () => {
 
               <div className="md:col-span-3 space-y-2.5 text-xs">
                 <p className="font-bold uppercase tracking-wider text-sky-300">Kontak Darurat &amp; Info</p>
+                {PRIMARY_EMERGENCY_PHONE && (
+                  <p className="font-mono tabular-nums text-base font-extrabold text-white">
+                    IGD 24 Jam:{' '}
+                    <a href={toTelHref(PRIMARY_EMERGENCY_PHONE)} className="hover:underline">
+                      {PRIMARY_EMERGENCY_PHONE}
+                    </a>
+                  </p>
+                )}
                 <p className="font-mono tabular-nums text-base font-extrabold text-white">
-                  IGD 24 Jam: 1-500-911
+                  Darurat:{' '}
+                  {NATIONAL_EMERGENCY_NUMBERS.map((em, emIdx) => (
+                    <React.Fragment key={em.number}>
+                      {emIdx > 0 && ' / '}
+                      <a href={toTelHref(em.number)} className="hover:underline" title={em.label}>
+                        {em.number}
+                      </a>
+                    </React.Fragment>
+                  ))}
                 </p>
-                <p className="text-blue-200">Pendaftaran Telepon: (021) 5098-8800</p>
-                <p className="text-blue-200">WhatsApp Customer Relations: 0811-1500-911</p>
+                <p className="text-blue-200">
+                  Pendaftaran Telepon:{' '}
+                  <a href={toTelHref('(021) 5098-8800')} className="hover:text-white hover:underline">
+                    (021) 5098-8800
+                  </a>
+                </p>
+                <p className="text-blue-200">
+                  WhatsApp Customer Relations:{' '}
+                  <a
+                    href={toWhatsAppHref('0811-1500-911')}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-white hover:underline"
+                  >
+                    0811-1500-911
+                  </a>
+                </p>
                 <p className="text-blue-200">Jl. Kesehatan Raya No. 88, Jakarta Pusat</p>
               </div>
             </div>

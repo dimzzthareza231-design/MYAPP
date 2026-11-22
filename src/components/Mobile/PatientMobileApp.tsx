@@ -84,6 +84,8 @@ const fadeSlideTransition = {
 };
 
 const PATIENT_TOKEN_KEY = 'myitaru_patient_token';
+const PATIENT_LOGIN_UNAVAILABLE_MESSAGE =
+  'Login pasien belum tersedia, hubungi pendaftaran.';
 
 export const PatientMobileApp: React.FC = () => {
   const navigate = useNavigate();
@@ -135,6 +137,8 @@ export const PatientMobileApp: React.FC = () => {
   });
   const [subTabDirection, setSubTabDirection] = useState<number>(1);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [qrCardValue, setQrCardValue] = useState<string | null>(null);
+  const [qrCardStatus, setQrCardStatus] = useState<'idle' | 'loading' | 'error'>('idle');
 
   const switchTab = useCallback(
     (nextTab: MobileTab) => {
@@ -169,7 +173,7 @@ export const PatientMobileApp: React.FC = () => {
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [fcmCapability, setFcmCapability] = useState<FcmCapabilityStatus | null>(null);
   const [fcmMode, setFcmMode] = useState<'fcm_web_push' | 'realtime_sse_fallback' | 'inactive'>('inactive');
-  const [fcmTokenPreview, setFcmTokenPreview] = useState<string | null>(() => getCachedFcmToken());
+  const [, setFcmTokenPreview] = useState<string | null>(() => getCachedFcmToken());
   const [fcmSyncing, setFcmSyncing] = useState(false);
   const [sseConnected, setSseConnected] = useState(false);
   const [simulatingType, setSimulatingType] = useState<'queue_call' | 'lab_ready' | null>(null);
@@ -186,6 +190,48 @@ export const PatientMobileApp: React.FC = () => {
   const [bookingPenjamin, setBookingPenjamin] = useState('Umum / Mandiri');
   const [bookingKeluhan, setBookingKeluhan] = useState('');
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+
+  // QR kartu pasien: token opaque berumur pendek yang diterbitkan server (tanpa nama/No. RM di payload).
+  useEffect(() => {
+    if (!showQrModal || !token) {
+      setQrCardValue(null);
+      setQrCardStatus('idle');
+      return;
+    }
+    let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const loadQrCard = async () => {
+      setQrCardStatus('loading');
+      try {
+        const res = await fetch('/api/patient/qr-card', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (!res.ok || !data?.success || typeof data.qr_value !== 'string') {
+          setQrCardValue(null);
+          setQrCardStatus('error');
+          return;
+        }
+        setQrCardValue(data.qr_value);
+        setQrCardStatus('idle');
+        const expiresAt = Date.parse(data.expires_at);
+        const refreshInMs = Number.isFinite(expiresAt) ? Math.max(30_000, expiresAt - Date.now() - 60_000) : 5 * 60_000;
+        refreshTimer = setTimeout(loadQrCard, refreshInMs);
+      } catch {
+        if (!cancelled) {
+          setQrCardValue(null);
+          setQrCardStatus('error');
+        }
+      }
+    };
+    loadQrCard();
+    return () => {
+      cancelled = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [showQrModal, token]);
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.read).length,
@@ -440,7 +486,7 @@ export const PatientMobileApp: React.FC = () => {
       setFcmTokenPreview(result.fcmToken);
       toast.success(result.message);
     } catch {
-      toast.error('Gagal mengaktifkan notifikasi push FCM.');
+      toast.error('Gagal mengaktifkan notifikasi.');
     } finally {
       setFcmSyncing(false);
     }
@@ -462,7 +508,7 @@ export const PatientMobileApp: React.FC = () => {
       });
       setFcmMode(reg.mode);
       setFcmTokenPreview(reg.fcmToken);
-      toast.success('Preferensi notifikasi real-time disimpan.');
+      toast.success('Preferensi notifikasi disimpan.');
     }
   };
 
@@ -562,6 +608,10 @@ export const PatientMobileApp: React.FC = () => {
         })
       });
 
+      if (res.status === 503) {
+        toast.error(PATIENT_LOGIN_UNAVAILABLE_MESSAGE);
+        return;
+      }
       const data = await res.json();
       if (!res.ok || !data?.success || !data?.dossier) {
         toast.error(data?.message || 'Verifikasi No. RM dan Tanggal Lahir gagal.');
@@ -607,6 +657,10 @@ export const PatientMobileApp: React.FC = () => {
         })
       });
 
+      if (res.status === 503) {
+        toast.error(PATIENT_LOGIN_UNAVAILABLE_MESSAGE);
+        return;
+      }
       const data = await res.json();
       if (!res.ok || !data?.success) {
         toast.error(data?.message || 'Gagal memverifikasi akun Google pasien.');
@@ -649,6 +703,10 @@ export const PatientMobileApp: React.FC = () => {
           linkTanggalLahir: dobInput.trim()
         })
       });
+      if (res.status === 503) {
+        toast.error(PATIENT_LOGIN_UNAVAILABLE_MESSAGE);
+        return;
+      }
       const data = await res.json();
       if (!res.ok || !data?.success || !data?.dossier) {
         toast.error(data?.message || 'Gagal menautkan No. RM ke akun Google.');
@@ -699,14 +757,18 @@ export const PatientMobileApp: React.FC = () => {
     if (!bookingDoc || !dossier) return;
     setIsBookingSubmitting(true);
     try {
+      if (!token) {
+        toast.error('Sesi pasien berakhir. Silakan masuk kembali.');
+        return;
+      }
+      // Identitas pasien ditentukan server dari sesi (Authorization: Bearer), bukan dari body.
       const res = await fetch('/api/patient/appointments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({
-          no_rm: dossier.patient.no_rm,
-          nama: dossier.patient.nama,
-          tanggal_lahir: dossier.patient.tanggal_lahir,
-          no_hp: dossier.patient.no_hp,
           poli_id: bookingDoc.poli_id,
           poli_nama: bookingDoc.poli,
           dokter_id: bookingDoc.id,
@@ -714,20 +776,28 @@ export const PatientMobileApp: React.FC = () => {
           tanggal: bookingDate,
           jam_praktek: bookingDoc.jam || '08:00 - 13:00 WIB',
           penjamin: bookingPenjamin,
-          keluhan: bookingKeluhan,
-          google_email: dossier.linkedEmail
+          keluhan: bookingKeluhan
         })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (res.status === 401) {
+        toast.error('Sesi pasien berakhir. Silakan masuk kembali untuk membuat janji temu.');
+        setToken(null);
+        setDossier(null);
+        try {
+          sessionStorage.removeItem(PATIENT_TOKEN_KEY);
+        } catch {
+          // Ignore storage exceptions
+        }
+        return;
+      }
       if (!res.ok || !data?.success) {
         toast.error(data?.message || 'Gagal membuat janji temu.');
         return;
       }
 
-      if (data.token && data.dossier) {
-        persistSession(data.token, data.dossier);
-      }
       setBookingDoc(null);
+      fetchDossierSilent();
       setBookingKeluhan('');
       switchTab('beranda');
       toast.success(`Antrean baru ${data.booking.nomor_antrian} diterbitkan!`);
@@ -946,11 +1016,11 @@ export const PatientMobileApp: React.FC = () => {
 
             <div className="pt-2 text-center border-t border-slate-100">
               <a
-                href="tel:1500911"
+                href="tel:119"
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-[#DC2626]"
               >
                 <PhoneCall className="w-3.5 h-3.5" />
-                <span>Darurat IGD 24 Jam: 1-500-911</span>
+                <span>Gawat Darurat: 119</span>
               </a>
             </div>
           </div>
@@ -1025,7 +1095,7 @@ export const PatientMobileApp: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowNotificationsModal(true)}
-              aria-label="Notifikasi Real-Time FCM"
+              aria-label="Notifikasi"
               className="relative p-2.5 rounded-xl bg-white/10 hover:bg-white/20 transition cursor-pointer min-h-[42px] min-w-[42px] flex items-center justify-center"
             >
               {unreadCount > 0 ? (
@@ -1039,7 +1109,7 @@ export const PatientMobileApp: React.FC = () => {
                 </span>
               ) : sseConnected ? (
                 <span
-                  title="Saluran Real-Time Aktif"
+                  title="Diperbarui otomatis"
                   className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-[#0B3D91]"
                 />
               ) : null}
@@ -1093,7 +1163,7 @@ export const PatientMobileApp: React.FC = () => {
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/80 border border-current/15">
-                    {liveBannerAlert.type === 'queue_call' ? 'Panggilan Antrean Live' : 'Hasil Lab Baru'}
+                    {liveBannerAlert.type === 'queue_call' ? 'Panggilan Antrean' : 'Hasil Lab Baru'}
                   </span>
                   <span className="text-[11px] font-mono opacity-75">
                     {new Date(liveBannerAlert.createdAt).toLocaleTimeString('id-ID', {
@@ -1355,7 +1425,7 @@ export const PatientMobileApp: React.FC = () => {
                     </div>
                     <div>
                       <h3 className="text-sm font-extrabold text-slate-900">
-                        Notifikasi Push Real-Time (FCM)
+                        Notifikasi Antrean &amp; Hasil Lab
                       </h3>
                       <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
                         Terima peringatan seketika saat nomor antrean dipanggil poli atau hasil laboratorium selesai divalidasi.
@@ -1372,9 +1442,9 @@ export const PatientMobileApp: React.FC = () => {
                     }`}
                   >
                     {fcmMode === 'fcm_web_push'
-                      ? 'FCM Aktif'
+                      ? 'Notifikasi aktif'
                       : sseConnected
-                      ? 'Live Aktif'
+                      ? 'Diperbarui otomatis'
                       : 'Siap'}
                   </span>
                 </div>
@@ -1389,7 +1459,7 @@ export const PatientMobileApp: React.FC = () => {
                     >
                       <BellRing className="w-3.5 h-3.5" />
                       <span>
-                        {fcmSyncing ? 'Mengaktifkan FCM...' : 'Aktifkan Notifikasi Push FCM'}
+                        {fcmSyncing ? 'Mengaktifkan notifikasi...' : 'Aktifkan Notifikasi'}
                       </span>
                     </button>
                   ) : null}
@@ -1802,14 +1872,15 @@ export const PatientMobileApp: React.FC = () => {
           <div className="bg-white text-slate-900 rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl">
             <h3 className="text-lg font-extrabold text-slate-900">Kartu Pasien &amp; Check-In QR</h3>
             <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 inline-block mx-auto">
-              <QRCodeSVG
-                value={JSON.stringify({
-                  no_rm: dossier.patient.no_rm,
-                  antrean: primaryQueue?.nomor_antrian || 'UMUM',
-                  nama: dossier.patient.nama
-                })}
-                size={176}
-              />
+              {qrCardValue ? (
+                <QRCodeSVG value={qrCardValue} size={176} />
+              ) : (
+                <div className="w-[176px] h-[176px] flex items-center justify-center text-xs text-slate-500 px-3">
+                  {qrCardStatus === 'error'
+                    ? 'QR belum dapat ditampilkan. Periksa koneksi atau tunjukkan No. RM ke petugas pendaftaran.'
+                    : 'Menyiapkan QR...'}
+                </div>
+              )}
             </div>
             <div>
               <p className="font-bold text-slate-900">{dossier.patient.nama}</p>
@@ -1817,7 +1888,7 @@ export const PatientMobileApp: React.FC = () => {
                 {dossier.patient.no_rm} · {primaryQueue?.nomor_antrian || 'Terdaftar'}
               </p>
               <p className="text-xs text-slate-500 mt-2">
-                Pindai QR ini pada Anjungan Mandiri (APM) saat tiba di MYITARU.
+                Pindai QR ini pada Anjungan Mandiri (APM) saat tiba di MYITARU. QR diperbarui otomatis setiap beberapa menit.
               </p>
             </div>
             <button
@@ -1906,7 +1977,7 @@ export const PatientMobileApp: React.FC = () => {
               <div className="flex items-center gap-2.5">
                 <BellRing className="w-5 h-5 text-amber-300" />
                 <div>
-                  <h3 className="text-base font-extrabold">Pusat Notifikasi Real-Time (FCM)</h3>
+                  <h3 className="text-base font-extrabold">Pusat Notifikasi</h3>
                   <p className="text-[11px] text-blue-200">
                     Antrean Poli &amp; Hasil Laboratorium Tervalidasi
                   </p>
@@ -1927,7 +1998,7 @@ export const PatientMobileApp: React.FC = () => {
               <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-                    Status Firebase Cloud Messaging
+                    Status Notifikasi
                   </span>
                   <span
                     className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
@@ -1939,9 +2010,9 @@ export const PatientMobileApp: React.FC = () => {
                     }`}
                   >
                     {fcmMode === 'fcm_web_push'
-                      ? 'FCM Web Push Aktif'
+                      ? 'Notifikasi aktif'
                       : sseConnected
-                      ? 'Live Real-Time + Browser'
+                      ? 'Diperbarui otomatis'
                       : 'Menghubungkan...'}
                   </span>
                 </div>
@@ -1951,21 +2022,15 @@ export const PatientMobileApp: React.FC = () => {
                     Izin Browser:{' '}
                     <strong className="text-slate-900">
                       {fcmCapability?.permission === 'granted'
-                        ? 'Diizinkan (Granted)'
+                        ? 'Diizinkan'
                         : fcmCapability?.permission === 'denied'
                         ? 'Diblokir Browser (Aktifkan di Setelan Situs)'
                         : 'Belum Diminta'}
                     </strong>
                   </p>
-                  {fcmTokenPreview && (
-                    <p className="font-mono text-[11px] text-slate-500 truncate">
-                      Device Token: {fcmTokenPreview.slice(0, 28)}...
-                    </p>
-                  )}
                   {fcmCapability && !fcmCapability.hasVapidKey && (
                     <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1">
-                      Saluran real-time SSE &amp; notifikasi browser aktif. Tambahkan{' '}
-                      <code className="font-mono font-bold">VITE_FIREBASE_VAPID_KEY</code> dari Firebase Console untuk web push saat tab tertutup.
+                      Notifikasi muncul selama aplikasi ini terbuka. Biarkan tab tetap terbuka agar tidak melewatkan panggilan antrean.
                     </p>
                   )}
                 </div>
@@ -1977,10 +2042,10 @@ export const PatientMobileApp: React.FC = () => {
                   className="w-full py-2.5 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white text-xs font-bold cursor-pointer disabled:opacity-60"
                 >
                   {fcmSyncing
-                    ? 'Menyinkronkan Token Perangkat...'
+                    ? 'Memperbarui notifikasi...'
                     : fcmCapability?.permission === 'granted'
-                    ? 'Sinkronkan Ulang Token Perangkat FCM'
-                    : 'Aktifkan Izin Notifikasi Push FCM'}
+                    ? 'Perbarui Notifikasi di Perangkat Ini'
+                    : 'Izinkan Notifikasi'}
                 </button>
 
                 {/* Alert Type Toggles */}
@@ -1996,7 +2061,7 @@ export const PatientMobileApp: React.FC = () => {
                   >
                     <div>
                       <p className="text-xs font-bold">Antrean Dipanggil</p>
-                      <p className="text-[10px] opacity-75">Alert saat poli memanggil</p>
+                      <p className="text-[10px] opacity-75">Kabar saat poli memanggil</p>
                     </div>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
@@ -2018,7 +2083,7 @@ export const PatientMobileApp: React.FC = () => {
                   >
                     <div>
                       <p className="text-xs font-bold">Hasil Lab Tersedia</p>
-                      <p className="text-[10px] opacity-75">Alert validasi Sp.PK</p>
+                      <p className="text-[10px] opacity-75">Kabar saat hasil siap</p>
                     </div>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
@@ -2031,10 +2096,11 @@ export const PatientMobileApp: React.FC = () => {
                 </div>
               </div>
 
-              {/* Interactive Simulation Buttons */}
+              {/* Tombol simulasi hanya untuk pengembangan; tidak pernah tampil ke pasien. */}
+              {import.meta.env.DEV && (
               <div className="space-y-2">
                 <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
-                  Uji Coba Notifikasi Real-Time Langsung
+                  Uji Coba Notifikasi (mode pengembangan)
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
@@ -2061,6 +2127,7 @@ export const PatientMobileApp: React.FC = () => {
                   </button>
                 </div>
               </div>
+              )}
 
               {/* Notification Inbox List */}
               <div className="space-y-2.5">

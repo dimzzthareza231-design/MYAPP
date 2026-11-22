@@ -1,6 +1,7 @@
 import React from 'react';
 import { PhoneCall, ChevronRight, Smartphone } from 'lucide-react';
 import { BrandLogo } from '../Common/BrandLogo';
+import { NATIONAL_EMERGENCY_NUMBERS, PRIMARY_EMERGENCY_PHONE, toTelHref } from '../../data/hospitalPublicCatalog';
 
 export const EMPLOYEE_PORTAL_URL = 'https://myitaru.ai.studio/portal-karyawan';
 export const STAFF_SIMK_URL = 'https://myitaru.ai.studio/staff/login';
@@ -63,15 +64,26 @@ export const PublicUtilityBar: React.FC<PublicUtilityBarProps> = ({
     <div className="bg-[#082B6B] text-white text-xs py-2 px-4 sm:px-6 lg:px-8 border-b border-white/10">
       <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-4">
-          <a
-            href="tel:1500911"
-            className="inline-flex items-center gap-2 font-semibold text-white hover:text-red-200 transition"
-          >
+          <span className="inline-flex items-center gap-2 font-semibold text-white">
             <span className="inline-flex items-center gap-1 bg-[#DC2626] px-2 py-0.5 rounded font-bold tracking-wide">
-              <PhoneCall className="w-3 h-3" /> IGD 24 JAM
+              <PhoneCall className="w-3 h-3" /> DARURAT
             </span>
-            <span className="font-mono tabular-nums font-bold">1-500-911</span>
-          </a>
+            {PRIMARY_EMERGENCY_PHONE && (
+              <a href={toTelHref(PRIMARY_EMERGENCY_PHONE)} className="font-mono tabular-nums font-bold hover:text-red-200 transition">
+                IGD {PRIMARY_EMERGENCY_PHONE}
+              </a>
+            )}
+            {NATIONAL_EMERGENCY_NUMBERS.map((em) => (
+              <a
+                key={em.number}
+                href={toTelHref(em.number)}
+                title={em.label}
+                className="font-mono tabular-nums font-bold hover:text-red-200 transition"
+              >
+                {em.number}
+              </a>
+            ))}
+          </span>
           <span className="hidden sm:inline text-blue-200">
             MYITARU SIMK · Terintegrasi BPJS VClaim &amp; Kemenkes SatuSehat
           </span>

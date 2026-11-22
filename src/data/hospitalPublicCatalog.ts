@@ -66,6 +66,10 @@ export interface HospitalBranch {
   name: string;
   city: string;
   address: string;
+  /**
+   * Nomor IGD/ambulans cabang. Kosongkan ('') bila belum ada nomor resmi yang terverifikasi;
+   * UI akan menyembunyikannya dan tetap menampilkan nomor darurat nasional 119/112.
+   */
   emergencyPhone: string;
   appointmentPhone: string;
   whatsappPhone: string;
@@ -471,13 +475,38 @@ export const MCU_PACKAGES: MCUPackage[] = [
   }
 ];
 
+/** Nomor darurat nasional Indonesia (selalu ditampilkan di portal publik). */
+export const NATIONAL_EMERGENCY_NUMBERS: Array<{ number: string; label: string }> = [
+  { number: '119', label: 'Ambulans / Gawat Darurat (PSC 119)' },
+  { number: '112', label: 'Panggilan Darurat Nasional' }
+];
+
+/** Nomor IGD utama untuk header/footer; '' = belum dikonfigurasi (UI menyembunyikan). */
+export const PRIMARY_EMERGENCY_PHONE = ''; // TODO: isi nomor IGD resmi rumah sakit
+
+/** Ubah nomor tampilan (mis. "(021) 5098-8800") menjadi href tel:. Mengembalikan '' bila kosong. */
+export function toTelHref(phone: string): string {
+  const trimmed = (phone || '').trim();
+  if (!trimmed) return '';
+  const digits = trimmed.replace(/[^\d+]/g, '');
+  return digits ? `tel:${digits}` : '';
+}
+
+/** Ubah nomor WhatsApp lokal (mis. "0811-1500-911") menjadi tautan https://wa.me/62... */
+export function toWhatsAppHref(phone: string): string {
+  let digits = (phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('0')) digits = `62${digits.slice(1)}`;
+  return `https://wa.me/${digits}`;
+}
+
 export const HOSPITAL_BRANCHES: HospitalBranch[] = [
   {
     id: 'MYI-JKT',
     name: 'MYITARU Pusat (Flagship)',
     city: 'Jakarta Pusat',
     address: 'Jl. Kesehatan Raya No. 88, Menteng, Jakarta Pusat 10310',
-    emergencyPhone: '1-500-911',
+    emergencyPhone: '', // TODO: isi nomor IGD resmi cabang ini (sebelumnya placeholder 1-500-911)
     appointmentPhone: '(021) 5098-8800',
     whatsappPhone: '0811-1500-911',
     bedsCount: 380,
@@ -489,7 +518,7 @@ export const HOSPITAL_BRANCHES: HospitalBranch[] = [
     name: 'MYITARU Karawaci',
     city: 'Tangerang',
     address: 'Jl. Boulevard Medika Kav. 12, Lippo Village, Tangerang 15811',
-    emergencyPhone: '1-500-911',
+    emergencyPhone: '', // TODO: isi nomor IGD resmi cabang ini (sebelumnya placeholder 1-500-911)
     appointmentPhone: '(021) 5460-2200',
     whatsappPhone: '0811-5460-220',
     bedsCount: 240,
@@ -501,7 +530,7 @@ export const HOSPITAL_BRANCHES: HospitalBranch[] = [
     name: 'MYITARU Surabaya',
     city: 'Surabaya',
     address: 'Jl. Mayjen Sungkono No. 105, Gubeng, Surabaya 60281',
-    emergencyPhone: '1-500-911',
+    emergencyPhone: '', // TODO: isi nomor IGD resmi cabang ini (sebelumnya placeholder 1-500-911)
     appointmentPhone: '(031) 5020-7700',
     whatsappPhone: '0811-5020-770',
     bedsCount: 210,

@@ -306,6 +306,80 @@ describe('web publik pasien', () => {
     assert.equal(checkIn.body?.code, 'CHECKIN_DATE_MISMATCH');
   });
 
+  test('ringkasan antrean publik hanya agregat tanpa No. RM, nama, atau ID pasien', async () => {
+    const forbiddenKeys = ['no_rm', 'pasien_nama', 'pasien_nama_masked', 'nama_pasien', 'pasien_id', 'id_pasien', 'sampleTickets'];
+    const collectKeys = (value: unknown, keys = new Set<string>()): Set<string> => {
+      if (Array.isArray(value)) value.forEach((item) => collectKeys(item, keys));
+      else if (value && typeof value === 'object') {
+        for (const [k, v] of Object.entries(value)) {
+          keys.add(k);
+          collectKeys(v, keys);
+        }
+      }
+      return keys;
+    };
+
+    const summary = await call(pub, 'GET', '/api/public/queue-status');
+    assert.equal(summary.status, 200);
+    assert.equal(summary.body.sampleTickets, undefined);
+    assert.ok(Array.isArray(summary.body.poliQueues) && summary.body.poliQueues.length > 0);
+    for (const pq of summary.body.poliQueues) {
+      assert.deepEqual(Object.keys(pq).sort(), ['id', 'kode', 'nama', 'sedangDipanggil', 'totalMenunggu']);
+      assert.equal(typeof pq.totalMenunggu, 'number');
+    }
+    const summaryKeys = collectKeys(summary.body);
+    for (const key of forbiddenKeys) assert.equal(summaryKeys.has(key), false, `kunci terlarang: ${key}`);
+    assert.doesNotMatch(JSON.stringify(summary.body), /RM-\d{6}-\d{4}/);
+
+    const catalog = await call(pub, 'GET', '/api/public/hospital-catalog');
+    assert.doesNotMatch(JSON.stringify(catalog.body.poliQueues), /RM-\d{6}-\d{4}/);
+    assert.equal(catalog.body.emergencyHotline === '1-500-911', false);
+
+    // Pencarian dengan No. RM pasien lain tidak lagi didukung.
+    const byRm = await call(pub, 'GET', '/api/public/queue-status?q=RM-260101-0001');
+    assert.equal(byRm.status, 200);
+    assert.deepEqual(byRm.body.matches, []);
+  });
+
+  test('cek antrean publik memerlukan kode tiket lengkap dan tidak mengembalikan identitas pasien', async () => {
+    const cat = (await call(pub, 'GET', '/api/public/hospital-catalog')).body;
+    const doctor = (cat.doctors ?? cat.data.doctors)[0];
+    const patientName = 'Pasien Privasi Antrean';
+    const booking = await call(pub, 'POST', '/api/patient/appointments', {
+      nama: patientName,
+      tanggal_lahir: '1991-01-01',
+      no_hp: '081200000009',
+      poli_id: doctor.poli_id,
+      poli_nama: doctor.poli,
+      dokter_id: doctor.id,
+      dokter_nama: doctor.nama,
+      tanggal: new Date().toISOString().slice(0, 10),
+      jam_praktek: doctor.jam,
+      penjamin: 'Umum'
+    });
+    assert.equal(booking.status, 201);
+    const { nomor_antrian: ticket, no_rm: rm } = booking.body.booking;
+
+    const lookup = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(ticket)}`);
+    assert.equal(lookup.status, 200);
+    assert.ok(lookup.body.matches.length >= 1);
+    for (const match of lookup.body.matches) {
+      assert.equal(match.nomor_antrian, ticket);
+      for (const key of ['no_rm', 'pasien_nama', 'pasien_nama_masked', 'pasien_id', 'id']) {
+        assert.equal(key in match, false, `kunci terlarang: ${key}`);
+      }
+    }
+    const raw = JSON.stringify(lookup.body);
+    assert.equal(raw.includes(rm), false);
+    assert.equal(raw.includes(patientName), false);
+
+    // Pencarian sebagian (mis. hanya prefiks poli) tidak boleh menampilkan tiket pasien lain.
+    const partial = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(ticket.slice(0, 3))}`);
+    assert.deepEqual(partial.body.matches, []);
+    const byOwnRm = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(rm)}`);
+    assert.deepEqual(byOwnRm.body.matches, []);
+  });
+
   test('pendaftaran tanpa dokter ditolak', async () => {
     assert.equal((await call(pub, 'POST', '/api/patient/appointments', { nama: 'X', tanggal_lahir: '1990-01-01' })).status, 400);
   });
