@@ -66,7 +66,7 @@ interface LocalAuthOptions {
   bootstrapUsers?: LocalAuthBootstrapUser[];
 }
 
-const ROLE_SEEDS = [
+const BOOTSTRAP_ACCOUNTS = [
   { username: 'admin', email: process.env.LOCAL_AUTH_ADMIN_EMAIL?.trim() || 'admin@myitaru.local', nama: 'Administrator SIMK', roleId: 'admin', passwordEnv: 'LOCAL_AUTH_ADMIN_PASSWORD' },
   { username: 'dokter', email: 'dokter@myitaru.local', nama: 'Dokter MYITARU', roleId: 'dokter', passwordEnv: 'LOCAL_AUTH_DOKTER_PASSWORD' },
   { username: 'perawat', email: 'perawat@myitaru.local', nama: 'Perawat MYITARU', roleId: 'perawat', passwordEnv: 'LOCAL_AUTH_PERAWAT_PASSWORD' },
@@ -107,7 +107,7 @@ function isValidPasswordHash(value: string): boolean {
 }
 
 function getBootstrapUsers(): LocalAuthBootstrapUser[] {
-  return ROLE_SEEDS.flatMap(({ passwordEnv, ...account }) => {
+  return BOOTSTRAP_ACCOUNTS.flatMap(({ passwordEnv, ...account }) => {
     const password = process.env[passwordEnv];
     if (!password) return [];
     if (password.length < 12 || password.length > 128) {
@@ -121,8 +121,8 @@ export class LocalAuthService implements LocalAuthProvider {
   private readonly sessionSecret: string;
   private readonly sessionTtlMs: number;
   private readonly bootstrapUsers: LocalAuthBootstrapUser[];
-  private dummySalt = '';
-  private dummyHash: Uint8Array = new Uint8Array(SCRYPT_KEY_LENGTH);
+  private decoySalt = '';
+  private decoyHash: Uint8Array = new Uint8Array(SCRYPT_KEY_LENGTH);
 
   constructor(
     private readonly persistence: PersistenceRepository,
@@ -138,8 +138,8 @@ export class LocalAuthService implements LocalAuthProvider {
   }
 
   async initialize(): Promise<void> {
-    this.dummySalt = randomBytes(16).toString('hex');
-    this.dummyHash = await derivePassword(randomBytes(32).toString('hex'), this.dummySalt);
+    this.decoySalt = randomBytes(16).toString('hex');
+    this.decoyHash = await derivePassword(randomBytes(32).toString('hex'), this.decoySalt);
 
     const existing = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
     const existingById = new Map(existing.map(({ id, data }) => [id, data]));
@@ -200,7 +200,7 @@ export class LocalAuthService implements LocalAuthProvider {
     if (changes.length) await this.persistence.commit(changes);
     const persistedUsers = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
     const provisionedRoles = new Set(persistedUsers.filter(({ data }) => data.aktif).map(({ data }) => data.roleId));
-    const missingRoles = ROLE_SEEDS
+    const missingRoles = BOOTSTRAP_ACCOUNTS
       .filter(({ roleId }) => !provisionedRoles.has(roleId))
       .map(({ roleId, passwordEnv }) => ({ roleId, passwordEnv }));
 
@@ -232,10 +232,10 @@ export class LocalAuthService implements LocalAuthProvider {
         record.username.toLowerCase() === normalizedIdentifier ||
         record.email.toLowerCase() === normalizedIdentifier
       );
-    const salt = user?.passwordSalt || this.dummySalt;
+    const salt = user?.passwordSalt || this.decoySalt;
     const expectedHash = user && isValidPasswordHash(user.passwordHash)
       ? Buffer.from(user.passwordHash, 'hex')
-      : this.dummyHash;
+      : this.decoyHash;
     const actualHash = await derivePassword(password, salt);
     const passwordMatches = expectedHash.length === actualHash.length && timingSafeEqual(expectedHash, actualHash);
 

@@ -1,0 +1,9 @@
+# Web publik pasien MYITARU
+User-agent: *
+Allow: /
+# Halaman aplikasi pasien memerlukan login; tidak perlu diindeks.
+Disallow: /mobile
+Disallow: /api/
+
+# TODO: ganti domain bila domain resmi sudah tersedia.
+Sitemap: https://myitaru-public.myappv1.workers.dev/sitemap.xml

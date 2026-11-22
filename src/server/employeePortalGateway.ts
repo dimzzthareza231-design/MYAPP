@@ -49,15 +49,6 @@ interface EmployeeUserRecord {
   lastHrisSync: string;
 }
 
-interface MfaChallenge {
-  challengeId: string;
-  userId: string;
-  otp: string;
-  authType: 'nip' | 'google';
-  deviceInfo: string;
-  expiresAt: number;
-}
-
 interface GatewaySession {
   token: string;
   userId: string;
@@ -115,7 +106,11 @@ interface ConfigChangeProposal {
   reviewNote?: string;
 }
 
-const DEFAULT_DEMO_OTP = '123456';
+const EMPLOYEE_LOGIN_UNAVAILABLE = {
+  success: false,
+  code: 'EMPLOYEE_LOGIN_UNAVAILABLE',
+  message: 'Login pegawai belum tersedia: integrasi identitas pegawai dan MFA belum dikonfigurasi.'
+} as const;
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -150,29 +145,10 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   // =========================================================================
   // 1. IN-MEMORY ENTERPRISE STORES (SIMK / HRIS / GATEWAY STATE)
   // =========================================================================
-  const usersStore: EmployeeUserRecord[] = HOSPITAL_DIVISIONS.map((div, index) => ({
-    id: `emp-${div.id}`,
-    nip: div.defaultNip,
-    email: `${div.id.replace(/[^a-z0-9]/g, '')}@myitaru.id`,
-    name: div.defaultStaffName,
-    divisionId: div.id,
-    divisionName: div.name,
-    roleTitle: div.sampleRoles[0] || div.name,
-    portalRole: mapPortalRole(div),
-    isClinical: div.isClinical,
-    isAdminCapable: div.isAdminCapable,
-    active: true,
-    strNumber: div.isClinical ? `STR-3171-${100400 + index}` : undefined,
-    strExpiry: div.isClinical ? (index % 3 === 0 ? '2026-06-15' : '2028-11-30') : undefined,
-    sipNumber: div.isClinical ? `SIP-DKI-${2201 + index}/2025` : undefined,
-    sipExpiry: div.isClinical ? '2027-09-20' : undefined,
-    unitLocation: div.name,
-    shiftPattern: div.defaultShift,
-    lastHrisSync: new Date().toISOString()
-  }));
+  // Direktori pegawai diisi dari HRIS/admin; tidak ada akun bawaan.
+  const usersStore: EmployeeUserRecord[] = [];
 
-  // Tantangan MFA & sesi = token bertanda tangan (stateless) agar login tetap jalan di serverless multi-instance.
-  const mfaChallenges = createSignedStore<MfaChallenge>('mfa_', 'challengeId', 10 * 60 * 1000);
+  // Sesi = token bertanda tangan (stateless) agar login tetap jalan di serverless multi-instance.
   const sessions = createSignedStore<GatewaySession>('emp_', 'token', 12 * 60 * 60 * 1000);
   const idempotencyCache = new Map<string, { status: number; body: unknown; createdAt: number }>();
   const rateLimitMap = new Map<string, number[]>();
@@ -300,35 +276,15 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
   };
 
-  let portalAnnouncements = [
-    {
-      id: 'ann-1',
-      title: 'Pembaruan Kebijakan Keamanan PMK 24/2022 & MFA Klinis',
-      category: 'Tata Kelola & Keamanan',
-      priority: 'Penting',
-      publishedAt: '2026-04-02 08:00',
-      author: 'Komite Mutu & Unit SIMK/TI',
-      summary: 'Seluruh tenaga klinis dan pengelola sistem wajib mengaktifkan MFA 6-digit serta menjaga kepatuhan atribut ABAC On-Duty saat mengakses Rekam Medis Elektronik.'
-    },
-    {
-      id: 'ann-2',
-      title: 'Jadwal Uji Kompetensi BHD / ACLS Batch Q2 2026',
-      category: 'Diklat & SDM',
-      priority: 'Info',
-      publishedAt: '2026-04-01 10:30',
-      author: 'Instalasi Pendidikan & Pelatihan',
-      summary: 'Pegawai dengan masa berlaku sertifikat BHD kurang dari 90 hari dapat mendaftar langsung melalui modul Pengetahuan & Diklat.'
-    },
-    {
-      id: 'ann-3',
-      title: 'Pemeliharaan Terjadwal Adapter SATUSEHAT FHIR R4 Minggu Dini Hari',
-      category: 'Operasional TI',
-      priority: 'Info',
-      publishedAt: '2026-03-29 14:15',
-      author: 'Unit SIMK / TI',
-      summary: 'Pengiriman data klinis akan masuk ke Message Queue asinkron dan dikirim otomatis dengan mekanisme retry idempoten tanpa kehilangan transaksi.'
-    }
-  ];
+  const portalAnnouncements: Array<{
+    id: string;
+    title: string;
+    category: string;
+    priority: string;
+    publishedAt: string;
+    author: string;
+    summary: string;
+  }> = [];
 
   // Shift schedule store (3-shift & long-shift with weekly hour calculation)
   const shiftSchedulesStore: Array<{
@@ -342,14 +298,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     hours: number;
     unit: string;
     status: 'Terjadwal' | 'Sedang Bertugas' | 'Selesai' | 'Tukar Pending';
-  }> = [
-    { id: 'sh-1', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-06', dayLabel: 'Senin', shiftType: 'Pagi (07:00-14:00)', hours: 7, unit: 'Unit Bertugas', status: 'Selesai' },
-    { id: 'sh-2', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-07', dayLabel: 'Selasa', shiftType: 'Pagi (07:00-14:00)', hours: 7, unit: 'Unit Bertugas', status: 'Selesai' },
-    { id: 'sh-3', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-08', dayLabel: 'Rabu', shiftType: 'Siang (14:00-21:00)', hours: 7, unit: 'Unit Bertugas', status: 'Sedang Bertugas' },
-    { id: 'sh-4', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-09', dayLabel: 'Kamis', shiftType: 'Siang (14:00-21:00)', hours: 7, unit: 'Unit Bertugas', status: 'Terjadwal' },
-    { id: 'sh-5', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-10', dayLabel: 'Jumat', shiftType: 'Malam (21:00-07:00)', hours: 10, unit: 'Unit Bertugas', status: 'Terjadwal' },
-    { id: 'sh-6', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-11', dayLabel: 'Sabtu', shiftType: 'Libur', hours: 0, unit: 'Istirahat Mingguan', status: 'Terjadwal' }
-  ];
+  }> = [];
 
   const shiftSwapsStore: Array<{
     id: string;
@@ -366,23 +315,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     conflictWarning?: string;
     status: 'Menunggu Atasan Unit' | 'Disetujui' | 'Ditolak';
     createdAt: string;
-  }> = [
-    {
-      id: 'swp-1',
-      requesterName: 'Ns. Siti Fatimah, M.Kep',
-      requesterNip: 'NIP-19840920-015',
-      divisionId: 'keperawatan',
-      fromDate: '2026-04-10',
-      fromShift: 'Malam (21:00-07:00)',
-      targetColleague: 'Ns. Raka Pradipta, S.Kep',
-      toDate: '2026-04-11',
-      toShift: 'Pagi (07:00-14:00)',
-      reason: 'Pertukaran jadwal jaga akhir pekan & menjaga kepatuhan batas 40 jam/minggu',
-      weeklyHoursAfterSwap: 35,
-      status: 'Disetujui',
-      createdAt: '2026-04-05 09:15'
-    }
-  ];
+  }> = [];
 
   const attendanceLogsStore: Array<{
     id: string;
@@ -397,34 +330,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     biometricVerified: boolean;
     note?: string;
     idempotencyKey?: string;
-  }> = [
-    {
-      id: 'att-1',
-      nip: 'GLOBAL',
-      employeeName: 'Presensi Harian Unit',
-      divisionId: 'ALL',
-      timestamp: '2026-04-08 06:54:12',
-      type: 'MASUK',
-      method: 'Geofencing + Biometrik',
-      distanceMeters: 28,
-      withinGeofence: true,
-      biometricVerified: true,
-      note: 'Lobby Utama Gedung A'
-    },
-    {
-      id: 'att-2',
-      nip: 'GLOBAL',
-      employeeName: 'Presensi Harian Unit',
-      divisionId: 'ALL',
-      timestamp: '2026-04-07 14:12:40',
-      type: 'PULANG',
-      method: 'Geofencing + Biometrik',
-      distanceMeters: 34,
-      withinGeofence: true,
-      biometricVerified: true,
-      note: 'Selesai Handover Shift Pagi'
-    }
-  ];
+  }> = [];
 
   const leaveRequestsStore: Array<{
     id: string;
@@ -441,37 +347,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     unitApprovedBy?: string;
     sdmApprovedBy?: string;
     createdAt: string;
-  }> = [
-    {
-      id: 'lv-101',
-      nip: 'NIP-19900308-110',
-      employeeName: 'Ns. Dewi Anggraini, S.Kep',
-      divisionId: 'rawat-inap',
-      type: 'Cuti Tahunan',
-      startDate: '2026-04-20',
-      endDate: '2026-04-22',
-      days: 3,
-      substitute: 'Ns. Rian Kusuma, S.Kep',
-      reason: 'Keperluan keluarga di luar kota',
-      status: 'Menunggu Verifikasi SDM',
-      unitApprovedBy: 'Karu Bangsal Melati',
-      createdAt: '2026-04-06 11:20'
-    },
-    {
-      id: 'lv-102',
-      nip: 'NIP-19890722-201',
-      employeeName: 'apt. Dewi Lestari, S.Farm',
-      divisionId: 'farmasi',
-      type: 'Izin Pelatihan / Seminar',
-      startDate: '2026-04-18',
-      endDate: '2026-04-18',
-      days: 1,
-      substitute: 'apt. Hendri Gunawan, S.Farm',
-      reason: 'Simposium Farmasi Klinis & Stewardship Antibiotik',
-      status: 'Menunggu Atasan Unit',
-      createdAt: '2026-04-07 09:05'
-    }
-  ];
+  }> = [];
 
   const reimbursementsStore: Array<{
     id: string;
@@ -482,28 +358,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     amount: number;
     date: string;
     status: 'Diajukan' | 'Diverifikasi Keuangan' | 'Dibayarkan';
-  }> = [
-    {
-      id: 'rmb-1',
-      nip: 'NIP-19880512-101',
-      employeeName: 'dr. Bima Sakti, Sp.EM',
-      title: 'Resertifikasi ATLS Ikatan Dokter Indonesia',
-      category: 'Diklat / SKP',
-      amount: 3500000,
-      date: '2026-03-28',
-      status: 'Dibayarkan'
-    },
-    {
-      id: 'rmb-2',
-      nip: 'NIP-19900105-501',
-      employeeName: 'Bagas Setiawan, S.Kom., M.TI',
-      title: 'Workshop Keamanan ISO 27001 Fasilitas Kesehatan',
-      category: 'Diklat / SKP',
-      amount: 2250000,
-      date: '2026-04-02',
-      status: 'Diverifikasi Keuangan'
-    }
-  ];
+  }> = [];
 
   const sbarHandoversStore: Array<{
     id: string;
@@ -522,43 +377,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     karuVerified: boolean;
     karuName?: string;
     createdAt: string;
-  }> = [
-    {
-      id: 'sbar-1',
-      unit: 'Ruang Melati Lt. 3 / IGD',
-      divisionId: 'keperawatan',
-      sessionType: 'Bedside Handover',
-      fromShift: 'Shift Pagi (07:00-14:00)',
-      toShift: 'Shift Siang (14:00-21:00)',
-      senderName: 'Ns. Siti Fatimah, M.Kep',
-      receiverName: 'Ns. Dewi Anggraini, S.Kep',
-      patientLabel: 'Tn. Ahmad Subarjo (No. RM: RM-240101-0001) · Bed M-302',
-      situation: 'Post-op apendektomi H+1, nyeri luka operasi VAS 3/10, kesadaran compos mentis.',
-      background: 'Riwayat hipertensi terkontrol, alergi penisilin (tercatat di gelang kuning). Terpasang infus RL 20 tpm.',
-      assessment: 'TD 128/78 mmHg, Nadi 82x/m, Suhu 36.7°C, SpO2 99%, luka kering tanpa rembesan.',
-      recommendation: 'Lanjutkan Ketorolac IV sesuai jadwal pukul 16:00, observasi mobilisasi dini & cek bising usus sore.',
-      karuVerified: true,
-      karuName: 'Karu Unit Rawat Inap',
-      createdAt: '2026-04-08 13:50'
-    },
-    {
-      id: 'sbar-2',
-      unit: 'ICU Dewasa Bed 02',
-      divisionId: 'icu',
-      sessionType: 'Nurse Station (Terjadwal)',
-      fromShift: 'Shift Pagi (07:00-14:00)',
-      toShift: 'Shift Siang (14:00-21:00)',
-      senderName: 'dr. Kevin Wijaya, Sp.An-KIC',
-      receiverName: 'Ns. Pratama, S.Kep',
-      patientLabel: 'Ny. Ratna Kusuma (No. RM: RM-240214-0042) · ICU-02',
-      situation: 'Dalam penyapihan ventilator mode CPAP PEEP 5 FiO2 35%, AGD stabil.',
-      background: 'Pneumonia berat komunitas, terpasang CVC kanan, norepinefrin sudah tap-off sejak 09:00 WIB.',
-      assessment: 'MAP 76 mmHg, SpO2 98%, balans cairan -250 mL/24 jam, skor SOFA turun dari 7 menjadi 4.',
-      recommendation: 'Ulang foto toraks evaluasi pukul 17:00, pertimbangkan ekstubasi bila SBT 2 jam berhasil.',
-      karuVerified: false,
-      createdAt: '2026-04-08 13:58'
-    }
-  ];
+  }> = [];
 
   const helpdeskTicketsStore: Array<{
     id: string;
@@ -574,84 +393,13 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     status: 'Terbuka' | 'Ditangani ITIL L1/L2' | 'Selesai';
     assignedTeam: string;
     createdAt: string;
-  }> = [
-    {
-      id: 'tkt-1',
-      ticketNo: 'INC-2026-0408-01',
-      requesterName: 'dr. Budi Santoso, Sp.PD',
-      requesterContact: 'NIP-19830125-105',
-      divisionName: 'Instalasi Rawat Jalan',
-      category: 'TI / SIMK & MFA',
-      priority: 'P2 - Tinggi (1 Jam)',
-      subject: 'Reset device binding aplikasi mobile karyawan di perangkat baru',
-      description: 'Perlu pembaharuan fingerprint perangkat Android baru untuk akses MFA.',
-      source: 'Portal Karyawan',
-      status: 'Ditangani ITIL L1/L2',
-      assignedTeam: 'Service Desk TI (ISO 27001)',
-      createdAt: '2026-04-08 09:10'
-    },
-    {
-      id: 'tkt-2',
-      ticketNo: 'INC-2026-0408-02',
-      requesterName: 'Ns. Dewi Anggraini, S.Kep',
-      requesterContact: 'NIP-19900308-110',
-      divisionName: 'Instalasi Rawat Inap',
-      category: 'HR & Absensi / Payroll',
-      priority: 'P3 - Normal (4 Jam)',
-      subject: 'Verifikasi lembur shift malam ruang Melati',
-      description: 'Mohon validasi 2 jam lembur perpanjangan handover pasien kritis.',
-      source: 'Portal Karyawan',
-      status: 'Selesai',
-      assignedTeam: 'SDM & Payroll Service',
-      createdAt: '2026-04-07 20:45'
-    }
-  ];
+  }> = [];
 
   const divisionActionState = new Map<string, Record<string, string>>();
 
-  const siemAuditTrail: SiemAuditEntry[] = [
-    {
-      id: 'siem-1',
-      timestamp: '2026-04-08 07:02:14',
-      actorNip: 'NIP-19900105-501',
-      actorName: 'Bagas Setiawan, S.Kom., M.TI',
-      divisionId: 'simrs-ti',
-      eventType: 'GATEWAY_BOOT',
-      resource: 'API Gateway + RBAC/ABAC Engine',
-      decision: 'ALLOW',
-      detail: 'Inisialisasi kebijakan UU PDP, PMK 24/2022, ISO 27001/27799, dan ITIL 4/COBIT 2019 aktif.',
-      ipAddress: '10.24.1.15',
-      hash: 'sha256:9f4c2b81e7a03d91'
-    }
-  ];
+  const siemAuditTrail: SiemAuditEntry[] = [];
 
-  const configChangeProposals: ConfigChangeProposal[] = [
-    {
-      id: 'chg-101',
-      proposedAt: '2026-04-08 09:30:00',
-      proposedBy: 'Bagas Setiawan, S.Kom., M.TI (Unit SIMK/TI)',
-      category: 'ABAC_POLICY',
-      title: 'Aktifkan verifikasi hubungan perawatan (Care Relationship) untuk akses EMR detail',
-      targetKey: 'requireCareRelationshipForPatientRecords',
-      proposedValue: true,
-      justification: 'Memperketat prinsip need-to-know sesuai PMK 24/2022 dan audit SPI Q2 2026.',
-      status: 'PENDING_REVIEW'
-    },
-    {
-      id: 'chg-102',
-      proposedAt: '2026-04-07 15:10:00',
-      proposedBy: 'Dian Puspita, S.Psi., M.M. (SDM & Umum)',
-      category: 'FEATURE_FLAG',
-      title: 'Aktifkan mode absensi offline idempoten untuk seluruh unit',
-      targetKey: 'offline_attendance',
-      proposedValue: true,
-      justification: 'Menjaga kelancaran presensi di area basement & ambulans saat sinyal lemah.',
-      status: 'APPROVED',
-      reviewedAt: '2026-04-07 16:00:00',
-      reviewedBy: 'Siti Rahma, S.H., M.H.Kes (DPO / Hukum & Etik)',
-      reviewNote: 'Disetujui dengan syarat enkripsi lokal & Idempotency-Key aktif.'
-    }
-  ];
+  const configChangeProposals: ConfigChangeProposal[] = [];
 
   const governanceChangelog: Array<{
     id: string;
@@ -661,71 +409,38 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     title: string;
     approvedBy: string;
     summary: string;
-  }> = [
-    {
-      id: 'clog-1',
-      appliedAt: '2026-04-07 16:00:00',
-      proposalId: 'chg-102',
-      category: 'FEATURE_FLAG',
-      title: 'Aktivasi Mode Absensi Offline Idempoten',
-      approvedBy: 'Siti Rahma, S.H., M.H.Kes (DPO / Hukum & Etik)',
-      summary: 'Feature flag offline_attendance diaktifkan dengan proteksi Idempotency-Key.'
-    }
-  ];
+  }> = [];
 
-  const integrationHealthStore = [
-    {
-      id: 'satusehat',
-      name: 'SATUSEHAT Kemenkes (FHIR R4 Adapter)',
-      protocol: 'REST / FHIR R4 Bundle (OAuth2)',
-      status: 'TERHUBUNG',
-      latencyMs: 118,
-      queueDepth: 3,
-      idempotencyRate: '100%',
-      lastSync: '2026-04-08 13:55:00'
-    },
-    {
-      id: 'bpjs-vclaim',
-      name: 'BPJS Kesehatan Middleware (VClaim & Antrean JKN)',
-      protocol: 'REST + HMAC-SHA256 + LZ-String',
-      status: 'TERHUBUNG',
-      latencyMs: 142,
-      queueDepth: 0,
-      idempotencyRate: '100%',
-      lastSync: '2026-04-08 13:57:12'
-    },
-    {
-      id: 'hris-core',
-      name: 'HRIS Kepegawaian & Payroll Inti',
-      protocol: 'Internal mTLS / Sync Queue',
-      status: 'TERHUBUNG',
-      latencyMs: 34,
-      queueDepth: 0,
-      idempotencyRate: '100%',
-      lastSync: '2026-04-08 13:50:00'
-    },
-    {
-      id: 'async-mq',
-      name: 'Async Message Queue (Notifikasi & Retry Idempoten)',
-      protocol: 'Worker Queue (Dead-Letter Guarded)',
-      status: 'TERHUBUNG',
-      latencyMs: 19,
-      queueDepth: 2,
-      idempotencyRate: '100%',
-      lastSync: '2026-04-08 13:58:01'
-    }
-  ];
+  // Status integrasi apa adanya: belum ada konektor yang terpasang, jadi tidak ada latensi/sinkronisasi.
+  const integrationHealthStore: Array<{
+    id: string;
+    name: string;
+    protocol: string;
+    status: 'BELUM DIKONFIGURASI';
+    latencyMs: number | null;
+    queueDepth: number | null;
+    idempotencyRate: string | null;
+    lastSync: string | null;
+  }> = [
+    { id: 'satusehat', name: 'SATUSEHAT Kemenkes (FHIR R4 Adapter)', protocol: 'REST / FHIR R4 Bundle (OAuth2)' },
+    { id: 'bpjs-vclaim', name: 'BPJS Kesehatan Middleware (VClaim & Antrean JKN)', protocol: 'REST + HMAC-SHA256 + LZ-String' },
+    { id: 'hris-core', name: 'HRIS Kepegawaian & Payroll Inti', protocol: 'Internal mTLS / Sync Queue' },
+    { id: 'async-mq', name: 'Async Message Queue (Notifikasi & Retry Idempoten)', protocol: 'Worker Queue (Dead-Letter Guarded)' }
+  ].map((item) => ({
+    ...item,
+    status: 'BELUM DIKONFIGURASI' as const,
+    latencyMs: null,
+    queueDepth: null,
+    idempotencyRate: null,
+    lastSync: null
+  }));
 
   const landingAnalyticsStore = {
-    totalVisits: 1842,
-    byDevice: { Android: 964, iOS: 418, Desktop: 460 },
-    byCta: { playstore: 612, appstore: 285, qr: 214, deeplink: 198, mobile_web: 341, portal: 512 },
-    byUtmSource: { intranet: 740, qrcode_lobby: 520, whatsapp_hr: 392, direct: 190 },
-    recentEvents: [
-      { timestamp: '2026-04-08 13:45', device: 'Android', cta: 'playstore', utmSource: 'whatsapp_hr' },
-      { timestamp: '2026-04-08 13:32', device: 'Desktop', cta: 'qr', utmSource: 'intranet' },
-      { timestamp: '2026-04-08 13:18', device: 'iOS', cta: 'mobile_web', utmSource: 'qrcode_lobby' }
-    ] as Array<{ timestamp: string; device: string; cta: string; utmSource: string }>
+    totalVisits: 0,
+    byDevice: { Android: 0, iOS: 0, Desktop: 0 },
+    byCta: { playstore: 0, appstore: 0, qr: 0, deeplink: 0, mobile_web: 0, portal: 0 },
+    byUtmSource: { intranet: 0, qrcode_lobby: 0, whatsapp_hr: 0, direct: 0 },
+    recentEvents: [] as Array<{ timestamp: string; device: string; cta: string; utmSource: string }>
   };
 
   // =========================================================================
@@ -880,233 +595,14 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   // =========================================================================
   // 3. AUTHENTICATION & MANDATORY MFA OTP
   // =========================================================================
-  app.post('/api/gateway/auth/login', (req, res) => {
-    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
-      return res.status(503).json({
-        success: false,
-        code: 'EMPLOYEE_IDENTITY_NOT_CONFIGURED',
-        message: 'Integrasi identitas pegawai belum dikonfigurasi; autentikasi demo dinonaktifkan.'
-      });
-    }
-
-    const { identifier, divisionId, authType, googleEmail, googleName, deviceInfo } = req.body || {};
-
-    let user: EmployeeUserRecord | undefined;
-    if (divisionId) {
-      user = usersStore.find((u) => u.divisionId === divisionId);
-    }
-    if (!user && identifier) {
-      const cleanId = String(identifier).trim().toLowerCase();
-      user = usersStore.find(
-        (u) => u.nip.toLowerCase() === cleanId || u.email.toLowerCase() === cleanId || u.name.toLowerCase().includes(cleanId)
-      );
-    }
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'NIP / Email pegawai tidak terdaftar di direktori HRIS. Gunakan pemilih divisi cepat atau hubungi SDM.'
-      });
-    }
-
-    if (!user.active) {
-      appendSiemLog({
-        actorNip: user.nip,
-        actorName: user.name,
-        divisionId: user.divisionId,
-        eventType: 'LOGIN_ATTEMPT',
-        resource: 'Portal Karyawan Auth',
-        decision: 'DENY',
-        detail: 'Akun pegawai dalam status dinonaktifkan.',
-        ipAddress: req.ip
-      });
-      return res.status(403).json({
-        success: false,
-        message: 'Akun pegawai dinonaktifkan oleh Administrator / Bagian SDM.'
-      });
-    }
-
-    const effectiveName = authType === 'google' && googleName ? `${googleName} (${user.divisionName})` : user.name;
-    const effectiveEmail = authType === 'google' && googleEmail ? googleEmail : user.email;
-
-    const needsMfa = abacPolicies.mfaRequiredForClinicalAndAdmin && (user.isClinical || user.isAdminCapable);
-
-    if (needsMfa) {
-      const challengeId = mfaChallenges.issue({
-        challengeId: '',
-        userId: user.id,
-        otp: DEFAULT_DEMO_OTP,
-        authType: authType === 'google' ? 'google' : 'nip',
-        deviceInfo: String(deviceInfo || 'Browser Web Portal MYITARU'),
-        expiresAt: Date.now() + 10 * 60 * 1000
-      });
-
-      appendSiemLog({
-        actorNip: user.nip,
-        actorName: effectiveName,
-        divisionId: user.divisionId,
-        eventType: 'MFA_CHALLENGE_ISSUED',
-        resource: `MFA (${authType === 'google' ? 'Google SSO' : 'NIP'})`,
-        decision: 'CHALLENGE',
-        detail: `Tantangan OTP 6-digit diterbitkan untuk role sensitif (${user.divisionName}).`,
-        ipAddress: req.ip
-      });
-
-      return res.json({
-        success: true,
-        mfaRequired: true,
-        challengeId,
-        demoOtpHint: DEFAULT_DEMO_OTP,
-        userPreview: {
-          nip: user.nip,
-          name: effectiveName,
-          email: effectiveEmail,
-          divisionId: user.divisionId,
-          divisionName: user.divisionName,
-          roleTitle: user.roleTitle,
-          isClinical: user.isClinical,
-          isAdminCapable: user.isAdminCapable
-        }
-      });
-    }
-
-    // Standard role direct issue (MFA optional)
-    let token = '';
-    const session: GatewaySession = {
-      token,
-      userId: user.id,
-      nip: user.nip,
-      name: effectiveName,
-      email: effectiveEmail,
-      divisionId: user.divisionId,
-      divisionName: user.divisionName,
-      roleTitle: user.roleTitle,
-      portalRole: user.portalRole,
-      isClinical: user.isClinical,
-      isAdminCapable: user.isAdminCapable,
-      mfaVerified: true,
-      authType: authType === 'google' ? 'google' : 'nip',
-      deviceFingerprint: `DEV-${user.nip.slice(-3)}-${String(deviceInfo || 'WEB').slice(0, 12).toUpperCase()}`,
-      abac: {
-        onDuty: true,
-        unitMatch: true,
-        careRelationship: true,
-        breakGlassActive: false,
-        breakGlassReason: ''
-      },
-      createdAt: new Date().toISOString()
-    };
-    token = sessions.issue(session);
-
-    appendSiemLog({
-      actorNip: user.nip,
-      actorName: effectiveName,
-      divisionId: user.divisionId,
-      eventType: 'GATEWAY_LOGIN',
-      resource: 'Portal Karyawan',
-      decision: 'ALLOW',
-      detail: `Login berhasil (${session.authType.toUpperCase()}) dengan Device Binding ${session.deviceFingerprint}.`,
-      ipAddress: req.ip
-    });
-
-    return res.json({
-      success: true,
-      mfaRequired: false,
-      token,
-      session
-    });
+  // Login & MFA pegawai: belum ada penyedia identitas/MFA pegawai yang terpasang. Kedua endpoint
+  // menolak dengan 503; mesin sesi (signed store) tetap dipakai saat integrasi nyata tersedia.
+  app.post('/api/gateway/auth/login', (_req, res) => {
+    return res.status(503).json(EMPLOYEE_LOGIN_UNAVAILABLE);
   });
 
-  app.post('/api/gateway/auth/verify-mfa', (req, res) => {
-    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
-      return res.status(503).json({
-        success: false,
-        code: 'EMPLOYEE_IDENTITY_NOT_CONFIGURED',
-        message: 'MFA pegawai belum dikonfigurasi; autentikasi demo dinonaktifkan.'
-      });
-    }
-
-    const { challengeId, otp, deviceName } = req.body || {};
-    const challenge = mfaChallenges.get(String(challengeId || ''));
-
-    if (!challenge || challenge.expiresAt < Date.now()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Sesi tantangan MFA tidak ditemukan atau sudah kedaluwarsa.'
-      });
-    }
-
-    const cleanOtp = String(otp || '').trim();
-    if (cleanOtp !== challenge.otp && cleanOtp !== DEFAULT_DEMO_OTP) {
-      const user = usersStore.find((u) => u.id === challenge.userId);
-      appendSiemLog({
-        actorNip: user?.nip || 'UNKNOWN',
-        actorName: user?.name || 'Unknown User',
-        divisionId: user?.divisionId || 'unknown',
-        eventType: 'MFA_VERIFY_FAILED',
-        resource: 'MFA 6-Digit OTP',
-        decision: 'DENY',
-        detail: 'Kode OTP MFA tidak valid.',
-        ipAddress: req.ip
-      });
-      return res.status(401).json({
-        success: false,
-        message: `Kode OTP salah. Gunakan kode demo ${DEFAULT_DEMO_OTP}.`
-      });
-    }
-
-    const user = usersStore.find((u) => u.id === challenge.userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'Pengguna tidak ditemukan.' });
-    }
-
-    mfaChallenges.delete(challenge.challengeId);
-    let token = '';
-    const deviceFingerprint = `BND-${user.nip.slice(-3)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-
-    const session: GatewaySession = {
-      token,
-      userId: user.id,
-      nip: user.nip,
-      name: user.name,
-      email: user.email,
-      divisionId: user.divisionId,
-      divisionName: user.divisionName,
-      roleTitle: user.roleTitle,
-      portalRole: user.portalRole,
-      isClinical: user.isClinical,
-      isAdminCapable: user.isAdminCapable,
-      mfaVerified: true,
-      authType: challenge.authType,
-      deviceFingerprint,
-      abac: {
-        onDuty: true,
-        unitMatch: true,
-        careRelationship: true,
-        breakGlassActive: false,
-        breakGlassReason: ''
-      },
-      createdAt: new Date().toISOString()
-    };
-
-    token = sessions.issue(session);
-
-    appendSiemLog({
-      actorNip: user.nip,
-      actorName: user.name,
-      divisionId: user.divisionId,
-      eventType: 'MFA_VERIFIED_LOGIN',
-      resource: 'Portal Karyawan + Device Binding',
-      decision: 'ALLOW',
-      detail: `MFA 6-digit terverifikasi (${challenge.authType.toUpperCase()}). Perangkat terikat: ${deviceName || challenge.deviceInfo} [${deviceFingerprint}].`,
-      ipAddress: req.ip
-    });
-
-    return res.json({
-      success: true,
-      token,
-      session
-    });
+  app.post('/api/gateway/auth/verify-mfa', (_req, res) => {
+    return res.status(503).json(EMPLOYEE_LOGIN_UNAVAILABLE);
   });
 
   app.post('/api/gateway/auth/logout', (req, res) => {
@@ -1136,7 +632,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!session) return;
 
     const division = HOSPITAL_DIVISIONS.find((d) => d.id === session.divisionId) || HOSPITAL_DIVISIONS[0];
-    const user = usersStore.find((u) => u.id === session.userId) || usersStore[0];
+    const user = usersStore.find((u) => u.id === session.userId) || null;
     const access = evaluateAccess(session, division);
 
     res.json({
@@ -1202,48 +698,22 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   app.get('/api/gateway/profile', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
-    const user = usersStore.find((u) => u.id === session.userId) || usersStore[0];
+    const user = usersStore.find((u) => u.id === session.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'Pegawai tidak ditemukan di direktori HRIS.' });
     const division = HOSPITAL_DIVISIONS.find((d) => d.id === session.divisionId) || HOSPITAL_DIVISIONS[0];
+
+    // Hanya data yang tercatat di direktori; kontrak & lisensi tanpa sumber HRIS tidak dikarang.
+    const licenses = [
+      user.strNumber ? { id: 'str', name: 'Surat Tanda Registrasi (STR)', number: user.strNumber, expiry: user.strExpiry || null } : null,
+      user.sipNumber ? { id: 'sip', name: 'Surat Izin Praktik (SIP)', number: user.sipNumber, expiry: user.sipExpiry || null } : null
+    ].filter((item): item is NonNullable<typeof item> => item !== null);
 
     res.json({
       success: true,
       user,
       division,
-      contracts: {
-        statusKepegawaian: 'Pegawai Tetap RS',
-        tanggalMasuk: '2021-03-01',
-        masaKerja: '5 Tahun 1 Bulan',
-        penilaianTerakhir: '92.4 (Sangat Baik)'
-      },
-      licenses: division.isClinical
-        ? [
-            {
-              id: 'lic-1',
-              name: 'Surat Tanda Registrasi (STR)',
-              number: user.strNumber || 'STR-3171-100991',
-              expiry: user.strExpiry || '2026-06-15',
-              daysRemaining: user.strExpiry === '2026-06-15' ? 68 : 940,
-              status: user.strExpiry === '2026-06-15' ? 'Segera Perpanjang (<90 Hari)' : 'Aktif'
-            },
-            {
-              id: 'lic-2',
-              name: 'Surat Izin Praktik (SIP)',
-              number: user.sipNumber || 'SIP-DKI-2201/2025',
-              expiry: user.sipExpiry || '2027-09-20',
-              daysRemaining: 530,
-              status: 'Aktif'
-            }
-          ]
-        : [
-            {
-              id: 'lic-3',
-              name: 'Sertifikat K3 & PPI Klinik Utama',
-              number: `K3-MYITARU-${user.nip.slice(-3)}`,
-              expiry: '2027-12-31',
-              daysRemaining: 632,
-              status: 'Aktif'
-            }
-          ]
+      contracts: null,
+      licenses
     });
   });
 
@@ -1305,7 +775,13 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!session) return;
 
     const { fromDate, fromShift, targetColleague, toDate, toShift, reason, extraHours } = req.body || {};
-    const projectedHours = 38 + Number(extraHours || 0);
+    if (!fromDate || !fromShift || !targetColleague || !toDate || !toShift) {
+      return res.status(400).json({ success: false, message: 'Tanggal, shift asal/tujuan, dan rekan pengganti wajib diisi.' });
+    }
+    const scheduledHours = shiftSchedulesStore
+      .filter((s) => s.nip === session.nip)
+      .reduce((acc, s) => acc + s.hours, 0);
+    const projectedHours = scheduledHours + Number(extraHours || 0);
     const conflictWarning =
       abacPolicies.enforce40HourShiftCap && projectedHours > 40
         ? `Peringatan UU Ketenagakerjaan: Total jam kerja menjadi ${projectedHours} jam/minggu (melebihi batas 40 jam). Memerlukan justifikasi & persetujuan Atasan Unit.`
@@ -1316,12 +792,12 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       requesterName: session.name,
       requesterNip: session.nip,
       divisionId: session.divisionId,
-      fromDate: String(fromDate || '2026-04-09'),
-      fromShift: String(fromShift || 'Siang (14:00-21:00)'),
-      targetColleague: String(targetColleague || 'Rekan Satu Unit'),
-      toDate: String(toDate || '2026-04-11'),
-      toShift: String(toShift || 'Pagi (07:00-14:00)'),
-      reason: String(reason || 'Penyesuaian jadwal jaga unit'),
+      fromDate: String(fromDate),
+      fromShift: String(fromShift),
+      targetColleague: String(targetColleague),
+      toDate: String(toDate),
+      toShift: String(toShift),
+      reason: String(reason || ''),
       weeklyHoursAfterSwap: projectedHours,
       conflictWarning,
       status: 'Menunggu Atasan Unit' as const,
@@ -1371,7 +847,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!session) return;
 
     const logs = attendanceLogsStore.filter(
-      (l) => l.nip === 'GLOBAL' || l.nip === session.nip || l.divisionId === session.divisionId
+      (l) => l.nip === session.nip || l.divisionId === session.divisionId
     );
 
     res.json({
@@ -1379,12 +855,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       geofence: HOSPITAL_GEOFENCE,
       offlineModeEnabled: featureFlags.offline_attendance.enabled,
       logs,
-      monthlySummary: {
-        hadirTepatWaktu: 19,
-        terlambat: 0,
-        lemburJam: 6.5,
-        statusRekap: 'Memenuhi Target Kehadiran'
-      }
+      monthlySummary: null
     });
   });
 
@@ -1393,8 +864,11 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!session) return;
 
     const { type, lat, lng, biometricVerified, note, isOfflineReplay } = req.body || {};
-    const userLat = typeof lat === 'number' ? lat : HOSPITAL_GEOFENCE.lat;
-    const userLng = typeof lng === 'number' ? lng : HOSPITAL_GEOFENCE.lng;
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      return res.status(400).json({ success: false, message: 'Koordinat lokasi presensi wajib disertakan.' });
+    }
+    const userLat = lat;
+    const userLng = lng;
     const distanceMeters = haversineMeters(userLat, userLng, HOSPITAL_GEOFENCE.lat, HOSPITAL_GEOFENCE.lng);
     const withinGeofence = distanceMeters <= HOSPITAL_GEOFENCE.radiusMeters;
 
@@ -1426,7 +900,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       method: isOfflineReplay ? ('Offline Sync (Idempoten)' as const) : ('Geofencing + Biometrik' as const),
       distanceMeters,
       withinGeofence,
-      biometricVerified: Boolean(biometricVerified ?? true),
+      biometricVerified: biometricVerified === true,
       note: String(note || (withinGeofence ? 'Area Kampus MYITARU' : 'Koreksi / Tugas Luar')),
       idempotencyKey: typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'] : undefined
     };
@@ -1476,8 +950,8 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         timestamp: String(item.capturedAt || new Date().toISOString().replace('T', ' ').slice(0, 19)),
         type: (item.type || 'MASUK') as 'MASUK' | 'PULANG' | 'LEMBUR' | 'KOREKSI',
         method: 'Offline Sync (Idempoten)' as const,
-        distanceMeters: Number(item.distanceMeters || 42),
-        withinGeofence: true,
+        distanceMeters: Number(item.distanceMeters) || 0,
+        withinGeofence: Number.isFinite(Number(item.distanceMeters)) && Number(item.distanceMeters) <= HOSPITAL_GEOFENCE.radiusMeters,
         biometricVerified: true,
         note: String(item.note || 'Sinkronisasi antrean offline'),
         idempotencyKey: idem || undefined
@@ -1511,12 +985,8 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!session) return;
     res.json({
       success: true,
-      balances: {
-        tahunanTotal: 12,
-        tahunanTerpakai: 3,
-        tahunanSisa: 9,
-        izinDiklatTersisa: 5
-      },
+      // Saldo cuti berasal dari HRIS yang belum terhubung.
+      balances: null,
       requests: leaveRequestsStore
     });
   });
@@ -1526,17 +996,20 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!session) return;
 
     const { type, startDate, endDate, days, substitute, reason } = req.body || {};
+    if (!type || !startDate || !endDate || !Number(days)) {
+      return res.status(400).json({ success: false, message: 'Jenis cuti, tanggal mulai/selesai, dan jumlah hari wajib diisi.' });
+    }
     const newLeave = {
       id: 'lv-' + Date.now(),
       nip: session.nip,
       employeeName: session.name,
       divisionId: session.divisionId,
-      type: (type || 'Cuti Tahunan') as 'Cuti Tahunan' | 'Cuti Sakit' | 'Izin Pelatihan / Seminar' | 'Izin Khusus',
-      startDate: String(startDate || '2026-04-24'),
-      endDate: String(endDate || '2026-04-25'),
-      days: Number(days || 2),
-      substitute: String(substitute || 'Rekan Pengganti Unit'),
-      reason: String(reason || 'Keperluan pribadi'),
+      type: type as 'Cuti Tahunan' | 'Cuti Sakit' | 'Izin Pelatihan / Seminar' | 'Izin Khusus',
+      startDate: String(startDate),
+      endDate: String(endDate),
+      days: Number(days),
+      substitute: String(substitute || ''),
+      reason: String(reason || ''),
       status: 'Menunggu Atasan Unit' as const,
       createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
     };
@@ -1592,28 +1065,10 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const session = requireGatewaySession(req, res);
     if (!session) return;
 
-    const baseSalary = session.isClinical ? 12500000 : session.isAdminCapable ? 10500000 : 7800000;
-    const jasaMedis = session.isClinical ? 6400000 : 1850000;
-    const tunjanganShift = 1150000;
-    const bpjsKesehatanPot = 180000;
-    const pph21 = Math.round((baseSalary + jasaMedis) * 0.04);
-    const takeHomePay = baseSalary + jasaMedis + tunjanganShift - bpjsKesehatanPot - pph21;
-
     res.json({
       success: true,
-      currentSlip: {
-        periode: 'Maret 2026',
-        nip: session.nip,
-        nama: session.name,
-        unit: session.divisionName,
-        gajiPokok: baseSalary,
-        jasaPelayanan: jasaMedis,
-        tunjanganShiftLembur: tunjanganShift,
-        potonganBpjs: bpjsKesehatanPot,
-        potonganPajak: pph21,
-        takeHomePay,
-        statusPembayaran: 'Sudah Ditransfer (Mandiri Payroll)'
-      },
+      // Slip gaji berasal dari sistem payroll yang belum terhubung.
+      currentSlip: null,
       reimbursements: reimbursementsStore
     });
   });
@@ -1623,13 +1078,16 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!session) return;
 
     const { title, category, amount } = req.body || {};
+    if (!title || !category || !(Number(amount) > 0)) {
+      return res.status(400).json({ success: false, message: 'Judul, kategori, dan nominal klaim wajib diisi.' });
+    }
     const newItem = {
       id: 'rmb-' + Date.now(),
       nip: session.nip,
       employeeName: session.name,
-      title: String(title || 'Klaim Pelatihan / Operasional'),
-      category: (category || 'Diklat / SKP') as 'Diklat / SKP' | 'Perjalanan Dinas' | 'Kesehatan Pegawai' | 'Operasional Unit',
-      amount: Number(amount || 500000),
+      title: String(title),
+      category: category as 'Diklat / SKP' | 'Perjalanan Dinas' | 'Kesehatan Pegawai' | 'Operasional Unit',
+      amount: Number(amount),
       date: new Date().toISOString().split('T')[0],
       status: 'Diajukan' as const
     };
@@ -1638,12 +1096,17 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   });
 
   // Training & SOP
-  const trainingCatalog = [
-    { id: 'trn-1', code: 'SOP-PPI-01', type: 'SOP Wajib', title: 'Kepatuhan Kebersihan Tangan 6 Langkah & 5 Momen WHO', unit: 'Komite PPI', status: 'Dibaca & Disetujui', enrolled: true, skp: 2 },
-    { id: 'trn-2', code: 'DIKLAT-BHD-26', type: 'Pelatihan Wajib', title: 'Bantuan Hidup Dasar (BHD) & Code Blue Response 2026', unit: 'Instalasi Diklat', status: 'Terjadwal 19 Apr 2026', enrolled: false, skp: 4 },
-    { id: 'trn-3', code: 'SEC-UUPDP-26', type: 'Pelatihan Kepatuhan', title: 'Pelindungan Data Pribadi Pasien (UU PDP & PMK 24/2022)', unit: 'Hukum & SIMK/TI', status: 'Sertifikat Aktif', enrolled: true, skp: 3 },
-    { id: 'trn-4', code: 'SOP-SBAR-04', type: 'SOP Klinis', title: 'Komunikasi Efektif SBAR Saat Serah Terima Shift & Konsul DPJP', unit: 'Komite Mutu & Keperawatan', status: 'Wajib Tahunan', enrolled: false, skp: 2 }
-  ];
+  // Katalog pelatihan diisi oleh unit Diklat; tidak ada katalog bawaan.
+  const trainingCatalog: Array<{
+    id: string;
+    code: string;
+    type: string;
+    title: string;
+    unit: string;
+    status: string;
+    enrolled: boolean;
+    skp: number;
+  }> = [];
 
   app.get('/api/gateway/training', (req, res) => {
     const session = requireGatewaySession(req, res);
@@ -1651,10 +1114,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     res.json({
       success: true,
       courses: trainingCatalog,
-      certificates: [
-        { name: 'Bantuan Hidup Dasar (BHD)', validUntil: '2027-01-15', status: 'Aktif' },
-        { name: 'Keamanan Informasi Kesehatan (PMK 24/2022)', validUntil: '2026-06-30', status: 'Perlu Resertifikasi' }
-      ]
+      certificates: []
     });
   });
 
@@ -1678,25 +1138,10 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
     res.json({
       success: true,
-      individualKpi: {
-        periode: 'Kuartal I 2026',
-        totalScore: 93.2,
-        predikat: 'Sangat Baik (Memenuhi Target RS)',
-        dimensions: [
-          { label: 'Kuantitas & Beban Kerja Unit', score: 94, target: 90, weight: '30%' },
-          { label: 'Kualitas & Akurasi Dokumentasi', score: 95, target: 90, weight: '30%' },
-          { label: 'Perilaku Profesional & Disiplin Shift', score: 92, target: 85, weight: '25%' },
-          { label: 'Kepatuhan K3 / PPI & Risiko Jabatan', score: 91, target: 88, weight: '15%' }
-        ]
-      },
+      // KPI & OPPE berasal dari sistem penilaian kinerja yang belum terhubung.
+      individualKpi: null,
       oppeVisible: access.oppeAccess,
-      doctorOppeMetrics: access.oppeAccess
-        ? [
-            { doctor: 'dr. Budi Santoso, Sp.PD', ksm: 'Penyakit Dalam', alosDays: 3.8, mortalityRate: '0.4%', fornasCompliance: '97.2%', resumeUnder24h: '98.5%', status: 'Memenuhi Standar' },
-            { doctor: 'dr. Bambang Alamsyah, Sp.B', ksm: 'Bedah Umum', alosDays: 3.1, mortalityRate: '0.2%', fornasCompliance: '95.8%', resumeUnder24h: '96.4%', status: 'Memenuhi Standar' },
-            { doctor: 'dr. Hendra Wijaya, Sp.JP', ksm: 'Kardiologi', alosDays: 4.2, mortalityRate: '0.8%', fornasCompliance: '98.1%', resumeUnder24h: '99.0%', status: 'Memenuhi Standar' }
-          ]
-        : []
+      doctorOppeMetrics: []
     });
   });
 
@@ -1775,14 +1220,9 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     res.json({
       success: true,
       tickets: helpdeskTicketsStore,
-      emergencyContacts: [
-        { label: 'Service Desk TI / SIMK (24 Jam)', phone: 'Ext. 1100 / 0811-900-1100', sla: 'Respon < 15 Menit (P1)' },
-        { label: 'HR Helpdesk & Payroll', phone: 'Ext. 1205', sla: 'Hari Kerja 08:00 - 16:30' },
-        { label: 'Code Blue / Kegawatdaruratan Internal', phone: 'Ext. 911', sla: 'Segera < 3 Menit' },
-        { label: 'Data Protection Officer (UU PDP)', phone: 'dpo@myitaru.id', sla: 'Eskalasi Keamanan Data' }
-      ],
+      // Kontak unit diisi oleh fasilitas; tidak ada nomor bawaan.
+      emergencyContacts: [],
       faqs: [
-        { q: 'Bagaimana jika kode OTP MFA tidak diterima saat login?', a: 'Pada lingkungan demo gunakan kode 123456, atau klik "Buat Tiket TI" bila perangkat baru belum terikat.' },
         { q: 'Apakah absensi tetap tercatat di area basement / ambulans tanpa sinyal?', a: 'Ya. Aktifkan Mode Offline di aplikasi mobile karyawan. Data disimpan terenkripsi dan otomatis disinkronkan menggunakan Idempotency-Key.' },
         { q: 'Mengapa tombol Rekam Medis terkunci saat Off-Duty?', a: 'Kebijakan ABAC (Attribute-Based Access Control) sesuai PMK 24/2022 membatasi akses EMR di luar jadwal jaga, kecuali menggunakan protokol darurat Break-Glass yang diaudit.' }
       ]
@@ -1796,7 +1236,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
     const ticket = {
       id: 'tkt-' + Date.now(),
-      ticketNo: `INC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      ticketNo: `INC-${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
       requesterName: String(requesterName || session?.name || 'Karyawan RS'),
       requesterContact: String(requesterContact || session?.nip || 'Eksternal'),
       divisionName: String(divisionName || session?.divisionName || 'Umum / Pengunjung Landing Page'),
@@ -1857,26 +1297,15 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const worklist = div.specificModules.map((modName, idx) => {
       const itemId = `${div.id}-task-${idx + 1}`;
       const isClinicalLocked = div.isClinical && access.emrAccess === 'LOCKED';
-      const defaultStatus = isClinicalLocked
-        ? 'Terkunci (ABAC)'
-        : idx === 0
-        ? 'Prioritas Aktif'
-        : idx === 1
-        ? 'Dalam Proses'
-        : 'Terpantau Baik';
+      const defaultStatus = isClinicalLocked ? 'Terkunci (ABAC)' : 'Belum Ada Data';
 
       return {
         id: itemId,
         moduleTitle: modName,
-        referenceCode: `${div.id.toUpperCase().slice(0, 4)}-2026-0${idx + 1}`,
+        referenceCode: `${div.id.toUpperCase().slice(0, 4)}-${String(idx + 1).padStart(2, '0')}`,
         assignedUnit: div.name,
         sensitivity: div.abacSensitivity,
-        metricSummary:
-          idx === 0
-            ? `${4 + ((div.name.length + idx) % 12)} item memerlukan verifikasi`
-            : idx === 1
-            ? `SLA Unit: 98.${(div.name.length % 7) + 2}% terpenuhi`
-            : 'Sinkron API Gateway (FHIR/HRIS)',
+        metricSummary: null,
         status: divisionActions[itemId] || defaultStatus,
         requiresEmrClearance: div.isClinical
       };
@@ -1886,11 +1315,8 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       success: true,
       division: div,
       access,
-      kpis: [
-        { label: 'Kepatuhan Standar Unit', value: '97.8%', hint: 'Target >= 95%' },
-        { label: 'Beban Tugas Shift Berjalan', value: `${6 + (div.name.length % 9)} Item`, hint: div.defaultShift },
-        { label: 'Kesiapan SDM Terjadwal', value: '100% Terpenuhi', hint: 'Batas 40 jam/minggu aman' }
-      ],
+      // KPI unit belum memiliki sumber data; jangan tampilkan angka karangan.
+      kpis: [],
       worklist
     });
   });
@@ -1981,7 +1407,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         divisionsCovered: HOSPITAL_DIVISIONS.length,
         activeSessions: sessions.size,
         pendingApprovals: configChangeProposals.filter((p) => p.status === 'PENDING_REVIEW').length + leaveRequestsStore.filter((l) => l.status !== 'Disetujui Final' && l.status !== 'Ditolak').length,
-        complianceScore: '99.4%'
+        complianceScore: null
       }
     });
   });
@@ -2171,22 +1597,13 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const target = integrationHealthStore.find((i) => i.id === integrationId);
     if (!target) return res.status(404).json({ success: false, message: 'Layanan integrasi tidak ditemukan.' });
 
-    target.latencyMs = Math.max(14, Math.round(target.latencyMs * 0.75));
-    target.queueDepth = 0;
-    target.lastSync = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
-    appendSiemLog({
-      actorNip: session.nip,
-      actorName: session.name,
-      divisionId: session.divisionId,
-      eventType: 'INTEGRATION_IDEMPOTENT_TEST',
-      resource: target.name,
-      decision: 'ALLOW',
-      detail: `Uji koneksi & retry queue idempoten berhasil (${target.latencyMs}ms, antrean kosong).`,
-      ipAddress: req.ip
+    // Belum ada konektor nyata yang bisa diuji; jangan laporkan uji koneksi palsu.
+    return res.status(503).json({
+      success: false,
+      code: 'INTEGRATION_NOT_CONFIGURED',
+      message: `${target.name} belum dikonfigurasi.`,
+      integration: target
     });
-
-    res.json({ success: true, integration: target });
   });
 
   // =========================================================================

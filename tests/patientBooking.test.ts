@@ -4,11 +4,11 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { createTestPatient, createTestPatientSession, type TestPatient } from './helpers/patientFixtures';
 
 process.env.VERCEL = '1'; // cegah server.ts menjalankan listen() sendiri
 process.env.SESSION_SECRET = 'test-secret';
 process.env.NODE_ENV = 'test';
-process.env.ALLOW_INSECURE_DEMO_AUTH = 'true';
 delete process.env.GEMINI_API_KEY;
 
 type Res = { status: number; body: any };
@@ -37,6 +37,8 @@ async function call(base: string, method: string, path: string, body?: unknown, 
 
 let sessionToken = '';
 let doctor: any;
+let patient: TestPatient;
+let otherPatient: TestPatient;
 
 function bookingBody(extra: Record<string, unknown> = {}) {
   return {
@@ -67,12 +69,9 @@ before(async () => {
   core = await listen(app);
   pub = await listen(publicApp);
 
-  const verified = await call(pub, 'POST', '/api/patient/verify', {
-    no_rm: 'RM-260101-0001',
-    tanggal_lahir: '1985-04-23'
-  });
-  assert.equal(verified.status, 200);
-  sessionToken = verified.body.token;
+  patient = await createTestPatient(core, 'test-token', { nama: 'Ny. Pasien Sesi Uji' });
+  otherPatient = await createTestPatient(core, 'test-token', { nama: 'Tn. Pasien Lain Uji' });
+  sessionToken = createTestPatientSession(patient.no_rm);
   const catalog = (await call(pub, 'GET', '/api/public/hospital-catalog')).body;
   doctor = (catalog.doctors ?? catalog.data.doctors)[0];
 });
@@ -82,8 +81,8 @@ after(() => servers.forEach((s) => s.close()));
 describe('booking janji temu aplikasi pasien', () => {
   test('booking pasien terdaftar tanpa token sesi ditolak 401', async () => {
     const r = await call(pub, 'POST', '/api/patient/appointments', bookingBody({
-      no_rm: 'RM-260101-0001',
-      tanggal_lahir: '1985-04-23',
+      no_rm: patient.no_rm,
+      tanggal_lahir: patient.tanggal_lahir,
       no_hp: '081200000000'
     }));
     assert.equal(r.status, 401);
@@ -97,7 +96,7 @@ describe('booking janji temu aplikasi pasien', () => {
 
   test('token sesi untuk No. RM pasien lain ditolak 403', async () => {
     const r = await call(pub, 'POST', '/api/patient/appointments', bookingBody({
-      no_rm: 'RM-260102-0002',
+      no_rm: otherPatient.no_rm,
       nama: 'Pasien Lain'
     }), sessionToken);
     assert.equal(r.status, 403);
@@ -110,8 +109,8 @@ describe('booking janji temu aplikasi pasien', () => {
       tanggal_lahir: '2000-01-01'
     }), sessionToken);
     assert.equal(r.status, 201);
-    assert.equal(r.body.booking.no_rm, 'RM-260101-0001');
-    assert.equal(r.body.booking.nama, 'Ny. Siti Rahmawati');
+    assert.equal(r.body.booking.no_rm, patient.no_rm);
+    assert.equal(r.body.booking.nama, patient.nama);
     assert.match(r.body.booking.qr_value, /^MYITARU1\./);
 
     const dossier = await call(pub, 'GET', '/api/patient/dossier', undefined, sessionToken);
@@ -132,13 +131,56 @@ describe('kartu QR pasien', () => {
     assert.equal(r.status, 200);
     const qr: string = r.body.qr_value;
     assert.match(qr, /^MYITARU1\./);
-    assert.equal(qr.includes('RM-260101-0001'), false);
-    assert.equal(qr.includes('Siti'), false);
+    assert.equal(qr.includes(patient.no_rm), false);
+    assert.equal(qr.includes('Pasien'), false);
     const ttl = Date.parse(r.body.expires_at) - Date.now();
     assert.ok(ttl > 0 && ttl <= 10 * 60 * 1000);
 
     const resolved = await call(core, 'POST', '/api/v1/patient-qr/resolve', { token: qr }, 'test-token');
     assert.equal(resolved.status, 200);
-    assert.equal(resolved.body.patient.no_rm, 'RM-260101-0001');
+    assert.equal(resolved.body.patient.no_rm, patient.no_rm);
+  });
+});
+
+describe('login pasien', () => {
+  test('login No. RM + tanggal lahir dan Google ditolak 503 sampai penyedia OTP tersedia', async () => {
+    for (const path of ['/api/patient/verify', '/api/patient/google-session']) {
+      const r = await call(pub, 'POST', path, { no_rm: patient.no_rm, tanggal_lahir: patient.tanggal_lahir, email: 'x@test.local' });
+      assert.equal(r.status, 503);
+      assert.equal(r.body?.code, 'PATIENT_LOGIN_UNAVAILABLE');
+      assert.equal(r.body?.message, 'Login pasien belum tersedia');
+      assert.equal(r.body?.token, undefined);
+    }
+  });
+
+  test('endpoint simulasi notifikasi pasien sudah dihapus', async () => {
+    const r = await call(pub, 'POST', '/api/patient/notifications/test', { type: 'lab_ready' }, sessionToken);
+    assert.equal(r.status, 404);
+  });
+});
+
+describe('dossier pasien hanya dari data tersimpan', () => {
+  test('pasien tanpa data klinis menerima array kosong / null, bukan data karangan', async () => {
+    const fresh = await createTestPatient(core, 'test-token', { nama: 'Pasien Dossier Kosong' });
+    const r = await call(pub, 'GET', '/api/patient/dossier', undefined, createTestPatientSession(fresh.no_rm));
+    assert.equal(r.status, 200);
+    const d = r.body.dossier;
+    assert.equal(d.patient.no_rm, fresh.no_rm);
+    assert.deepEqual(d.activeQueues, []);
+    assert.deepEqual(d.medications, []);
+    assert.deepEqual(d.labRadResults, []);
+    assert.deepEqual(d.allergies, []);
+    assert.deepEqual(d.problemList, []);
+    assert.equal(d.vitalsLatest, null);
+    assert.equal(d.clinicalResume, null);
+    assert.equal(d.inpatientStay, null);
+    assert.deepEqual(d.billing.items, []);
+    assert.equal(d.billing.totalBiaya, 0);
+    assert.equal(d.billing.status, 'Belum Ada Tagihan');
+  });
+
+  test('sesi untuk No. RM yang tidak tersimpan tidak menghasilkan dossier', async () => {
+    const r = await call(pub, 'GET', '/api/patient/dossier', undefined, createTestPatientSession('RM-TIDAK-ADA'));
+    assert.equal(r.status, 404);
   });
 });

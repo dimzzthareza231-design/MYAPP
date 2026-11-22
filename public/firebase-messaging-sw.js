@@ -20,7 +20,7 @@ messaging.onBackgroundMessage((payload) => {
   const title =
     notification.title ||
     data.title ||
-    'MYITARU SIMK';
+    'MYITARU';
 
   const body =
     notification.body ||
@@ -29,7 +29,7 @@ messaging.onBackgroundMessage((payload) => {
 
   const targetUrl =
     data.url ||
-    (data.type === 'lab_ready' ? '/mobile?tab=hasil' : '/mobile?tab=beranda');
+    (data.type === 'lab_ready' ? '/mobile/hasil/lab' : '/mobile/beranda');
 
   const options = {
     body,

@@ -139,28 +139,3 @@ CREATE TABLE gizi_supplement_tracking (
     efek_samping TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA
-INSERT INTO gizi_assessment (id_assessment, id_pasien, id_kunjungan, tanggal_assessment, jenis_screening, tinggi_badan_cm, berat_badan_kg, lingkar_lengan_cm, lingkar_perut_cm, skor_screening, status_gizi, risiko_gizi, alergi_makanan, preferensi_makanan, keluhan_gi, catatan, dinutrisi) VALUES
-('GA-001', 'P1', 'K-01', '2026-08-01 09:00:00', 'MUST', 165.0, 55.0, 24.5, 80.0, 2.0, 'Gizi Baik', 'Sedang', '["Seafood"]', '["Ayam"]', 'Mual', 'Perlu observasi', 'U-NUT-01');
-
-INSERT INTO gizi_diet_prescription (id_prescription, id_assessment, id_pasien, id_kunjungan, jenis_diet, kalori_harian_kkal, protein_gram, lemak_gram, karbohidrat_gram, serat_gram, natrium_mg, cairan_ml, frekuensi_makan, pantangan, tanggal_mulai, status) VALUES
-('GDP-001', 'GA-001', 'P1', 'K-01', 'Diet Rendah Garam', 1800, 60.0, 40.0, 250.0, 25.0, 1500.0, 1500, '3x makan utama + 2x selingan', 'Garam berlebih, makanan kaleng', '2026-08-01', 'Active');
-
-INSERT INTO gizi_menu_template (id_menu, kode_menu, nama_menu, jenis_diet, waktu_makan, kalori_kkal, protein_gram, lemak_gram, karbohidrat_gram, deskripsi) VALUES
-('MNU-001', 'M-PG-01', 'Nasi Tim Ayam Jamur', '["Diet Biasa", "Diet Rendah Garam"]', 'Pagi', 450, 15.0, 12.0, 60.0, 'Nasi tim dengan dada ayam rebus dan jamur merang');
-
-INSERT INTO gizi_intake_monitoring (id_intake, id_pasien, id_kunjungan, tanggal, waktu_makan, menu_diberikan, porsi_dihabiskan_persen, kalori_aktual_kkal, catatan) VALUES
-('GIM-001', 'P1', 'K-01', '2026-08-01', 'Pagi', 'Nasi Tim Ayam Jamur', 75, 337, 'Pasien merasa kenyang');
-
-INSERT INTO gizi_education (id_education, id_pasien, id_kunjungan, topik, materi, metode, tanggal_edukasi, pemahaman_pasien) VALUES
-('GED-001', 'P1', 'K-01', 'Edukasi Diet Hipertensi', 'Pentingnya membatasi asupan natrium dan menghindari makanan olahan.', 'Konseling Individual', '2026-08-01 10:30:00', 'Baik');
-
-INSERT INTO gizi_anthropometry (id_anthro, id_pasien, tanggal_ukur, berat_badan_kg, tinggi_badan_cm) VALUES
-('GAN-001', 'P1', '2026-08-01', 55.0, 165.0);
-
-INSERT INTO gizi_order_to_kitchen (id_order, id_pasien, id_kunjungan, tanggal_order, waktu_makan, jenis_diet, menu, catatan_khusus, status) VALUES
-('GOK-001', 'P1', 'K-01', '2026-08-01 06:00:00', 'Pagi', 'Diet Rendah Garam', '["Nasi Tim Ayam Jamur"]', 'Tanpa MSG', 'Served');
-
-INSERT INTO gizi_supplement_tracking (id_track, id_pasien, id_kunjungan, nama_supplement, dosis, frekuensi, tanggal_mulai, kepatuhan) VALUES
-('GST-001', 'P1', 'K-01', 'Vitamin B Complex', '1 tablet', '1x1', '2026-08-01', 'Baik');

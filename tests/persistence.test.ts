@@ -7,93 +7,13 @@ import {
   HybridAdapter,
   MemoryPersistenceRepository,
   type CloudPersistenceRepository,
-  type OutboxEntry,
   type PersistenceChange,
   type PersistenceEntity,
   type PersistenceHealth,
   type PersistenceRepository,
-  type PrimaryPersistenceRepository,
   type StoredRecord
 } from '../src/server/databaseAdapter';
-
-class FakePrimaryRepository implements PrimaryPersistenceRepository {
-  readonly mode = 'mysql' as const;
-  private readonly records = new Map<PersistenceEntity, Map<string, unknown>>();
-  private readonly outbox: OutboxEntry[] = [];
-  private nextOutboxId = 1;
-
-  constructor(private readonly online = true) {
-    for (const entity of [
-      'patients', 'registrations', 'queues', 'emr_soap', 'prescriptions',
-      'billings', 'qr_tokens', 'audit_logs', 'beds', 'inventory',
-      'documents', 'bookings', 'system_data'
-    ] as const) {
-      this.records.set(entity, new Map());
-    }
-  }
-
-  async health(): Promise<PersistenceHealth> {
-    return {
-      mode: this.mode,
-      mysqlConnected: this.online,
-      firebaseConnected: false,
-      persistentReady: this.online,
-      pendingSync: this.outbox.length
-    };
-  }
-
-  async get<T>(entity: PersistenceEntity, id: string): Promise<T | null> {
-    if (!this.online) throw new Error('simulated MySQL outage');
-    return (this.records.get(entity)?.get(id) as T | undefined) ?? null;
-  }
-
-  async list<T>(entity: PersistenceEntity): Promise<Array<StoredRecord<T>>> {
-    if (!this.online) throw new Error('simulated MySQL outage');
-    return [...(this.records.get(entity) || new Map())].map(([id, data]) => ({
-      id,
-      data: structuredClone(data) as T
-    }));
-  }
-
-  async commit(changes: PersistenceChange[]): Promise<void> {
-    if (!this.online) throw new Error('simulated MySQL outage');
-    for (const change of changes) {
-      const entityRecords = this.records.get(change.entity)!;
-      if (change.data === null) entityRecords.delete(change.id);
-      else entityRecords.set(change.id, structuredClone(change.data));
-    }
-  }
-
-  async commitWithOutbox(localChanges: PersistenceChange[], cloudChanges: PersistenceChange[]): Promise<void> {
-    await this.commit(localChanges);
-    for (const change of cloudChanges) {
-      this.outbox.push({ ...structuredClone(change), outboxId: this.nextOutboxId++ });
-    }
-  }
-
-  async getPendingOutbox(limit: number): Promise<OutboxEntry[]> {
-    return this.outbox.slice(0, limit).map((entry) => structuredClone(entry));
-  }
-
-  async markOutboxSynced(ids: number[]): Promise<void> {
-    const synced = new Set(ids);
-    for (let index = this.outbox.length - 1; index >= 0; index -= 1) {
-      if (synced.has(this.outbox[index].outboxId)) this.outbox.splice(index, 1);
-    }
-  }
-
-  async markOutboxFailed(): Promise<void> {}
-
-  async commitImportedBookings(changes: PersistenceChange[]): Promise<void> {
-    await this.commit(changes);
-  }
-
-  async pendingCount(): Promise<number> {
-    return this.outbox.length;
-  }
-
-  async close(): Promise<void> {}
-}
+import { FakePrimaryRepository } from './helpers/fakePersistence';
 
 class FakeCloudRepository implements CloudPersistenceRepository {
   readonly mode = 'firebase' as const;
@@ -239,13 +159,11 @@ describe('integrasi Express dengan persistence', () => {
     const previousEnv = {
       vercel: process.env.VERCEL,
       nodeEnv: process.env.NODE_ENV,
-      sessionSecret: process.env.SESSION_SECRET,
-      demoAuth: process.env.ALLOW_INSECURE_DEMO_AUTH
+      sessionSecret: process.env.SESSION_SECRET
     };
     process.env.VERCEL = '1';
     process.env.NODE_ENV = 'test';
     process.env.SESSION_SECRET = 'persistence-integration-test-secret';
-    process.env.ALLOW_INSECURE_DEMO_AUTH = 'true';
     const durableStore = new FakePrimaryRepository();
     const token = 'persistence-test-token';
     const auth = {
@@ -387,8 +305,6 @@ describe('integrasi Express dengan persistence', () => {
       else process.env.NODE_ENV = previousEnv.nodeEnv;
       if (previousEnv.sessionSecret === undefined) delete process.env.SESSION_SECRET;
       else process.env.SESSION_SECRET = previousEnv.sessionSecret;
-      if (previousEnv.demoAuth === undefined) delete process.env.ALLOW_INSECURE_DEMO_AUTH;
-      else process.env.ALLOW_INSECURE_DEMO_AUTH = previousEnv.demoAuth;
     }
   });
 });

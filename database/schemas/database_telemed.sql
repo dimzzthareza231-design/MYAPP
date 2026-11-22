@@ -119,38 +119,3 @@ CREATE TABLE telemed_rating (
     tanggal_rating DATETIME NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA
-INSERT INTO telemed_jenis_konsul (id_jenis, nama_jenis, durasi_menit, tarif) VALUES
-('JK-001', 'Konsultasi Umum (Video)', 15, 100000.00),
-('JK-002', 'Konsultasi Spesialis (Video)', 20, 250000.00),
-('JK-003', 'Konsultasi Follow-Up (Chat)', 15, 75000.00);
-
-INSERT INTO telemed_janji_temu (id_janji, id_pasien, id_dokter, id_jenis, tanggal_janji, durasi_menit, status, catatan_pasien, link_video, room_id) VALUES
-('JT-001', 'P-001', 'DR-001', 'JK-001', '2026-08-03 10:00:00', 15, 'Completed', 'Demam 3 hari', 'https://meet.telemed.com/room-123', 'room-123'),
-('JT-002', 'P-002', 'DR-002', 'JK-002', '2026-08-04 14:00:00', 20, 'Scheduled', 'Nyeri dada', 'https://meet.telemed.com/room-456', 'room-456');
-
-INSERT INTO telemed_session (id_session, id_janji, id_pasien, id_dokter, tanggal_mulai, tanggal_selesai, durasi_aktual_menit, jenis_sesi, status) VALUES
-('SES-001', 'JT-001', 'P-001', 'DR-001', '2026-08-03 10:00:00', '2026-08-03 10:15:00', 15, 'Video', 'Ended');
-
-INSERT INTO telemed_chat_message (id_message, id_session, sender_id, sender_type, content) VALUES
-('MSG-001', 'SES-001', 'P-001', 'Patient', 'Selamat pagi dok'),
-('MSG-002', 'SES-001', 'DR-001', 'Doctor', 'Pagi bapak, mari kita mulai videonya');
-
-INSERT INTO telemed_prescription (id_prescription, id_session, id_pasien, id_dokter, tanggal_resep, items, diagnosis, status) VALUES
-('PRES-001', 'SES-001', 'P-001', 'DR-001', '2026-08-03 10:15:00', '[{"obat": "Paracetamol 500mg", "dosis": "3x1", "frekuensi": "Setelah makan", "durasi": "3 hari", "catatan": "Bila demam"}]', 'Fever', 'Signed');
-
-INSERT INTO telemed_remote_monitoring (id_monitoring, id_pasien, device_type, device_id, reading_value, unit, recorded_at, alert_triggered) VALUES
-('RM-001', 'P-001', 'Heart Rate', 'Watch-01', 85.00, 'bpm', '2026-08-02 08:00:00', FALSE),
-('RM-002', 'P-001', 'SpO2', 'Watch-01', 98.00, '%', '2026-08-02 08:00:00', FALSE),
-('RM-003', 'P-002', 'Blood Pressure', 'Tensimeter-02', 150.00, 'mmHg', '2026-08-02 09:00:00', TRUE);
-
-INSERT INTO telemed_medical_record (id_record, id_session, id_pasien, id_dokter, subjective, objective, assessment, plan, diagnosis, kode_icd10) VALUES
-('MR-001', 'SES-001', 'P-001', 'DR-001', 'Pasien mengeluh demam 3 hari', 'Suhu terpantau via monitoring 38.5C', 'Observasi febris', 'Paracetamol 3x1', 'Fever', 'R50.9');
-
-INSERT INTO telemed_payment (id_payment, id_janji, id_pasien, jumlah, metode_bayar, status, paid_at) VALUES
-('PAY-001', 'JT-001', 'P-001', 100000.00, 'E-Wallet', 'Paid', '2026-08-03 09:50:00'),
-('PAY-002', 'JT-002', 'P-002', 250000.00, 'Virtual Account', 'Pending', NULL);
-
-INSERT INTO telemed_rating (id_rating, id_session, id_pasien, id_dokter, rating, komentar, tanggal_rating) VALUES
-('RAT-001', 'SES-001', 'P-001', 'DR-001', 5, 'Dokter sangat ramah dan jelas penjelasannya', '2026-08-03 10:20:00');

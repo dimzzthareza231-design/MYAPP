@@ -18,7 +18,17 @@ export function makeConfig(target: AppTarget) {
     build: {
       outDir: isPublic ? 'dist/public' : 'dist/core',
       emptyOutDir: true,
-      rollupOptions: { input: path.resolve(__dirname, isPublic ? 'public.html' : 'index.html') },
+      rollupOptions: {
+        input: path.resolve(__dirname, isPublic ? 'public.html' : 'index.html'),
+        // Web publik: seedData (mis. initSeedData() yang menulis data master ke localStorage) hanya boleh
+        // ikut bila export-nya benar-benar dipakai (aplikasi pasien), bukan karena di-import tidak langsung
+        // oleh katalog publik di halaman landing.
+        ...(isPublic && {
+          treeshake: {
+            moduleSideEffects: (id: string) => !/[\\/]src[\\/]data[\\/]seedData\.ts$/.test(id),
+          },
+        }),
+      },
     },
     plugins: [
       react(),
@@ -26,18 +36,44 @@ export function makeConfig(target: AppTarget) {
       // PWA hanya untuk aplikasi pasien.
       isPublic && VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'logo-myitaru.png', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        includeAssets: ['favicon.ico', 'logo-myitaru.png', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'robots.txt', 'sitemap.xml'],
         manifest: {
           id: '/',
-          name: 'MYITARU SIMK · App Pasien',
+          name: 'MYITARU · Aplikasi Pasien',
           short_name: 'MYITARU',
-          description: 'Portal resmi layanan kesehatan MYITARU SIMK dan aplikasi mobile pasien untuk cek antrean, jadwal dokter, hasil lab, dan rekam medis.',
+          description: 'Aplikasi pasien MYITARU untuk melihat jadwal dokter, memantau nomor antrean, dan melihat hasil pemeriksaan.',
+          lang: 'id',
+          dir: 'ltr',
+          categories: ['medical', 'health'],
           theme_color: '#0B3D91',
           background_color: '#ffffff',
           display: 'standalone',
           orientation: 'portrait-primary',
           start_url: '/mobile',
           scope: '/',
+          shortcuts: [
+            {
+              name: 'Jadwal Dokter',
+              short_name: 'Jadwal',
+              description: 'Lihat jadwal dokter dan buat janji temu',
+              url: '/mobile/jadwal',
+              icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+            },
+            {
+              name: 'Antrean Saya',
+              short_name: 'Antrean',
+              description: 'Pantau nomor antrean kunjungan Anda',
+              url: '/mobile/beranda',
+              icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+            },
+            {
+              name: 'Hasil Pemeriksaan',
+              short_name: 'Hasil',
+              description: 'Lihat hasil laboratorium, resume medis, dan obat',
+              url: '/mobile/hasil/lab',
+              icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+            },
+          ],
           icons: [
             {
               src: '/pwa-192x192.png',
@@ -61,9 +97,11 @@ export function makeConfig(target: AppTarget) {
         },
         workbox: {
           navigateFallback: 'public.html',
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml)$/],
           maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
-          globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,jpg,webp,svg,woff,woff2}'],
+          // Jangan precache gambar sosial (hanya untuk crawler).
+          globIgnores: ['**/og-image.jpg'],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

@@ -171,36 +171,3 @@ CREATE TABLE satusehat_sync_log (
     triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     retry_count INT DEFAULT 0
 );
-
--- DUMMY DATA INSERTION
-
-INSERT INTO satusehat_config (id_config, environment, base_url, client_id, client_secret, organization_id, location_id) VALUES 
-('CFG-001', 'Staging', 'https://api-satusehat-stg.dto.kemkes.go.id', 'client-stg-12345', 'secret-stg-abcdef', 'ORG-100123', 'LOC-500456');
-
-INSERT INTO satusehat_patient_mapping (id_mapping, id_pasien, satusehat_patient_id, nik, sync_status) VALUES
-('PM-001', 'P1', 'P-10001', '3171234567890001', 'Synced'),
-('PM-002', 'P2', 'P-10002', '3171234567890002', 'Synced'),
-('PM-003', 'P3', NULL, '3171234567890003', 'Failed');
-
-INSERT INTO satusehat_encounter (id_encounter, id_kunjungan, satusehat_encounter_id, satusehat_patient_id, encounter_class, status, period_start, location_id, sync_status) VALUES
-('ENC-001', 'K-001', 'E-20001', 'P-10001', 'ambulatory', 'finished', '2026-08-01 08:30:00', 'LOC-500456', 'Synced'),
-('ENC-002', 'K-002', NULL, 'P-10002', 'emergency', 'in-progress', '2026-08-02 09:15:00', 'LOC-500456', 'Not-Synced');
-
-INSERT INTO satusehat_condition (id_condition, id_encounter, satusehat_condition_id, code_system, code_value, display_name, clinical_status, verification_status, sync_status) VALUES
-('COND-001', 'ENC-001', 'C-30001', 'ICD-10', 'A09', 'Infectious gastroenteritis', 'active', 'confirmed', 'Synced'),
-('COND-002', 'ENC-002', NULL, 'ICD-10', 'A90', 'Dengue fever', 'active', 'provisional', 'Not-Synced');
-
-INSERT INTO satusehat_observation (id_observation, id_encounter, category, code_loinc, code_display, value_quantity, value_unit, status, sync_status) VALUES
-('OBS-001', 'ENC-001', 'vital-signs', '8480-6', 'Systolic blood pressure', 120, 'mmHg', 'final', 'Synced'),
-('OBS-002', 'ENC-001', 'vital-signs', '8462-4', 'Diastolic blood pressure', 80, 'mmHg', 'final', 'Synced');
-
-INSERT INTO satusehat_medication_statement (id_medication, id_encounter, kode_kfa, nama_obat, dosis, rute, frekuensi, status, sync_status) VALUES
-('MED-001', 'ENC-001', 'KFA-939023', 'Paracetamol 500mg', '500 mg', 'Oral', '3x1', 'active', 'Synced');
-
-INSERT INTO satusehat_immunization (id_immunization, id_pasien, vaccine_code, vaccine_name, occurrence_datetime, dose_number, status, sync_status) VALUES
-('IMM-001', 'P1', 'KFA-849021', 'COVID-19 Sinovac', '2021-08-15 10:00:00', 1, 'completed', 'Synced');
-
-INSERT INTO satusehat_sync_log (id_log, resource_type, resource_id, action, satusehat_id, http_status, success, error_message, duration_ms) VALUES
-('LOG-001', 'Patient', 'P1', 'Create', 'P-10001', 201, TRUE, NULL, 450),
-('LOG-002', 'Patient', 'P3', 'Create', NULL, 400, FALSE, 'Invalid NIK format', 320),
-('LOG-003', 'Encounter', 'ENC-001', 'Create', 'E-20001', 201, TRUE, NULL, 510);

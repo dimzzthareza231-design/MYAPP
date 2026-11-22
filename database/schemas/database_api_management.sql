@@ -93,29 +93,3 @@ CREATE TABLE api_documentation (
     changelog TEXT,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA
-INSERT INTO api_client (id_client, nama_client, deskripsi, api_key, api_secret, owner_email, status, ip_whitelist) VALUES 
-('CLI-001', 'Mobile App V1', 'Official Mobile App', 'ak_live_123456789', 'sk_live_abcdef123456', 'dev@myitaru.com', 'Active', '["192.168.1.0/24"]'),
-('CLI-002', 'Partner Portal', 'Third-party integration', 'ak_live_987654321', 'sk_live_654321fedcba', 'partner@example.com', 'Active', '[]');
-
-INSERT INTO api_endpoint (id_endpoint, path, method, versi, deskripsi, kategori) VALUES 
-('EP-001', '/api/v1/patients', 'GET', 'v1', 'Get list of patients', 'Patient'),
-('EP-002', '/api/v1/appointments', 'POST', 'v1', 'Create new appointment', 'Appointment');
-
-INSERT INTO api_request_log (id_log, id_client, id_endpoint, request_url, request_method, response_status, response_time_ms, ip_address, timestamp) VALUES 
-('REQ-001', 'CLI-001', 'EP-001', '/api/v1/patients', 'GET', 200, 45, '10.0.0.1', '2026-08-02 10:00:00'),
-('REQ-002', 'CLI-002', 'EP-002', '/api/v1/appointments', 'POST', 201, 120, '10.0.0.2', '2026-08-02 10:05:00');
-
-INSERT INTO api_rate_limit_log (id_log, id_client, timestamp, requests_count, limit_exceeded) VALUES 
-('RL-001', 'CLI-001', '2026-08-02 10:00:00', 50, FALSE),
-('RL-002', 'CLI-002', '2026-08-02 11:00:00', 10005, TRUE);
-
-INSERT INTO api_webhook (id_webhook, id_client, event_type, callback_url, secret, is_active) VALUES 
-('WH-001', 'CLI-002', 'appointment.scheduled', 'https://partner.example.com/webhooks/appointments', 'whsec_123456', TRUE);
-
-INSERT INTO api_webhook_delivery (id_delivery, id_webhook, event_type, payload, response_status, delivered_at, status) VALUES 
-('WHD-001', 'WH-001', 'appointment.scheduled', '{"id": "APT-123", "status": "Scheduled"}', 200, '2026-08-02 10:05:05', 'Delivered');
-
-INSERT INTO api_documentation (id_doc, id_endpoint, judul, deskripsi, response_example) VALUES 
-('DOC-001', 'EP-001', 'Get Patients List', 'Returns a paginated list of patients', '{"data": [{"id": "PAT-123", "name": "John Doe"}], "meta": {"total": 1}}');

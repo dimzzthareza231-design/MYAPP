@@ -244,27 +244,3 @@ CREATE TABLE rme_document_attachment (
     diupload_oleh VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA INSERTION
-INSERT INTO rme_allergy_list (id_allergy, id_pasien, jenis_allergen, nama_allergen, reaksi, tanggal_diketahui, status) VALUES
-('AL-001', 'P1', 'Drug', 'Penicillin', '[{"reaction": "Urticaria", "severity": "Severe"}]', '2020-01-15', 'Active'),
-('AL-002', 'P1', 'Food', 'Seafood', '[{"reaction": "Itching", "severity": "Mild"}]', '2015-05-10', 'Active');
-
-INSERT INTO rme_problem_list (id_problem, id_pasien, kode_icd10, nama_problem, kategori, status, severity, tanggal_onset) VALUES
-('PR-001', 'P1', 'E11.9', 'Type 2 Diabetes Mellitus', 'Diagnosis', 'Active', 'Moderate', '2022-03-10'),
-('PR-002', 'P1', 'I10', 'Essential (primary) hypertension', 'Diagnosis', 'Active', 'Moderate', '2021-06-20');
-
-INSERT INTO rme_medication_history (id_medication, id_pasien, nama_obat, dosis, rute, frekuensi, status, tanggal_mulai) VALUES
-('MH-001', 'P1', 'Metformin', '500 mg', 'Oral', '2x1', 'Active', '2022-03-15'),
-('MH-002', 'P1', 'Amlodipine', '5 mg', 'Oral', '1x1', 'Active', '2021-06-25');
-
-INSERT INTO rme_vital_signs (id_vital, id_pasien, tekanan_darah_sistolik, tekanan_darah_diastolik, nadi, suhu_celsius, respirasi_rate, spo2, tinggi_badan_cm, berat_badan_kg, bmi, tanggal_catat) VALUES
-('VS-001', 'P1', 130, 85, 78, 36.5, 18, 98, 170.0, 75.0, 25.9, '2026-08-01 08:00:00'),
-('VS-002', 'P1', 125, 80, 75, 36.6, 16, 99, 170.0, 74.5, 25.8, '2026-07-01 09:30:00');
-
-INSERT INTO rme_timeline_event (id_event, id_pasien, event_type, event_title, event_description, event_date) VALUES
-('TL-001', 'P1', 'Registration', 'Pendaftaran Rawat Jalan', 'Pasien mendaftar di Poli Penyakit Dalam', '2026-08-01 07:30:00'),
-('TL-002', 'P1', 'Vital-Sign', 'Pemeriksaan Tanda Vital', 'TD: 130/85 mmHg, Nadi: 78x/mnt', '2026-08-01 08:00:00'),
-('TL-003', 'P1', 'Consultation', 'Konsultasi Dokter', 'Pemeriksaan rutin DM dan Hipertensi', '2026-08-01 08:30:00'),
-('TL-004', 'P1', 'Prescription', 'Resep Obat Baru', 'Metformin 500mg, Amlodipine 5mg', '2026-08-01 08:45:00');
-

@@ -33,15 +33,43 @@
         }
       })();
     </script>
-    <title>Web Publik MYITARU</title>
-    <meta name="description" content="MYITARU - Sistem informasi manajemen dan rekam medis elektronik terintegrasi." />
-    <meta property="og:title" content="MYITARU SIMK" />
-    <meta property="og:description" content="MYITARU SIMK - Portal layanan kesehatan, aplikasi pasien, portal karyawan, dan rekam medis elektronik terintegrasi." />
+    <!-- TODO: ganti SITE_URL (https://myitaru-public.myappv1.workers.dev) bila domain resmi sudah tersedia;
+         perbarui juga public/robots.txt dan public/sitemap.xml. -->
+    <title>MYITARU — Jadwal Dokter, Pendaftaran Online &amp; Cek Antrean Pasien</title>
+    <meta name="description" content="Situs resmi pasien MYITARU: lihat jadwal dokter, daftar poliklinik secara online, cek nomor antrean, dan akses Aplikasi Pasien dari ponsel." />
+    <meta name="color-scheme" content="light" />
+    <link rel="canonical" href="https://myitaru-public.myappv1.workers.dev/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="id_ID" />
+    <meta property="og:site_name" content="MYITARU" />
+    <meta property="og:title" content="MYITARU — Jadwal Dokter, Pendaftaran Online &amp; Cek Antrean" />
+    <meta property="og:description" content="Lihat jadwal dokter, daftar poliklinik secara online, dan pantau nomor antrean Anda dari ponsel." />
+    <meta property="og:url" content="https://myitaru-public.myappv1.workers.dev/" />
+    <meta property="og:image" content="https://myitaru-public.myappv1.workers.dev/og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Gedung MYITARU" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MYITARU — Jadwal Dokter, Pendaftaran Online &amp; Cek Antrean" />
+    <meta name="twitter:description" content="Lihat jadwal dokter, daftar poliklinik secara online, dan pantau nomor antrean Anda dari ponsel." />
+    <meta name="twitter:image" content="https://myitaru-public.myappv1.workers.dev/og-image.jpg" />
+    <!-- TODO: lengkapi address, telephone, dan sameAs dengan data resmi rumah sakit. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Hospital",
+        "name": "MYITARU",
+        "url": "https://myitaru-public.myappv1.workers.dev/",
+        "logo": "https://myitaru-public.myappv1.workers.dev/logo-myitaru.png",
+        "image": "https://myitaru-public.myappv1.workers.dev/og-image.jpg",
+        "description": "Situs resmi pasien MYITARU untuk jadwal dokter, pendaftaran poliklinik online, dan cek nomor antrean."
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   </head>
-  <body class="bg-slate-50 dark:bg-[#071322] text-slate-900 dark:text-slate-100 antialiased min-h-screen font-sans selection:bg-blue-500/20">
+  <body class="bg-slate-50 text-slate-900 antialiased min-h-screen font-sans selection:bg-blue-500/20">
     <div id="root"></div>
     <script type="module" src="/src/main.public.tsx"></script>
   </body>

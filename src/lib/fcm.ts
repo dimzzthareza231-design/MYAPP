@@ -325,7 +325,8 @@ export async function registerFcmForPatient(params: {
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID().replace(/-/g, '')
         : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    resolvedToken = existingCached || `fcm_sse_${params.no_rm.replace(/[^a-zA-Z0-9]/g, '')}_${randomSuffix}`;
+    // Pengenal acak untuk kanal SSE; tidak memuat No. RM atau data identitas pasien.
+    resolvedToken = existingCached || `fcm_sse_${randomSuffix}`;
   }
 
   try {
@@ -520,7 +521,7 @@ export async function showNativeBrowserNotification(item: {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
 
-  const targetUrl = item.type === 'lab_ready' ? '/mobile?tab=hasil' : '/mobile?tab=beranda';
+  const targetUrl = item.type === 'lab_ready' ? '/mobile/hasil/lab' : '/mobile/beranda';
   const options: NotificationOptions = {
     body: item.body,
     icon: '/pwa-192x192.png',

@@ -407,9 +407,6 @@ export function registerCoreAuthentication(
 
 export function assertProductionAuthConfiguration(authMode = getCoreAuthMode()): void {
   if (process.env.NODE_ENV !== 'production') return;
-  if (process.env.ALLOW_INSECURE_DEMO_AUTH === 'true') {
-    throw new Error('ALLOW_INSECURE_DEMO_AUTH must not be enabled in production.');
-  }
   if (authMode === 'local') {
     if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
       throw new Error('SESSION_SECRET must contain at least 32 characters for production local authentication.');

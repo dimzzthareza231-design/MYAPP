@@ -27,12 +27,12 @@ export const ClinicLogoMark: React.FC<ClinicLogoMarkProps> = ({
         <span
           className={`${
             compact ? 'text-base' : 'text-lg sm:text-xl'
-          } font-extrabold tracking-tight text-[#0B3D91] dark:text-sky-400`}
+          } font-extrabold tracking-tight text-brand dark:text-sky-400`}
         >
           MYITARU
         </span>
         {subtitle && (
-          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">
             {subtitle}
           </span>
         )}
@@ -61,11 +61,11 @@ export const PublicUtilityBar: React.FC<PublicUtilityBarProps> = ({
   onRightClick
 }) => {
   return (
-    <div className="bg-[#082B6B] text-white text-xs py-2 px-4 sm:px-6 lg:px-8 border-b border-white/10">
+    <div className="bg-brand-strong text-white text-xs py-2 px-4 sm:px-6 lg:px-8 border-b border-white/10">
       <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-4">
           <span className="inline-flex items-center gap-2 font-semibold text-white">
-            <span className="inline-flex items-center gap-1 bg-[#DC2626] px-2 py-0.5 rounded font-bold tracking-wide">
+            <span className="inline-flex items-center gap-1 bg-emergency px-2 py-0.5 rounded font-bold tracking-wide">
               <PhoneCall className="w-3 h-3" /> DARURAT
             </span>
             {PRIMARY_EMERGENCY_PHONE && (

@@ -9,6 +9,22 @@
   --color-secondary-gray: #f3f4f6;
   --color-midnight: #0f172a;
   --color-midnight-light: #1e293b;
+
+  /* Token warna brand web publik (dipakai sebagai bg-brand, text-brand, from-brand-night/95, dst). */
+  --color-brand: #0B3D91;
+  --color-brand-hover: #082D6E;
+  --color-brand-strong: #082B6B;
+  --color-brand-deep: #07265C;
+  --color-brand-ink: #061A3D;
+  --color-brand-night: #051430;
+  --color-emergency: #DC2626;
+}
+
+/* Gulir halus untuk tautan jangkar (#section), dinonaktifkan bila pengguna memilih reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
 body {

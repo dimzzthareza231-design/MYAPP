@@ -97,36 +97,3 @@ CREATE TABLE portal_chat_message (
     attachment_url VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA
-INSERT INTO portal_user_account (id_account, id_pasien, username, password_hash, email_verified, phone_verified, preferred_language, last_login, is_active) VALUES
-('ACC-001', 'P-001', 'budi_santoso', 'hash123', TRUE, TRUE, 'ID', '2026-08-02 10:00:00', TRUE),
-('ACC-002', 'P-002', 'ani_yudhoyono', 'hash456', TRUE, FALSE, 'ID', '2026-08-01 14:00:00', TRUE);
-
-INSERT INTO portal_appointment_booking (id_booking, id_account, id_pasien, id_poli, id_dokter, tanggal_booking, jam_pilihan, keluhan, jenis_penjamin, status) VALUES
-('BOOK-001', 'ACC-001', 'P-001', 'POL-001', 'DR-001', '2026-08-05 00:00:00', '09:00:00', 'Demam tinggi', 'BPJS', 'Confirmed'),
-('BOOK-002', 'ACC-002', 'P-002', 'POL-002', 'DR-002', '2026-08-06 00:00:00', '14:30:00', 'Nyeri dada', 'Umum', 'Pending');
-
-INSERT INTO portal_document_access (id_access, id_account, jenis_dokumen, id_referensi, tanggal_akses, ip_address) VALUES
-('ACC-DOC-001', 'ACC-001', 'Hasil Lab', 12345, '2026-08-01 08:00:00', '192.168.1.1'),
-('ACC-DOC-002', 'ACC-001', 'Resep', 12346, '2026-08-01 08:05:00', '192.168.1.1');
-
-INSERT INTO portal_payment (id_payment, id_account, id_kunjungan, nomor_tagihan, jumlah, metode, status, paid_at) VALUES
-('PAY-001', 'ACC-001', 'KUNJ-001', 'INV-2026-001', 150000.00, 'QRIS', 'Paid', '2026-08-01 09:00:00'),
-('PAY-002', 'ACC-002', 'KUNJ-002', 'INV-2026-002', 300000.00, 'VA', 'Pending', NULL);
-
-INSERT INTO portal_health_journal (id_journal, id_account, tanggal, gejala, tanda_vital, obat_diminum, catatan) VALUES
-('JRN-001', 'ACC-001', '2026-08-01', 'Sakit kepala, demam', '{"TD": "120/80", "nadi": 85, "suhu": 38.5, "BB": 70}', '["Paracetamol 500mg"]', 'Istirahat di rumah'),
-('JRN-002', 'ACC-002', '2026-08-01', 'Sesak napas', '{"TD": "140/90", "nadi": 90, "suhu": 37.0, "BB": 65}', '["Obat Asma"]', 'Menghindari debu');
-
-INSERT INTO portal_education (id_education, judul, kategori, konten, view_count) VALUES
-('EDU-001', 'Pentingnya Vaksinasi Flu', 'Pencegahan', 'Vaksinasi flu sangat penting untuk mencegah...', 150),
-('EDU-002', 'Cara Mengelola Hipertensi', 'Penyakit Kronis', 'Hipertensi dapat dikelola dengan diet dan...', 300);
-
-INSERT INTO portal_chat (id_chat, id_account, subjek, status) VALUES
-('CHT-001', 'ACC-001', 'Pertanyaan Jadwal Dokter Spesialis Jantung', 'Resolved'),
-('CHT-002', 'ACC-002', 'Kendala Pembayaran Online', 'In Progress');
-
-INSERT INTO portal_chat_message (id_message, id_chat, sender_type, message) VALUES
-('MSG-001', 'CHT-001', 'Patient', 'Selamat pagi, dokter Budi hari ini praktek jam berapa?'),
-('MSG-002', 'CHT-001', 'Staff', 'Selamat pagi, dokter Budi praktek jam 14:00 - 16:00.');

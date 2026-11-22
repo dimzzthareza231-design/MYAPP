@@ -97,27 +97,3 @@ CREATE TABLE cssd_incident (
     reported_by VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
-
--- DUMMY DATA INSERTION
-INSERT INTO cssd_alat (id_alat, kode_alat, nama_alat, kategori, set_instrument, material, siklus_hidup_max) VALUES
-('ALT-001', 'AL-001', 'Scalpel Handle', 'Instrument Bedah', 'Set Minor', 'Stainless Steel', 500),
-('ALT-002', 'AL-002', 'Mosquito Forceps', 'Instrument Bedah', 'Set Minor', 'Stainless Steel', 500);
-
-INSERT INTO cssd_pack (id_pack, kode_pack, nama_pack, daftar_alat, jumlah_piece, untuk_ruangan, berat_gram) VALUES
-('PCK-001', 'PK-001', 'Set Minor Surgery', '["ALT-001", "ALT-002"]', 2, '["OK", "IGD"]', 250);
-
-INSERT INTO cssd_siklus (id_siklus, id_pack, nomor_siklus, tanggal_mulai, tahap, status, operator) VALUES
-('SIK-001', 'PCK-001', 'CYC-260801-001', '2026-08-01 08:00:00', 'Storage', 'Completed', 'OP-01');
-
-INSERT INTO cssd_sterilizer (id_sterilizer, kode_sterilizer, nama_sterilizer, jenis, kapasitas, tanggal_kalibrasi_terakhir, tanggal_kalibrasi_berikutnya) VALUES
-('STR-001', 'ST-01', 'Autoclave 1', 'Autoclave', '500L', '2026-01-01', '2027-01-01');
-
-INSERT INTO cssd_sterilization_run (id_run, id_sterilizer, id_siklus, tanggal_run, jenis_siklus, suhu_celsius, tekanan, durasi_menit, indikator_kimia, indikator_biologis, batch_number, operator, status) VALUES
-('RUN-001', 'STR-001', 'SIK-001', '2026-08-01 10:00:00', 'Pre-vacuum', 134.0, 2.1, 45, 'Pass', 'Pass', 'B-260801', 'OP-01', 'Completed');
-
-INSERT INTO cssd_distribution (id_distribution, id_pack, id_siklus, ruangan_tujuan, tanggal_distribusi, diterima_oleh, kondisi_diterima, distributor) VALUES
-('DST-001', 'PCK-001', 'SIK-001', 'OK 1', '2026-08-01 13:00:00', 'Perawat OK', 'Baik', 'OP-02');
-
-INSERT INTO cssd_incident (id_incident, id_siklus, id_pack, jenis_incident, deskripsi, tanggal_kejadian, status, reported_by) VALUES
-('INC-001', 'SIK-001', 'PCK-001', 'Wet Pack', 'Ditemukan embun di dalam pack setelah sterilizer', '2026-08-01 11:00:00', 'Closed', 'OP-01');

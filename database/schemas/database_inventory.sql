@@ -216,35 +216,3 @@ CREATE TABLE inv_alert (
     resolved_at DATETIME,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA
-INSERT INTO inv_gudang (id_gudang, kode_gudang, nama_gudang, lokasi, jenis) VALUES
-('GDG-001', 'G-FARM', 'Gudang Farmasi Utama', 'Lantai 1, Sayap Kiri', 'Gudang Farmasi'),
-('GDG-002', 'G-ALKES', 'Gudang Alat Kesehatan', 'Lantai 1, Sayap Kanan', 'Gudang Alkes'),
-('GDG-003', 'D-IGD', 'Depo Farmasi IGD', 'Lantai 1, Area IGD', 'Depo Poli');
-
-INSERT INTO inv_kategori_item (id_kategori, kode_kategori, nama_kategori, jenis) VALUES
-('KAT-001', 'OBT-GN', 'Obat Generik', 'Obat'),
-('KAT-002', 'OBT-PT', 'Obat Paten', 'Obat'),
-('KAT-003', 'ALK-HP', 'Alkes Habis Pakai', 'Alkes');
-
-INSERT INTO inv_master_item (id_item, kode_item, nama_item, id_kategori, satuan, minimum_stock, maximum_stock, reorder_point) VALUES
-('ITM-001', 'OBT-001', 'Paracetamol 500mg', 'KAT-001', 'Tablet', 1000, 5000, 1500),
-('ITM-002', 'OBT-002', 'Amoxicillin 500mg', 'KAT-001', 'Kapsul', 500, 2000, 800),
-('ITM-003', 'ALK-001', 'Spuit 3cc', 'KAT-003', 'Pcs', 1000, 10000, 2000);
-
-INSERT INTO inv_batch (id_batch, id_item, nomor_batch, tanggal_produksi, tanggal_kadaluarsa, jumlah_awal, jumlah_sisa) VALUES
-('BTC-001', 'ITM-001', 'B-PCT-2026-01', '2026-01-01', '2028-01-01', 5000, 4500),
-('BTC-002', 'ITM-002', 'B-AMX-2026-02', '2026-02-15', '2027-02-15', 2000, 1500);
-
-INSERT INTO inv_stock (id_stock, id_item, id_gudang, id_batch, jumlah_stok) VALUES
-('STK-001', 'ITM-001', 'GDG-001', 'BTC-001', 4000),
-('STK-002', 'ITM-001', 'GDG-003', 'BTC-001', 500),
-('STK-003', 'ITM-002', 'GDG-001', 'BTC-002', 1500);
-
-INSERT INTO inv_supplier (id_supplier, kode_supplier, nama_supplier, jenis) VALUES
-('SUP-001', 'S-KF', 'Kimia Farma Trading', 'Distributor Obat'),
-('SUP-002', 'S-DX', 'Dexa Medica', 'Distributor Obat');
-
-INSERT INTO inv_alert (id_alert, id_item, id_gudang, jenis_alert, severity, pesan) VALUES
-('ALT-001', 'ITM-002', 'GDG-003', 'Low-Stock', 'Medium', 'Stok Amoxicillin 500mg di Depo IGD di bawah minimum (Sisa: 50)');

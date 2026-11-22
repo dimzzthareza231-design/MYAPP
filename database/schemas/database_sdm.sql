@@ -175,32 +175,3 @@ CREATE TABLE sdm_lembur (
     kompensasi DECIMAL(15,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA
-INSERT INTO sdm_departemen (id_departemen, kode_departemen, nama_departemen, jenis) VALUES
-('DEP-001', 'MED', 'Pelayanan Medis', 'Medis'),
-('DEP-002', 'KEP', 'Keperawatan', 'Keperawatan'),
-('DEP-003', 'IGD', 'Instalasi Gawat Darurat', 'Medis');
-
-INSERT INTO sdm_jabatan (id_jabatan, kode_jabatan, nama_jabatan, level) VALUES
-('JAB-001', 'DR-UMUM', 'Dokter Umum', 'Staff'),
-('JAB-002', 'DR-SP', 'Dokter Spesialis', 'Supervisor'),
-('JAB-003', 'PRW-PEL', 'Perawat Pelaksana', 'Staff');
-
-INSERT INTO sdm_kredensial (id_kredensial, id_user, jenis_kredensial, nomor_kredensial, tanggal_terbit, tanggal_kadaluarsa, status) VALUES
-('KRD-001', 'D1', 'STR', 'STR-317-001', '2022-01-01', '2027-01-01', 'Valid'),
-('KRD-002', 'D2', 'SIP', 'SIP-112-990', '2023-05-10', '2026-09-01', 'Valid'),
-('KRD-003', 'P1', 'STR', 'STR-PRW-881', '2021-08-20', '2026-08-20', 'Valid');
-
-INSERT INTO sdm_jadwal_shift (id_shift, kode_shift, nama_shift, jam_mulai, jam_selesai, durasi_jam, is_overnight) VALUES
-('SHF-001', 'PAGI', 'Shift Pagi', '07:00:00', '15:00:00', 8.00, FALSE),
-('SHF-002', 'SIANG', 'Shift Siang', '14:00:00', '22:00:00', 8.00, FALSE),
-('SHF-003', 'MALAM', 'Shift Malam', '21:00:00', '07:00:00', 10.00, TRUE);
-
-INSERT INTO sdm_roster (id_roster, id_user, id_shift, tanggal, status) VALUES
-('RST-001', 'D1', 'SHF-001', '2026-08-01', 'Scheduled'),
-('RST-002', 'P1', 'SHF-002', '2026-08-01', 'Scheduled');
-
-INSERT INTO sdm_kehadiran (id_kehadiran, id_user, tanggal, jam_masuk, jam_keluar, metode_absen, status) VALUES
-('KHD-001', 'D1', '2026-08-01', '06:55:00', '15:10:00', 'Fingerprint', 'Hadir'),
-('KHD-002', 'P1', '2026-08-01', '14:10:00', '22:05:00', 'Fingerprint', 'Telat');
