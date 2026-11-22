@@ -1,13 +1,17 @@
 # MYITARU
 
 [![CI](https://github.com/dimzzthareza231-design/MYAPP/actions/workflows/ci.yml/badge.svg)](https://github.com/dimzzthareza231-design/MYAPP/actions/workflows/ci.yml)
+![Cloudflare Workers](https://img.shields.io/badge/hosting-Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)
+![Cloudflare D1](https://img.shields.io/badge/database-Cloudflare%20D1-F38020?logo=cloudflare&logoColor=white)
 
-Sistem informasi manajemen dan rekam medis elektronik (RME) berbasis web, dilengkapi fitur kecerdasan buatan untuk mendukung pelayanan dan manajemen operasional. MYITARU terdiri atas dua aplikasi yang dibangun dari satu kode sumber:
+Sistem informasi manajemen dan rekam medis elektronik (RME) berbasis web, dilengkapi fitur kecerdasan buatan untuk mendukung pelayanan dan manajemen operasional. MYITARU terdiri atas dua aplikasi yang dibangun dari satu kode sumber dan kini berjalan di **Cloudflare Workers** dengan database **Cloudflare D1**:
 
 | Aplikasi | Untuk | Alamat |
 |---|---|---|
-| **Web Publik MYITARU** | Pasien dan masyarakat: portal layanan, jadwal dokter, pendaftaran daring, cek antrean, aplikasi pasien (PWA) | https://web-publik-myitaru.vercel.app |
-| **Aplikasi Inti MYITARU** | Staf: login pegawai, dasbor, 55 modul SIMK/RME, portal karyawan | https://aplikasi-inti-myitaru.vercel.app |
+| **Web Publik MYITARU** | Pasien dan masyarakat: portal layanan, jadwal dokter, pendaftaran daring, cek antrean, aplikasi pasien (PWA) | https://myitaru-public.myappv1.workers.dev |
+| **Aplikasi Inti MYITARU** | Staf: login pegawai, dasbor, 55 modul SIMK/RME, portal karyawan | https://myitaru-core.myappv1.workers.dev |
+
+Kode yang sama tetap dapat dijalankan secara lokal, dengan Docker, atau di Vercel (lihat [Deployment](#deployment)).
 
 > Jangan memasukkan data pasien sebenarnya. Pendaftaran pasien dan kunjungan telah terhubung ke adapter persistence, tetapi migrasi modul klinis lain, backup/pemulihan, dan integrasi pembayaran belum selesai sehingga aplikasi belum siap produksi.
 
@@ -65,6 +69,7 @@ flowchart LR
   AI -->|/api/v1, /api/ai, /api/gateway| FC[Express app inti]
   FP --> STORE[(Data store)]
   FC --> STORE[Persistence adapter]
+  STORE --> D1[(Cloudflare D1<br/>STORAGE_MODE=d1)]
   STORE --> MYSQL[(MySQL / MariaDB)]
   STORE --> FB[Firestore<br/>Firebase / hybrid replication]
   FC --> GEM[Google Gemini]
@@ -72,6 +77,7 @@ flowchart LR
 ```
 
 - `server.ts` mengekspor `createApps()` yang membangun dua aplikasi Express. Web publik hanya membuka `/api/public/*` dan `/api/patient/*`; aplikasi inti membuka `/api/v1/*`, `/api/ai/*`, `/api/gateway/*`, dan `/api/cloudflare/*`. Permintaan ke API inti dari domain publik selalu dijawab 404.
+- **Cloudflare (utama):** dua Worker, `myitaru-public` dan `myitaru-core`, dibangun dari satu `wrangler.jsonc`. `worker/index.ts` menjalankan Express yang sama lewat `cloudflare:node`; frontend disajikan sebagai Workers Static Assets. Keduanya berbagi satu database D1 (`myitaru-db`) melalui `D1Adapter`.
 - **Lokal/Docker:** kedua aplikasi berjalan dalam satu proses pada port `3000` (publik) dan `3001` (inti).
 - **Vercel:** dua proyek terpisah. `api/index.ts` adalah satu Vercel Function yang memilih aplikasi lewat variabel `APP_TARGET`.
 - Sesi pasien dan beberapa komponen prototipe memakai token bertanda tangan HMAC-SHA256 (`src/server/signedStore.ts`). Token stateless tidak menyediakan pencabutan global; jangan gunakan sesi demo untuk data nyata.
@@ -85,16 +91,18 @@ flowchart LR
 | Antarmuka | React 19, React Router 7, Vite 6, Tailwind CSS 4, Motion, Recharts, Leaflet |
 | Server | Node.js ≥ 20, Express 4, TypeScript 5.8 |
 | AI | Google Gemini melalui `@google/genai` |
-| Data & autentikasi | MySQL/MariaDB untuk mode lokal; Firebase Authentication dan Cloud Firestore opsional |
+| Data & autentikasi | Cloudflare D1 di Workers; MySQL/MariaDB untuk mode lokal; Firebase Authentication dan Cloud Firestore opsional |
 | PWA | `vite-plugin-pwa` (Workbox) |
-| Deployment | Vercel (dua proyek), Docker multi-stage |
+| Deployment | Cloudflare Workers + Static Assets (utama), Vercel (dua proyek), Docker multi-stage |
 | Pengujian & CI | `node:test` + `tsx`, GitHub Actions |
 
 ## Struktur proyek
 
 ```
+├── .10x/                   Spec, ADR, dan catatan keputusan tim
 ├── api/                    Vercel Function untuk seluruh /api/*
 ├── database/schemas/       Skema SQL untuk migrasi ke basis data relasional
+├── migrations/             Migrasi skema Cloudflare D1
 ├── public/                 Aset statis (ikon, service worker FCM)
 ├── scripts/                Pemeriksaan pra-deployment
 ├── src/
@@ -105,8 +113,10 @@ flowchart LR
 │   ├── data/               Data demo dan registri modul
 │   ├── lib/                Firebase, FCM, logger aktivitas
 │   └── server/             Layanan API pasien, gateway karyawan, mesin AI, token sesi
-├── tests/                  Pengujian API black-box
+├── tests/                  Pengujian API black-box dan adapter persistence
+├── worker/                 Entry Cloudflare Worker dan stub bundling
 ├── server.ts               Server Express (dua aplikasi)
+├── wrangler.jsonc          Konfigurasi Worker publik/inti dan binding D1
 ├── index.html              Halaman aplikasi inti
 ├── public.html             Halaman web publik
 ├── vite.config.ts          Build aplikasi inti
@@ -138,7 +148,7 @@ npm run dev
 | `LOCAL_AUTH_*_PASSWORD` | Mode lokal | Sandi awal unik kuat untuk enam akun peran; hanya dibaca server lalu di-hash dengan scrypt. Jangan memasukkan nilai sandi ke repositori. |
 | `LOCAL_AUTH_ADMIN_EMAIL` | Tidak | Alamat email akun admin lokal; bawaan `admin@myitaru.local`. |
 | `MYITARU_QR_SECRET` | Produksi | Kunci enkripsi QR khusus server; bila kosong, QR memakai `SESSION_SECRET`. |
-| `STORAGE_MODE` / `VITE_STORAGE_MODE` | Produksi | Set nilainya sama. Mode lokal memakai `mysql`; Firebase/hybrid untuk integrasi cloud, sedangkan `memory` hanya untuk demo dan tes. |
+| `STORAGE_MODE` / `VITE_STORAGE_MODE` | Produksi | Set nilainya sama. Cloudflare memakai `d1`; mode lokal memakai `mysql`; Firebase/hybrid untuk integrasi cloud, sedangkan `memory` hanya untuk demo dan tes. |
 | `DB_HOST` / `DB_PORT` | Jika MySQL aktif | Host dan port MySQL/MariaDB (bawaan `127.0.0.1:3306`). |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Jika MySQL aktif | Kredensial dan nama database (bawaan database `db_myitaru`). |
 | `FIREBASE_PROJECT_ID` | Mode Firebase | ID project Firebase Admin untuk verifikasi sesi staf. |
@@ -148,7 +158,7 @@ npm run dev
 | `CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME` | Jika Turnstile aktif | Hostname yang harus dikembalikan Cloudflare. |
 | `CLOUDFLARE_TURNSTILE_EXPECTED_ACTION` | Tidak | Aksi widget yang diharapkan (bawaan `login`). |
 | `GEMINI_API_KEY` | Tidak | Kunci Google Gemini. Tanpa kunci, fitur AI memakai mesin aturan. |
-| `APP_TARGET` | Vercel | `public` untuk proyek web publik, `core` untuk proyek aplikasi inti. |
+| `APP_TARGET` | Vercel/Cloudflare | `public` untuk web publik, `core` untuk aplikasi inti. Di Cloudflare sudah diatur per env di `wrangler.jsonc`. |
 | `PUBLIC_PORT` / `CORE_PORT` | Tidak | Port lokal/Docker, bawaan `3000` dan `3001`. |
 | `VITE_FIREBASE_*` | Mode Firebase | Konfigurasi klien Firebase. Bila `VITE_FIREBASE_API_KEY` kosong, Firebase Auth tidak diinisialisasi. |
 | `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY` | Jika Turnstile aktif | Site key publik widget; secret verifikasi tetap di environment server. |
@@ -165,6 +175,10 @@ Untuk XAMPP, impor [init_myitaru_xampp.sql](./database/init_myitaru_xampp.sql) l
 | `npm run build` | Build lengkap: aplikasi inti, web publik, dan bundel server |
 | `npm run build:core` / `build:public` | Build salah satu aplikasi |
 | `npm start` | Menjalankan hasil build (`dist/server.cjs`) |
+| `npm run cf:build` | Build kedua frontend untuk Cloudflare (`VITE_STORAGE_MODE=d1`) |
+| `npm run cf:deploy` | Build lalu deploy Worker publik dan inti |
+| `npm run cf:migrate` / `cf:migrate:local` | Terapkan `migrations/` ke D1 remote / lokal |
+| `npm run cf:dev:core` / `cf:dev:public` | Jalankan Worker secara lokal dengan `wrangler dev` |
 
 ## Pengujian
 
@@ -177,11 +191,35 @@ Pengujian menjalankan kedua aplikasi Express di dalam proses dan memeriksa:
 - pendaftaran daring dan akses API yang memerlukan sesi/role/MFA,
 - keluaran fitur AI pada mesin aturan (ICD-10, interaksi obat, audit klaim, audit dokumen),
 - kuantitas farmasi dan transaksi atomik,
-- penolakan klaim palsu untuk pembayaran, backup, dan Turnstile yang belum terkonfigurasi.
+- penolakan klaim palsu untuk pembayaran, backup, dan Turnstile yang belum terkonfigurasi,
+- `D1Adapter` terhadap SQLite sungguhan (`node:sqlite`) memakai skema `migrations/0001_init.sql`.
 
 GitHub Actions menjalankan typecheck, pengujian, dan kedua build pada setiap push ke `main` dan setiap pull request.
 
 ## Deployment
+
+### Cloudflare (Workers + D1)
+
+Dua Worker dari satu kode (`wrangler.jsonc`): `myitaru-public` (`--env public`) dan `myitaru-core` (`--env core`), berbagi satu database D1 `myitaru-db`. Express dijalankan lewat `worker/index.ts`; frontend disajikan sebagai Static Assets. Di Cloudflare hanya `AUTH_MODE=local` + `STORAGE_MODE=d1` yang didukung (firebase-admin tidak berjalan di Workers).
+
+Deployment aktif: web publik di https://myitaru-public.myappv1.workers.dev dan aplikasi inti di https://myitaru-core.myappv1.workers.dev. Untuk men-deploy perubahan cukup jalankan `npm run cf:deploy`.
+
+Penyiapan dari nol (akun Cloudflare baru):
+
+```bash
+npx wrangler login
+npx wrangler d1 create myitaru-db        # salin database_id ke kedua env di wrangler.jsonc
+npm run cf:migrate                        # terapkan migrations/ ke D1
+# Secret --env core (Worker publik cukup SESSION_SECRET dan MYITARU_QR_SECRET dengan --env public):
+npx wrangler secret put SESSION_SECRET --env core   # minimal 32 karakter
+npx wrangler secret put MYITARU_QR_SECRET --env core
+npx wrangler secret put LOCAL_AUTH_ADMIN_PASSWORD --env core   # juga DOKTER/PERAWAT/RMIK/APOTEKER/KASIR
+npx wrangler secret put GEMINI_API_KEY --env core              # opsional
+```
+
+Deploy: `npm run cf:deploy`. Uji lokal: isi `.dev.vars` (lihat `.env.example`), lalu `npm run cf:build`, `npm run cf:migrate:local`, dan `npm run cf:dev:core` atau `npm run cf:dev:public` (jalankan bergantian; keduanya memakai D1 lokal yang sama).
+
+Keterbatasan: rate limiter in-memory berlaku per isolate Worker; koneksi SSE portal pasien dapat diputus dan klien harus menyambung ulang.
 
 ### Vercel
 
@@ -208,27 +246,6 @@ Jangan membuka port `3001` (aplikasi inti) ke internet tanpa proteksi tambahan.
 ### Status kesiapan produksi
 
 Mode `NODE_ENV=production` hanya dapat startup bila `STORAGE_MODE` menunjuk ke penyimpanan persisten yang terhubung. Pendaftaran dan pembacaan pasien/kunjungan pada `HospitalContext` menggunakan API inti; data master dokter/perawat/pengaturan disimpan melalui `system_data`. Mode lokal harus menggunakan MySQL dan tidak mengaktifkan koneksi Firebase/hybrid; mode `hybrid` tetap memerlukan MySQL dan mempertahankan replikasi cloud yang gagal di outbox. Namun, modul klinis lain belum seluruhnya dimigrasikan ke adapter, booking masih menerbitkan No. RM dan antrean sebelum check-in, backup belum dikonfigurasi, callback QRIS ditolak, dan pemetaan identitas HRIS belum tersedia. Karena itu konfigurasi ini belum cukup untuk menyatakan sistem siap produksi. Sebelum deployment nyata, migrasikan semua modul dan alur transaksi ke store persisten dengan kontrol akses, siapkan backup/pemulihan teruji, integrasikan provider pembayaran, serta uji enrollment dan enforcement MFA bila memakai Firebase. Build yang berhasil bukan bukti kesiapan produksi.
-
-### Cloudflare (Workers + D1)
-
-Dua Worker dari satu kode (`wrangler.jsonc`): `myitaru-public` (`--env public`) dan `myitaru-core` (`--env core`), berbagi satu database D1 `myitaru-db`. Express dijalankan lewat `worker/index.ts`; frontend disajikan sebagai Static Assets. Di Cloudflare hanya `AUTH_MODE=local` + `STORAGE_MODE=d1` yang didukung (firebase-admin tidak berjalan di Workers).
-
-Sekali saja:
-
-```bash
-npx wrangler login
-npx wrangler d1 create myitaru-db        # salin database_id ke kedua env di wrangler.jsonc
-npm run cf:migrate                        # terapkan migrations/ ke D1
-# Secret --env core (Worker publik cukup SESSION_SECRET dan MYITARU_QR_SECRET dengan --env public):
-npx wrangler secret put SESSION_SECRET --env core   # minimal 32 karakter
-npx wrangler secret put MYITARU_QR_SECRET --env core
-npx wrangler secret put LOCAL_AUTH_ADMIN_PASSWORD --env core   # juga DOKTER/PERAWAT/RMIK/APOTEKER/KASIR
-npx wrangler secret put GEMINI_API_KEY --env core              # opsional
-```
-
-Deploy: `npm run cf:deploy`. Uji lokal: isi `.dev.vars` (lihat `.env.example`), lalu `npm run cf:build`, `npm run cf:migrate:local`, dan `npm run cf:dev:core` atau `npm run cf:dev:public` (jalankan bergantian; keduanya memakai D1 lokal yang sama).
-
-Keterbatasan: rate limiter in-memory berlaku per isolate Worker; koneksi SSE portal pasien dapat diputus dan klien harus menyambung ulang.
 
 ## Keamanan dan keterbatasan
 
