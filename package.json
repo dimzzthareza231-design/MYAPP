@@ -1,8 +1,12 @@
 {
-  "name": "myappv1",
+  "name": "myitaru",
   "private": true,
   "version": "1.0.0",
   "description": "MYITARU: sistem informasi manajemen dan rekam medis elektronik berbasis AI, terdiri atas web publik pasien dan aplikasi inti.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dimzzthareza231-design/MYAPP.git"
+  },
   "engines": {
     "node": ">=20"
   },
