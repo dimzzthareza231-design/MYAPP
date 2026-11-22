@@ -1,5 +1,5 @@
 import React, { useId, useMemo } from 'react';
-import { CalendarX2, Clock, RefreshCw, Search, SearchX } from 'lucide-react';
+import { CalendarX2, ChevronRight, Clock, History, RefreshCw, Search, SearchX } from 'lucide-react';
 import type { LoadStatus, PublicDoctor, PublicPoliklinik } from './types';
 import { EmptyState, SkeletonList } from './ui';
 
@@ -23,6 +23,8 @@ export const JadwalScreen: React.FC<{
   visibleCount: number;
   onShowMore: () => void;
   onSelectDoctor: (doc: PublicDoctor) => void;
+  /** Buka Riwayat Kunjungan (batal/ubah jadwal janji temu). */
+  onGoRiwayat?: () => void;
 }> = ({
   doctors,
   poliklinik,
@@ -34,7 +36,8 @@ export const JadwalScreen: React.FC<{
   onPoliChange,
   visibleCount,
   onShowMore,
-  onSelectDoctor
+  onSelectDoctor,
+  onGoRiwayat
 }) => {
   const searchId = useId();
   const poliSelectId = useId();
@@ -162,6 +165,20 @@ export const JadwalScreen: React.FC<{
 
   return (
     <div className="space-y-4">
+      {onGoRiwayat && (
+        <button
+          type="button"
+          onClick={onGoRiwayat}
+          className="w-full bg-white rounded-2xl border border-slate-200 hover:border-[#0B3D91] p-4 min-h-[44px] flex items-center gap-3 text-left cursor-pointer"
+        >
+          <History className="w-5 h-5 text-[#0B3D91] shrink-0" aria-hidden="true" />
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-bold text-slate-900">Riwayat &amp; Janji Temu Saya</span>
+            <span className="block text-sm text-slate-600">Lihat, ubah jadwal, atau batalkan janji temu.</span>
+          </span>
+          <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" aria-hidden="true" />
+        </button>
+      )}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
         <h2 className="text-base font-extrabold text-slate-900">Cari Jadwal Dokter &amp; Ambil Antrean</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

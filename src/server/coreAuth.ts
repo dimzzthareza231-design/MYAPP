@@ -172,6 +172,7 @@ function scopeForPath(path: string, req?: express.Request): string | null {
   if (path === '/api/v1/patient-notifications/dispatch') {
     return req?.body?.type === 'lab_ready' ? 'laboratorium' : 'rawat-jalan';
   }
+  if (path.startsWith('/api/v1/patient-feedback') || path.startsWith('/api/v1/patient-complaints')) return 'mutu';
   if (path.startsWith('/api/v1/master/')) return 'pendaftaran';
   if (path.startsWith('/api/v1/patients')) return 'pendaftaran';
   if (path.startsWith('/api/v1/appointments')) return 'pendaftaran';

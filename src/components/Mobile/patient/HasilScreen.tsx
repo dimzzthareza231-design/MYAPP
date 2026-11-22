@@ -1,9 +1,71 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { FlaskConical, Pill, Stethoscope } from 'lucide-react';
+import { CalendarPlus, Download, FlaskConical, Pill, Stethoscope } from 'lucide-react';
+import toast from 'react-hot-toast';
 import type { PatientDossierPayload, ResultSubTab } from './types';
 import { EmptyState, SkeletonList } from './ui';
-import { displayValue, fadeSlideTransition, fadeSlideVariants } from './utils';
+import { displayValue, fadeSlideTransition, fadeSlideVariants, formatShortDateId, localTodayIso } from './utils';
+import { buildLabPdfModel, buildResumePdfModel, downloadPdf, type PdfDocumentModel } from './pdfExport';
+import { buildIcsEvent, icsFileName, parseExplicitDate } from './reminders';
+import { downloadTextFile } from './clientFiles';
+import { buildLabTrends } from './labTrend';
+import { LabTrendCard } from './LabTrendCard';
+import { MedicineReminderPanel, type ReminderMedSource } from './MedicineReminders';
+
+/** Tombol unduh PDF dengan status sibuk; jsPDF dimuat hanya saat ditekan. */
+const PdfButton: React.FC<{ label: string; ariaLabel?: string; build: () => PdfDocumentModel; compact?: boolean }> = ({
+  label,
+  ariaLabel,
+  build,
+  compact
+}) => {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      aria-label={ariaLabel}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await downloadPdf(build());
+        } catch {
+          toast.error('PDF tidak dapat dibuat di perangkat ini. Coba lagi.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      className={`min-h-[44px] px-3 rounded-xl border border-slate-300 hover:border-[#0B3D91] bg-white text-slate-800 text-sm font-bold cursor-pointer disabled:opacity-60 inline-flex items-center justify-center gap-1.5 ${
+        compact ? '' : 'w-full sm:w-auto'
+      }`}
+    >
+      <Download className="w-4 h-4 text-[#0B3D91]" aria-hidden="true" />
+      {busy ? 'Menyiapkan PDF...' : label}
+    </button>
+  );
+};
+
+function downloadControlIcs(controlDate: string, resume: NonNullable<PatientDossierPayload['clinicalResume']>, hospitalName: string | null) {
+  const ics = buildIcsEvent({
+    uid: `kontrol-${resume.id || resume.no_resume}-${controlDate}`,
+    title: `Kontrol ${resume.unit_pelayanan || 'ke dokter'}`,
+    date: controlDate,
+    description: [
+      resume.dokter_dpjp && `DPJP: ${resume.dokter_dpjp}`,
+      resume.jadwal_kontrol && `Catatan dokter: ${resume.jadwal_kontrol}`,
+      'Buat janji temu melalui aplikasi pasien sebelum datang.'
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    location: [resume.unit_pelayanan, hospitalName].filter(Boolean).join(', '),
+    alarmMinutesBefore: 24 * 60
+  });
+  if (downloadTextFile(icsFileName('kontrol', controlDate), ics, 'text/calendar;charset=utf-8')) {
+    toast.success('Berkas kalender diunduh. Buka berkas untuk menambahkannya ke kalender.');
+  } else {
+    toast.error('Berkas kalender tidak dapat dibuat di perangkat ini.');
+  }
+}
 
 const SUB_TABS: Array<{ id: ResultSubTab; label: string }> = [
   { id: 'resume', label: 'Resume & Diagnosis' },
@@ -11,11 +73,18 @@ const SUB_TABS: Array<{ id: ResultSubTab; label: string }> = [
   { id: 'obat', label: 'Resep Obat' }
 ];
 
-const ResumePanel: React.FC<{ dossier: PatientDossierPayload }> = ({ dossier }) => {
+const ResumePanel: React.FC<{ dossier: PatientDossierPayload; hospitalName: string | null }> = ({ dossier, hospitalName }) => {
   const problemList = dossier.problemList ?? [];
   const resume = dossier.clinicalResume;
+  const controlDate = parseExplicitDate(resume?.jadwal_kontrol);
+  const showControlCalendar = Boolean(resume && controlDate && controlDate >= localTodayIso());
   return (
     <div className="space-y-4">
+      {(resume || problemList.length > 0) && (
+        <div className="flex justify-end">
+          <PdfButton label="Unduh Resume (PDF)" build={() => buildResumePdfModel(dossier, hospitalName)} />
+        </div>
+      )}
       <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3" aria-labelledby="diagnosis-heading">
         <h3 id="diagnosis-heading" className="text-base font-extrabold text-slate-900 flex items-center gap-2">
           <Stethoscope className="w-4 h-4 text-[#0B3D91]" aria-hidden="true" />
@@ -79,6 +148,16 @@ const ResumePanel: React.FC<{ dossier: PatientDossierPayload }> = ({ dossier }) 
                 </>
               )}
             </p>
+            {showControlCalendar && controlDate && (
+              <button
+                type="button"
+                onClick={() => downloadControlIcs(controlDate, resume, hospitalName)}
+                className="mt-2 min-h-[44px] px-3 rounded-xl border border-slate-300 hover:border-[#0B3D91] text-slate-800 text-sm font-bold cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <CalendarPlus className="w-4 h-4 text-[#0B3D91]" aria-hidden="true" />
+                Tambah Kontrol {formatShortDateId(controlDate)} ke Kalender
+              </button>
+            )}
           </div>
         </section>
       )}
@@ -86,8 +165,9 @@ const ResumePanel: React.FC<{ dossier: PatientDossierPayload }> = ({ dossier }) 
   );
 };
 
-const LabPanel: React.FC<{ dossier: PatientDossierPayload }> = ({ dossier }) => {
+const LabPanel: React.FC<{ dossier: PatientDossierPayload; hospitalName: string | null }> = ({ dossier, hospitalName }) => {
   const results = dossier.labRadResults ?? [];
+  const trends = useMemo(() => buildLabTrends(results.filter((r) => /lab/i.test(r.jenis || 'lab'))), [results]);
   if (results.length === 0) {
     return (
       <EmptyState
@@ -98,6 +178,13 @@ const LabPanel: React.FC<{ dossier: PatientDossierPayload }> = ({ dossier }) => 
     );
   }
   return (
+    <div className="space-y-4">
+    {results.length > 1 && (
+      <div className="flex justify-end">
+        <PdfButton label="Unduh Semua Hasil (PDF)" build={() => buildLabPdfModel(dossier, results, hospitalName)} />
+      </div>
+    )}
+    <LabTrendCard trends={trends} />
     <ul className="space-y-3">
       {results.map((item) => (
         <li key={item.id} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-2.5">
@@ -120,15 +207,44 @@ const LabPanel: React.FC<{ dossier: PatientDossierPayload }> = ({ dossier }) => 
             {displayValue(item.hasil)}
           </p>
           {item.dokter && <p className="text-sm text-slate-600">DPJP / Pengirim: {item.dokter}</p>}
+          <PdfButton
+            compact
+            label="Unduh PDF"
+            ariaLabel={`Unduh PDF hasil ${item.pemeriksaan}`}
+            build={() => buildLabPdfModel(dossier, [item], hospitalName)}
+          />
         </li>
       ))}
     </ul>
+    </div>
   );
 };
 
+function reminderSources(dossier: PatientDossierPayload): ReminderMedSource[] {
+  const seen = new Set<string>();
+  const out: ReminderMedSource[] = [];
+  const push = (name: string, dose: string, instruction: string) => {
+    const key = name.trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push({ name: name.trim(), dose: dose || '', instruction: instruction || '' });
+  };
+  for (const m of dossier.medications ?? []) {
+    if (/henti|stop|selesai/i.test(m.status || '')) continue;
+    push(m.name, m.dose, m.frequency);
+  }
+  for (const o of dossier.clinicalResume?.obat_pulang ?? []) {
+    push(o.nama_obat, o.dosis, [o.frekuensi, o.aturan_pakai].filter(Boolean).join(', '));
+  }
+  return out;
+}
+
 const ObatPanel: React.FC<{ dossier: PatientDossierPayload }> = ({ dossier }) => {
   const meds = dossier.medications ?? [];
+  const sources = useMemo(() => reminderSources(dossier), [dossier]);
+  const owner = dossier.patient?.no_rm ?? '';
   return (
+    <div className="space-y-4">
     <section className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3" aria-labelledby="obat-heading">
       <h3 id="obat-heading" className="text-base font-extrabold text-slate-900 flex items-center gap-2">
         <Pill className="w-4 h-4 text-[#0B3D91]" aria-hidden="true" />
@@ -157,6 +273,8 @@ const ObatPanel: React.FC<{ dossier: PatientDossierPayload }> = ({ dossier }) =>
         </ul>
       )}
     </section>
+    {owner && <MedicineReminderPanel owner={owner} meds={sources} />}
+    </div>
   );
 };
 
@@ -166,7 +284,9 @@ export const HasilScreen: React.FC<{
   subTab: ResultSubTab;
   direction: number;
   onSelectSubTab: (sub: ResultSubTab) => void;
-}> = ({ dossier, loading, subTab, direction, onSelectSubTab }) => (
+  /** Nama rumah sakit dari katalog publik (untuk kop PDF); null bila tidak dikonfigurasi. */
+  hospitalName?: string | null;
+}> = ({ dossier, loading, subTab, direction, onSelectSubTab, hospitalName = null }) => (
   <div className="space-y-4">
     <div role="group" aria-label="Jenis hasil medis" className="grid grid-cols-3 gap-2 p-1 rounded-2xl bg-slate-200/70">
       {SUB_TABS.map((st) => (
@@ -199,8 +319,8 @@ export const HasilScreen: React.FC<{
           exit="exit"
           transition={fadeSlideTransition}
         >
-          {subTab === 'resume' && <ResumePanel dossier={dossier} />}
-          {subTab === 'lab' && <LabPanel dossier={dossier} />}
+          {subTab === 'resume' && <ResumePanel dossier={dossier} hospitalName={hospitalName} />}
+          {subTab === 'lab' && <LabPanel dossier={dossier} hospitalName={hospitalName} />}
           {subTab === 'obat' && <ObatPanel dossier={dossier} />}
         </motion.div>
       </AnimatePresence>

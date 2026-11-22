@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, BellOff, BellRing, CalendarPlus, FlaskConical, HeartPulse, Receipt, Sparkles } from 'lucide-react';
+import { AlertTriangle, BellOff, BellRing, CalendarPlus, ChevronRight, FlaskConical, HeartPulse, History, Receipt, Sparkles } from 'lucide-react';
 import type { PatientDossierPayload } from './types';
 import type { PatientNotificationsState } from './usePatientNotifications';
 import { SkeletonBlock } from './ui';
@@ -47,7 +47,9 @@ export const BerandaScreen: React.FC<{
   onGoLab: () => void;
   onGoTagihan: () => void;
   onOpenNotifications: () => void;
-}> = ({ dossier, loading, notif, onOpenQr, onGoJadwal, onGoLab, onGoTagihan, onOpenNotifications }) => {
+  /** Buka Riwayat Kunjungan. */
+  onGoRiwayat?: () => void;
+}> = ({ dossier, loading, notif, onOpenQr, onGoJadwal, onGoLab, onGoTagihan, onOpenNotifications, onGoRiwayat }) => {
   if (!dossier) return loading ? <BerandaSkeleton /> : null;
 
   const activeQueues = dossier.activeQueues ?? [];
@@ -198,6 +200,21 @@ export const BerandaScreen: React.FC<{
               <VitalTile label="Saturasi O₂" value={displayValue(dossier.vitalsLatest.spo2)} unit="%" accent />
             </div>
           </div>
+        )}
+
+        {onGoRiwayat && (
+          <button
+            type="button"
+            onClick={onGoRiwayat}
+            className="w-full bg-white hover:border-[#0B3D91] border border-slate-200 rounded-2xl p-4 min-h-[44px] flex items-center gap-3 text-left transition cursor-pointer"
+          >
+            <History className="w-5 h-5 text-[#0B3D91] shrink-0" aria-hidden="true" />
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-bold text-slate-900">Riwayat Kunjungan</span>
+              <span className="block text-sm text-slate-600">Ubah jadwal, batalkan, atau tambahkan ke kalender.</span>
+            </span>
+            <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" aria-hidden="true" />
+          </button>
         )}
 
         <div className="grid grid-cols-2 gap-3">

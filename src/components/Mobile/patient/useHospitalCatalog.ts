@@ -25,6 +25,7 @@ function isPoli(value: unknown): value is PublicPoliklinik {
 export function useHospitalCatalog() {
   const [doctors, setDoctors] = useState<PublicDoctor[]>([]);
   const [poliklinikRaw, setPoliklinikRaw] = useState<PublicPoliklinik[]>([]);
+  const [hospitalName, setHospitalName] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -44,6 +45,7 @@ export function useHospitalCatalog() {
           }))
         );
         setPoliklinikRaw(polis.map((p: PublicPoliklinik) => ({ id: p.id, nama: p.nama })));
+        setHospitalName(typeof data?.hospitalName === 'string' && data.hospitalName.trim() ? data.hospitalName.trim() : null);
         setStatus('ready');
       })
       .catch(() => {
@@ -70,5 +72,5 @@ export function useHospitalCatalog() {
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  return { doctors, poliklinik, status, reload };
+  return { doctors, poliklinik, status, reload, hospitalName };
 }

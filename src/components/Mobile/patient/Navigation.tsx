@@ -32,6 +32,8 @@ export const AppHeader: React.FC<{
   onOpenNotifications: () => void;
   onRefresh: () => void;
   onOpenQr: () => void;
+  /** Aksi tambahan di header (mis. pemilih akun keluarga). */
+  extraActions?: React.ReactNode;
 }> = ({
   patient,
   activeTab,
@@ -43,7 +45,8 @@ export const AppHeader: React.FC<{
   isRefreshing,
   onOpenNotifications,
   onRefresh,
-  onOpenQr
+  onOpenQr,
+  extraActions
 }) => (
   <header className="sticky top-0 z-40 bg-[#0B3D91] text-white shadow-sm pt-[env(safe-area-inset-top)]">
     <div className="max-w-5xl mx-auto px-3 sm:px-4 h-16 flex items-center justify-between gap-2">
@@ -104,6 +107,7 @@ export const AppHeader: React.FC<{
       </nav>
 
       <div className="flex items-center gap-1.5 shrink-0">
+        {extraActions}
         <button
           type="button"
           onClick={onOpenNotifications}

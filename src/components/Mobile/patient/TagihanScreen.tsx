@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpRight, LogOut, Receipt } from 'lucide-react';
+import { ArrowUpRight, LogOut, MessageSquareHeart, Receipt, UserCog } from 'lucide-react';
 import { PWAInstallButton } from '../../PWA/PWAInstallButton';
 import type { PatientDossierPayload } from './types';
 import { EmptyState, SkeletonBlock, SkeletonList } from './ui';
@@ -81,7 +81,9 @@ export const TagihanScreen: React.FC<{
   onOpenPortal: () => void;
   /** Token sesi pasien; bila tidak diberikan, dibaca dari sessionStorage oleh klien pembayaran. */
   token?: string | null;
-}> = ({ dossier, loading, onLogout, onOpenPortal, token }) => {
+  onOpenProfile?: () => void;
+  onOpenFeedback?: () => void;
+}> = ({ dossier, loading, onLogout, onOpenPortal, token, onOpenProfile, onOpenFeedback }) => {
   const patient = dossier?.patient;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -140,6 +142,31 @@ export const TagihanScreen: React.FC<{
             <PWAInstallButton variant="primary" label="Pasang Aplikasi (PWA)" showAlwaysGuide />
           </div>
         </section>
+
+        {(onOpenProfile || onOpenFeedback) && (
+          <div className="grid grid-cols-2 gap-2">
+            {onOpenProfile && (
+              <button
+                type="button"
+                onClick={onOpenProfile}
+                className="min-h-[48px] rounded-2xl border border-slate-200 bg-white hover:border-[#0B3D91] text-slate-800 font-bold text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <UserCog className="w-4 h-4" aria-hidden="true" />
+                <span>Profil & Keluarga</span>
+              </button>
+            )}
+            {onOpenFeedback && (
+              <button
+                type="button"
+                onClick={onOpenFeedback}
+                className="min-h-[48px] rounded-2xl border border-slate-200 bg-white hover:border-[#0B3D91] text-slate-800 font-bold text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <MessageSquareHeart className="w-4 h-4" aria-hidden="true" />
+                <span>Masukan & Pengaduan</span>
+              </button>
+            )}
+          </div>
+        )}
 
         <button
           type="button"

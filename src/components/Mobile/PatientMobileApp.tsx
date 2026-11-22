@@ -32,6 +32,17 @@ import { TagihanScreen } from './patient/TagihanScreen';
 import { QrCardModal } from './patient/QrCardModal';
 import { BookingModal, type BookingRequest } from './patient/BookingModal';
 import { NotificationsModal } from './patient/NotificationsModal';
+import { RiwayatScreen } from './patient/RiwayatScreen';
+import { MedicineReminderRunner } from './patient/MedicineReminders';
+import { ProfileScreen } from './patient/account/ProfileScreen';
+import { FeedbackScreen, RatingPrompt } from './patient/account/FeedbackScreen';
+import { FamilySwitcher, GuardianBanner } from './patient/account/FamilySwitcher';
+import { useFamily } from './patient/account/useFamily';
+
+/** Rute sekunder (bukan tab bawah): riwayat kunjungan, disorot sebagai bagian tab Jadwal. */
+const RIWAYAT_PATH = `${MOBILE_BASE_PATH}/riwayat`;
+/** Rute akun (bukan tab bawah): profil & keluarga, masukan & pengaduan; disorot sebagai tab Tagihan & Akun. */
+const ACCOUNT_PAGES = { profil: `${MOBILE_BASE_PATH}/profil`, masukan: `${MOBILE_BASE_PATH}/masukan` } as const;
 
 const PATIENT_TOKEN_KEY = 'myitaru_patient_token';
 const PATIENT_LOGIN_UNAVAILABLE_MESSAGE = 'Login pasien belum tersedia, hubungi pendaftaran.';
@@ -77,10 +88,13 @@ export const PatientMobileApp: React.FC = () => {
     .filter(Boolean);
   const routeTab = segments[0];
   const routeSub = segments[1];
-  const activeTab: MobileTab = isMobileTab(routeTab) ? routeTab : 'beranda';
+  const isRiwayat = routeTab === 'riwayat';
+  const accountPage = routeTab === 'profil' || routeTab === 'masukan' ? routeTab : null;
+  const activeTab: MobileTab = isRiwayat ? 'jadwal' : accountPage ? 'tagihan' : isMobileTab(routeTab) ? routeTab : 'beranda';
   const resultSubTab: ResultSubTab = isResultSubTab(routeSub) ? routeSub : 'resume';
-  const needsRedirect =
-    !isMobileTab(routeTab) || (routeTab === 'hasil' && !isResultSubTab(routeSub)) || (routeTab !== 'hasil' && segments.length > 1);
+  const needsRedirect = isRiwayat || accountPage
+    ? segments.length > 1
+    : !isMobileTab(routeTab) || (routeTab === 'hasil' && !isResultSubTab(routeSub)) || (routeTab !== 'hasil' && segments.length > 1);
 
   // Indeks riwayat saat aplikasi pertama kali dibuka: tombol kembali di header hanya
   // mundur selama masih di dalam aplikasi pasien, tidak keluar ke situs portal.
@@ -244,6 +258,19 @@ export const PatientMobileApp: React.FC = () => {
   const refreshSilently = useCallback(() => {
     loadDossier('silent');
   }, [loadDossier]);
+
+  // Akun keluarga: beralih akun = token baru, dossier dimuat ulang untuk pasien yang dipilih.
+  const familyState = useFamily(token);
+  const handleSwitchAccount = useCallback((newToken: string) => {
+    setDossier(null);
+    setDossierStatus('loading');
+    setToken(newToken);
+    try {
+      sessionStorage.setItem(PATIENT_TOKEN_KEY, newToken);
+    } catch {
+      // Abaikan kuota penyimpanan.
+    }
+  }, []);
 
   const notif = usePatientNotifications({
     token,
@@ -521,6 +548,22 @@ export const PatientMobileApp: React.FC = () => {
         }
       />
     );
+  } else if (accountPage === 'profil') {
+    screen = <ProfileScreen token={token} familyState={familyState} onSwitched={handleSwitchAccount} />;
+  } else if (accountPage === 'masukan') {
+    screen = <FeedbackScreen token={token} />;
+  } else if (isRiwayat) {
+    screen = (
+      <RiwayatScreen
+        token={token}
+        doctors={catalog.doctors}
+        catalogStatus={catalog.status}
+        hospitalName={catalog.hospitalName}
+        onSessionExpired={clearSession}
+        onChanged={refreshSilently}
+        onGoJadwal={() => goToTab('jadwal')}
+      />
+    );
   } else if (activeTab === 'beranda') {
     screen = (
       <BerandaScreen
@@ -531,6 +574,7 @@ export const PatientMobileApp: React.FC = () => {
         onGoJadwal={() => goToTab('jadwal')}
         onGoLab={() => goToTab('hasil', 'lab')}
         onGoTagihan={() => goToTab('tagihan')}
+        onGoRiwayat={() => navigate(RIWAYAT_PATH)}
         onOpenNotifications={() => setShowNotificationsModal(true)}
       />
     );
@@ -553,6 +597,7 @@ export const PatientMobileApp: React.FC = () => {
         }}
         visibleCount={visibleDoctorCount}
         onShowMore={() => setVisibleDoctorCount((n) => n + DOCTOR_PAGE_SIZE)}
+        onGoRiwayat={() => navigate(RIWAYAT_PATH)}
         onSelectDoctor={(doc) => {
           if (!dossier) {
             toast.error('Data pasien belum dimuat. Coba perbarui data terlebih dahulu.');
@@ -565,6 +610,7 @@ export const PatientMobileApp: React.FC = () => {
   } else if (activeTab === 'hasil') {
     screen = (
       <HasilScreen
+        hospitalName={catalog.hospitalName}
         dossier={dossier}
         loading={loading}
         subTab={resultSubTab}
@@ -579,6 +625,8 @@ export const PatientMobileApp: React.FC = () => {
         loading={loading}
         onLogout={handlePatientLogout}
         onOpenPortal={() => navigate('/')}
+        onOpenProfile={() => navigate(ACCOUNT_PAGES.profil)}
+        onOpenFeedback={() => navigate(ACCOUNT_PAGES.masukan)}
       />
     );
   }
@@ -598,6 +646,16 @@ export const PatientMobileApp: React.FC = () => {
           onOpenNotifications={() => setShowNotificationsModal(true)}
           onRefresh={() => loadDossier(dossier ? 'manual' : 'initial')}
           onOpenQr={() => setShowQrModal(true)}
+          extraActions={
+            <FamilySwitcher
+              token={token}
+              familyState={familyState}
+              currentRm={dossier?.patient?.no_rm}
+              onSwitched={handleSwitchAccount}
+              onOpenProfile={() => navigate(ACCOUNT_PAGES.profil)}
+              onOpenFeedback={() => navigate(ACCOUNT_PAGES.masukan)}
+            />
+          }
         />
 
         <main className="max-w-5xl mx-auto px-4 py-5 space-y-5">
@@ -617,13 +675,16 @@ export const PatientMobileApp: React.FC = () => {
             </div>
           )}
 
+          <GuardianBanner familyState={familyState} token={token} onSwitched={handleSwitchAccount} />
+          {activeTab === 'beranda' && <RatingPrompt token={token} refreshKey={lastLoadedAt} />}
+
           {notif.liveBannerAlert && (
             <LiveAlertBanner alert={notif.liveBannerAlert} onOpen={openNotification} onDismiss={notif.dismissLiveBanner} />
           )}
 
           <AnimatePresence mode="wait" custom={tabDirectionRef.current} initial={false}>
             <motion.section
-              key={activeTab}
+              key={isRiwayat ? 'riwayat' : accountPage ?? activeTab}
               custom={tabDirectionRef.current}
               variants={fadeSlideVariants}
               initial="enter"
@@ -631,7 +692,13 @@ export const PatientMobileApp: React.FC = () => {
               exit="exit"
               transition={fadeSlideTransition}
               aria-label={
-                activeTab === 'beranda'
+                isRiwayat
+                  ? 'Riwayat kunjungan'
+                  : accountPage === 'profil'
+                  ? 'Profil dan akun keluarga'
+                  : accountPage === 'masukan'
+                  ? 'Masukan dan pengaduan'
+                  : activeTab === 'beranda'
                   ? 'Beranda'
                   : activeTab === 'jadwal'
                   ? 'Jadwal dan pendaftaran'
@@ -646,6 +713,8 @@ export const PatientMobileApp: React.FC = () => {
         </main>
 
         <BottomNav activeTab={activeTab} onSelectTab={(tab) => goToTab(tab)} />
+
+        <MedicineReminderRunner owner={dossier?.patient?.no_rm} />
 
         <QrCardModal
           open={showQrModal}

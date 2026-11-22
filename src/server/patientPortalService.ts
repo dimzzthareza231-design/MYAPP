@@ -110,24 +110,53 @@ interface PatientSession {
   authMethod: PatientAuthMethod;
   email?: string;
   verifiedAt: string;
+  /** No. RM wali yang bertindak atas nama pasien ini (akun keluarga); kosong = pasien sendiri. */
+  actorRm?: string;
 }
 
 const PATIENT_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+/** Sesi wali-atas-nama-tanggungan dibatasi lebih pendek agar pencabutan tautan cepat berlaku antar-instance. */
+export const GUARDIAN_SESSION_TTL_MS = 60 * 60 * 1000;
 // Sesi pasien = token bertanda tangan (stateless), tetap valid di semua instance serverless.
 const patientSessions = createSignedStore<PatientSession>('pat_', 'token', PATIENT_SESSION_TTL_MS);
+
+function readValidSession(token: string): PatientSession | undefined {
+  const session = patientSessions.get(token);
+  if (!session) return undefined;
+  if (session.actorRm) {
+    const issued = Date.parse(session.verifiedAt);
+    if (!Number.isFinite(issued) || Date.now() - issued > GUARDIAN_SESSION_TTL_MS) return undefined;
+  }
+  return session;
+}
 
 /**
  * Menerbitkan sesi pasien untuk No. RM yang identitasnya SUDAH diverifikasi oleh
  * penyedia autentikasi nyata (mis. OTP). Jangan panggil tanpa verifikasi kepemilikan.
  */
-export function issuePatientSession(no_rm: string, authMethod: PatientAuthMethod, email?: string): string {
+export function issuePatientSession(
+  no_rm: string,
+  authMethod: PatientAuthMethod,
+  email?: string,
+  options: { actorRm?: string } = {}
+): string {
   return patientSessions.issue({
     token: '',
     no_rm: normalizeRm(no_rm),
     authMethod,
     email,
-    verifiedAt: new Date().toISOString()
+    verifiedAt: new Date().toISOString(),
+    ...(options.actorRm ? { actorRm: normalizeRm(options.actorRm) } : {})
   });
+}
+
+/** Mencabut token sesi pasien (dipakai saat beralih akun keluarga). */
+export function revokePatientSessionToken(token: string): void {
+  if (token) patientSessions.delete(token);
+}
+
+export function readPatientSessionTokenFromRequest(req: express.Request): string {
+  return readPatientSessionToken(req);
 }
 
 export const PATIENT_SESSION_COOKIE = 'myitaru_patient_session';
@@ -155,10 +184,16 @@ function readPatientSessionToken(req: express.Request): string {
  */
 export function resolvePatientSession(
   req: express.Request
-): { no_rm: string; authMethod: PatientAuthMethod; email?: string; verifiedAt: string } | undefined {
-  const session = patientSessions.get(readPatientSessionToken(req));
+): { no_rm: string; authMethod: PatientAuthMethod; email?: string; verifiedAt: string; actorRm?: string } | undefined {
+  const session = readValidSession(readPatientSessionToken(req));
   if (!session) return undefined;
-  return { no_rm: session.no_rm, authMethod: session.authMethod, email: session.email, verifiedAt: session.verifiedAt };
+  return {
+    no_rm: session.no_rm,
+    authMethod: session.authMethod,
+    email: session.email,
+    verifiedAt: session.verifiedAt,
+    actorRm: session.actorRm
+  };
 }
 
 const PATIENT_LOGIN_UNAVAILABLE = {
@@ -330,7 +365,7 @@ export function registerPatientPortalRoutes(
   const sseClientsByRm = new Map<string, Set<express.Response>>();
 
   function resolveSessionFromReq(req: express.Request): PatientSession | undefined {
-    return patientSessions.get(readPatientSessionToken(req));
+    return readValidSession(readPatientSessionToken(req));
   }
 
   function setPatientSessionCookie(res: express.Response, token: string, maxAgeSeconds = 12 * 60 * 60): void {

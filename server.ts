@@ -19,6 +19,7 @@ import {
 } from './src/server/aiIntelligenceEngine';
 import { registerPatientPortalRoutes } from './src/server/patientPortalService';
 import { registerPaymentRoutes } from './src/server/payments';
+import { registerPatientAccountRoutes } from './src/server/patientAccountService';
 import {
   registerHospitalMasterRoutes,
   type ServerDoctorRecord,
@@ -194,6 +195,10 @@ export async function createApps(
       '/patient/verify': { max: 10, windowMs: 15 * 60 * 1000 },
       '/patient/google-session': { max: 10, windowMs: 15 * 60 * 1000 },
       '/patient/appointments': { max: 20, windowMs: 15 * 60 * 1000 },
+      '/patient/family/link/request': { max: 10, windowMs: 15 * 60 * 1000 },
+      '/patient/family/link/verify': { max: 20, windowMs: 15 * 60 * 1000 },
+      '/patient/feedback': { max: 20, windowMs: 15 * 60 * 1000 },
+      '/patient/complaints': { max: 10, windowMs: 15 * 60 * 1000 },
       '/v1/patient-qr/issue': { max: 30, windowMs: 15 * 60 * 1000 },
       '/v1/patient-qr/resolve': { max: 60, windowMs: 15 * 60 * 1000 },
       '/v1/patient-qr/redeem': { max: 60, windowMs: 15 * 60 * 1000 },
@@ -2233,6 +2238,9 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
 
   // Pembayaran online tagihan pasien (Xendit/PayPal) + webhook provider (web publik).
   registerPaymentRoutes(publicApp, { persistence, createAuditLog: appendAuditLog });
+
+  // Akun pasien: profil kontak, akun keluarga (OTP), penilaian & pengaduan; tindak lanjut petugas di aplikasi inti.
+  registerPatientAccountRoutes(publicApp, { persistence, patientsStore, appointmentsStore, staffApp: app, createAuditLog: appendAuditLog });
 
   // Register Unified Employee Ecosystem API Gateway (/api/gateway/*)
   registerEmployeePortalGateway(app, {
