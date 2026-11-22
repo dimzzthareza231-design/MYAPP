@@ -1,6 +1,6 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarCheck, CheckCircle2, ShieldCheck, Smartphone, Ticket } from 'lucide-react';
+import { CalendarCheck, Check, CheckCircle2, Copy, ShieldCheck, Smartphone, Ticket } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   EASE_OUT_EXPO,
@@ -21,9 +21,47 @@ interface BookingPanelProps {
   isSubmitting: boolean;
   bookingSuccess: BookingSuccess | null;
   onSubmit: (e: React.FormEvent) => void;
-  onCheckQueue: (nomor: string) => void;
+  /** Dipanggil dengan kode booking (kunci cek antrean publik). */
+  onCheckQueue: (kodeBooking: string) => void;
   onReset: () => void;
 }
+
+/** Kode booking ditampilkan menonjol + tombol salin; kode ini diperlukan untuk cek antrean. */
+const BookingCodeCard: React.FC<{ code: string }> = ({ code }) => {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="rounded-2xl border-2 border-brand bg-blue-50 p-4 space-y-2">
+      <p className="text-xs font-bold uppercase tracking-wider text-brand">Kode Booking — simpan kode ini</p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-2xl sm:text-3xl font-extrabold tracking-[0.18em] font-mono text-slate-900 break-all">{code}</p>
+        <button
+          type="button"
+          onClick={copy}
+          className="inline-flex items-center gap-1.5 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-bold px-3 min-h-[44px] cursor-pointer shrink-0"
+        >
+          {copied ? <Check className="w-4 h-4" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
+          <span>{copied ? 'Tersalin' : 'Salin'}</span>
+        </button>
+      </div>
+      <p className="text-xs text-slate-700">
+        Kode booking diperlukan untuk mengecek status antrean dari perangkat lain. Jangan bagikan kepada orang yang
+        tidak berkepentingan.
+      </p>
+      <span className="sr-only" aria-live="polite">
+        {copied ? 'Kode booking disalin ke papan klip.' : ''}
+      </span>
+    </div>
+  );
+};
 
 const inputClass =
   'w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white focus:border-brand outline-none focus-visible:ring-2 focus-visible:ring-brand/30';
@@ -68,6 +106,8 @@ export const BookingPanel: React.FC<BookingPanelProps> = ({
               </p>
             </div>
 
+            {bookingSuccess.kode_booking && <BookingCodeCard code={bookingSuccess.kode_booking} />}
+
             <dl className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-xs">
               {(
                 [
@@ -103,7 +143,7 @@ export const BookingPanel: React.FC<BookingPanelProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => onCheckQueue(bookingSuccess.nomor_antrian)}
+                onClick={() => onCheckQueue(bookingSuccess.kode_booking)}
                 className="w-full py-3 rounded-xl bg-brand hover:bg-brand-hover text-white font-bold text-xs cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <Ticket className="w-4 h-4" aria-hidden="true" />

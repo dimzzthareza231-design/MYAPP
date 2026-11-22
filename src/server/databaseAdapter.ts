@@ -21,7 +21,10 @@ export const PERSISTENCE_ENTITIES = [
   'bookings',
   'system_data',
   'local_auth_users',
-  'local_auth_sessions'
+  'local_auth_sessions',
+  'doctors',
+  'poliklinik',
+  'payments'
 ] as const;
 export type PersistenceEntity = typeof PERSISTENCE_ENTITIES[number];
 
@@ -40,7 +43,10 @@ const MYSQL_TABLES: Record<PersistenceEntity, string> = {
   bookings: 'bookings',
   system_data: 'system_data',
   local_auth_users: 'local_auth_users',
-  local_auth_sessions: 'local_auth_sessions'
+  local_auth_sessions: 'local_auth_sessions',
+  doctors: 'doctors',
+  poliklinik: 'poliklinik',
+  payments: 'payments'
 };
 
 const FIRESTORE_COLLECTIONS: Record<PersistenceEntity, string> = {
@@ -58,7 +64,10 @@ const FIRESTORE_COLLECTIONS: Record<PersistenceEntity, string> = {
   bookings: 'bookings',
   system_data: 'system_data',
   local_auth_users: 'local_auth_users',
-  local_auth_sessions: 'local_auth_sessions'
+  local_auth_sessions: 'local_auth_sessions',
+  doctors: 'doctors',
+  poliklinik: 'poliklinik',
+  payments: 'payments'
 };
 
 export interface StoredRecord<T = unknown> {

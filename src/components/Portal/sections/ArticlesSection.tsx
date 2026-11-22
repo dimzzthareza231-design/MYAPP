@@ -1,30 +1,24 @@
-import React, { useCallback, useState } from 'react';
+import React from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowRight, FileText } from 'lucide-react';
-import { AnimatePresence } from 'motion/react';
 import { SectionHeading } from './SectionHeading';
-import { ArticleModal } from './ArticleModal';
 import { SECTION_IDS } from '../portalShared';
+import { articleSlug } from '../publicDirectory';
 import type { HealthArticle, PatientStory } from '../../../data/hospitalPublicCatalog';
 import consultImg from '../../../assets/images/myitaru_poli_consult.webp';
 
 interface ArticlesSectionProps {
   articles: HealthArticle[];
   stories: PatientStory[];
-  onBookRelated: () => void;
 }
 
-/** Artikel edukasi & kisah pasien (berizin). Tidak dirender bila keduanya kosong. */
-export const ArticlesSection: React.FC<ArticlesSectionProps> = ({ articles, stories, onBookRelated }) => {
-  const [activeArticle, setActiveArticle] = useState<HealthArticle | null>(null);
-  const closeArticle = useCallback(() => setActiveArticle(null), []);
-  const bookFromArticle = useCallback(() => {
-    setActiveArticle(null);
-    onBookRelated();
-  }, [onBookRelated]);
+const LANDING_ARTICLE_LIMIT = 4;
 
+/** Artikel edukasi & kisah pasien (berizin). Tidak dirender bila keduanya kosong. */
+export const ArticlesSection: React.FC<ArticlesSectionProps> = ({ articles, stories }) => {
   if (articles.length === 0 && stories.length === 0) return null;
 
-  const [featured, ...rest] = articles;
+  const [featured, ...rest] = articles.slice(0, LANDING_ARTICLE_LIMIT);
 
   return (
     <section
@@ -56,15 +50,14 @@ export const ArticlesSection: React.FC<ArticlesSectionProps> = ({ articles, stor
                   </p>
                   <h3 className="text-lg font-bold text-slate-900 leading-snug">{featured.title}</h3>
                   <p className="text-sm text-slate-600">{featured.summary}</p>
-                  <button
-                    type="button"
-                    onClick={() => setActiveArticle(featured)}
-                    className="inline-flex items-center gap-1.5 text-sm font-bold text-brand pt-1 cursor-pointer"
+                  <Link
+                    to={`/artikel/${articleSlug(featured)}`}
+                    className="inline-flex items-center gap-1.5 text-sm font-bold text-brand pt-1 rounded"
                   >
                     <span>Baca Selengkapnya</span>
                     <span className="sr-only">: {featured.title}</span>
                     <ArrowRight className="w-4 h-4" aria-hidden="true" />
-                  </button>
+                  </Link>
                 </div>
               </article>
 
@@ -82,19 +75,25 @@ export const ArticlesSection: React.FC<ArticlesSectionProps> = ({ articles, stor
                         <h3 className="font-bold text-sm text-slate-900 mt-1.5 leading-snug">{article.title}</h3>
                         <p className="text-sm text-slate-600 mt-2 leading-relaxed">{article.summary}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setActiveArticle(article)}
-                        className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-brand cursor-pointer"
+                      <Link
+                        to={`/artikel/${articleSlug(article)}`}
+                        className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-brand rounded"
                       >
                         <FileText className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>Baca Artikel</span>
                         <span className="sr-only">: {article.title}</span>
-                      </button>
+                      </Link>
                     </li>
                   ))}
                 </ul>
               )}
+              <Link
+                to="/artikel"
+                className="inline-flex items-center gap-1.5 text-sm font-bold text-brand rounded"
+              >
+                <span>Lihat semua artikel</span>
+                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+              </Link>
             </div>
           )}
 
@@ -119,11 +118,6 @@ export const ArticlesSection: React.FC<ArticlesSectionProps> = ({ articles, stor
         </div>
       </div>
 
-      <AnimatePresence>
-        {activeArticle && (
-          <ArticleModal article={activeArticle} onClose={closeArticle} onBookRelated={bookFromArticle} />
-        )}
-      </AnimatePresence>
     </section>
   );
 };

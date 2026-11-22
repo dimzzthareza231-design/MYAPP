@@ -23,9 +23,12 @@
         "AUTH_MODE": "local",
         "STORAGE_MODE": "d1"
       },
+      // not_found_handling "none": path yang bukan file statis diteruskan ke Worker, yang menyajikan
+      // SPA dengan status 200 (rute dikenal) atau 404 (path tak dikenal). Lihat worker/index.ts.
       "assets": {
         "directory": "./dist/public",
-        "not_found_handling": "single-page-application",
+        "binding": "ASSETS",
+        "not_found_handling": "none",
         "run_worker_first": ["/api/*"]
       },
       "d1_databases": [

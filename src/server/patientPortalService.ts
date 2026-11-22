@@ -2,8 +2,19 @@ import crypto from 'crypto';
 import type express from 'express';
 import { createSignedStore } from './signedStore';
 import { createSecurePatientQrToken, isSecurePatientQrConfigured } from './securePatientQr';
-import { hashQrToken } from './databaseAdapter';
-import { MASTER_POLIKLINIK, SEMUA_DOKTER } from '../data/seedData';
+import { hashQrToken, type PersistenceRepository } from './databaseAdapter';
+import {
+  MemoryOtpStore,
+  OtpLoginService,
+  PersistenceOtpStore,
+  normalizeIndonesianPhone,
+  randomId,
+  resolveOtpSecret,
+  resolveOtpSender,
+  type OtpAuditEntry,
+  type OtpKvStore
+} from './otp';
+import type { ServerDoctorRecord, ServerPoliklinikRecord } from './hospitalMasterService';
 import type { ClinicalResume } from '../data/patientPelayananData';
 
 export interface ServerPatientRecord {
@@ -38,6 +49,28 @@ export interface ServerAppointmentRecord {
   tipe: 'Rawat Jalan' | 'IGD' | 'Konsultasi';
   created_at: string;
   checked_in_at?: string;
+  /** Kode booking acak (tidak berurutan) untuk cek antrean publik. */
+  kode_booking?: string;
+  poli_id?: string;
+  dokter_id?: string;
+  cancelled_at?: string;
+  rescheduled_at?: string;
+}
+
+// Alfabet Crockford-like tanpa karakter ambigu (0/O, 1/I/L, U): 30^10 ≈ 5,9e14 kemungkinan.
+const BOOKING_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
+const BOOKING_CODE_LENGTH = 10;
+
+export function generateBookingCode(): string {
+  let code = '';
+  for (let i = 0; i < BOOKING_CODE_LENGTH; i += 1) {
+    code += BOOKING_CODE_ALPHABET[crypto.randomInt(BOOKING_CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+function normalizeBookingCode(raw: unknown): string {
+  return String(raw || '').toUpperCase().replace(/[\s-]/g, '').slice(0, 32);
 }
 
 export interface ServerQrTokenRecord {
@@ -95,6 +128,37 @@ export function issuePatientSession(no_rm: string, authMethod: PatientAuthMethod
     email,
     verifiedAt: new Date().toISOString()
   });
+}
+
+export const PATIENT_SESSION_COOKIE = 'myitaru_patient_session';
+
+function readPatientSessionToken(req: express.Request): string {
+  const authHeader = req.headers.authorization || '';
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  if (bearer) return bearer;
+  const cookieToken = (req.headers.cookie || '')
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${PATIENT_SESSION_COOKIE}=`))
+    ?.slice(PATIENT_SESSION_COOKIE.length + 1);
+  if (!cookieToken) return '';
+  try {
+    return decodeURIComponent(cookieToken);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Satu-satunya pemeriksa sesi pasien (Bearer atau cookie HttpOnly). Modul lain (mis. pembayaran)
+ * wajib memakai fungsi ini agar logout/pencabutan token berlaku di semua rute.
+ */
+export function resolvePatientSession(
+  req: express.Request
+): { no_rm: string; authMethod: PatientAuthMethod; email?: string; verifiedAt: string } | undefined {
+  const session = patientSessions.get(readPatientSessionToken(req));
+  if (!session) return undefined;
+  return { no_rm: session.no_rm, authMethod: session.authMethod, email: session.email, verifiedAt: session.verifiedAt };
 }
 
 const PATIENT_LOGIN_UNAVAILABLE = {
@@ -238,6 +302,13 @@ export function registerPatientPortalRoutes(
     appointmentsStore: ServerAppointmentRecord[];
     bedsStore: ServerBedRecord[];
     qrTokensStore?: ServerQrTokenRecord[];
+    /** Master layanan tersimpan (dikelola petugas lewat /api/v1/master/*). */
+    doctorsStore: ServerDoctorRecord[];
+    poliklinikStore: ServerPoliklinikRecord[];
+    /** Aplikasi inti (di belakang autentikasi staf) untuk endpoint petugas, mis. dispatch notifikasi. */
+    staffApp?: express.Express;
+    /** Nama fasilitas untuk katalog publik; default dari env HOSPITAL_NAME. */
+    hospitalName?: string;
     createAuditLog?: (entry: {
       user: string;
       role: string;
@@ -249,10 +320,8 @@ export function registerPatientPortalRoutes(
     }) => void;
   }
 ) {
-  const { patientsStore, appointmentsStore, bedsStore, createAuditLog } = deps;
-
-  const doctorServedBoost = new Map<string, number>();
-  const patientSessionCookieName = 'myitaru_patient_session';
+  const { patientsStore, appointmentsStore, bedsStore, doctorsStore, poliklinikStore, createAuditLog } = deps;
+  const patientSessionCookieName = PATIENT_SESSION_COOKIE;
 
   // Token FCM, kotak notifikasi, hasil lab yang dikirim petugas, dan stream SSE per No. RM
   const fcmTokensByRm = new Map<string, ServerFcmTokenRecord[]>();
@@ -261,14 +330,7 @@ export function registerPatientPortalRoutes(
   const sseClientsByRm = new Map<string, Set<express.Response>>();
 
   function resolveSessionFromReq(req: express.Request): PatientSession | undefined {
-    const authHeader = req.headers.authorization || '';
-    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    const cookieToken = (req.headers.cookie || '')
-      .split(';')
-      .map((part) => part.trim())
-      .find((part) => part.startsWith(`${patientSessionCookieName}=`))
-      ?.slice(patientSessionCookieName.length + 1);
-    return patientSessions.get(bearer || cookieToken || '');
+    return patientSessions.get(readPatientSessionToken(req));
   }
 
   function setPatientSessionCookie(res: express.Response, token: string, maxAgeSeconds = 12 * 60 * 60): void {
@@ -486,6 +548,89 @@ export function registerPatientPortalRoutes(
     };
   }
 
+  const todayIso = () => new Date().toISOString().slice(0, 10);
+
+  function activePoliklinik(): ServerPoliklinikRecord[] {
+    return poliklinikStore.filter((p) => p.aktif !== false);
+  }
+
+  function findActivePoli(id: unknown): ServerPoliklinikRecord | undefined {
+    return typeof id === 'string' ? activePoliklinik().find((p) => p.id === id) : undefined;
+  }
+
+  function findActiveDoctor(id: unknown, poliId: string): ServerDoctorRecord | undefined {
+    return typeof id === 'string'
+      ? doctorsStore.find((d) => d.id === id && d.poli_id === poliId && d.aktif !== false)
+      : undefined;
+  }
+
+  function isLiveAppointment(a: ServerAppointmentRecord): boolean {
+    return a.status !== 'Dibatalkan' && a.status !== 'Batal';
+  }
+
+  function appointmentMatchesPoli(a: ServerAppointmentRecord, poli: ServerPoliklinikRecord): boolean {
+    return a.poli_id ? a.poli_id === poli.id : a.poli === poli.nama;
+  }
+
+  function bookedCountForDoctor(doctor: ServerDoctorRecord, tanggal: string, excludeId?: string): number {
+    return appointmentsStore.filter(
+      (a) => a.id !== excludeId && a.tanggal === tanggal && isLiveAppointment(a) &&
+        (a.dokter_id ? a.dokter_id === doctor.id : a.dokter === doctor.nama)
+    ).length;
+  }
+
+  function nextQueueNumber(poli: ServerPoliklinikRecord, tanggal: string): string {
+    const used = appointmentsStore.filter((a) => a.tanggal === tanggal && appointmentMatchesPoli(a, poli)).length;
+    return `${poli.kode}-${String(used + 1).padStart(3, '0')}`;
+  }
+
+  function uniqueBookingCode(): string {
+    for (;;) {
+      const code = generateBookingCode();
+      if (!appointmentsStore.some((a) => a.kode_booking === code)) return code;
+    }
+  }
+
+  function validateVisitDate(tanggal: unknown): { ok: true; date: string; endMs: number } | { ok: false; message: string } {
+    if (!isValidIsoDate(tanggal)) return { ok: false, message: 'Tanggal kunjungan tidak valid.' };
+    if (tanggal < todayIso()) return { ok: false, message: 'Tanggal kunjungan tidak boleh berada di masa lalu.' };
+    const endMs = Date.parse(`${tanggal}T23:59:59.999Z`);
+    if (!Number.isFinite(endMs) || endMs > Date.now() + 365 * 24 * 60 * 60 * 1000) {
+      return { ok: false, message: 'Pendaftaran hanya dapat dibuat hingga 1 tahun ke depan.' };
+    }
+    return { ok: true, date: tanggal, endMs };
+  }
+
+  // QR reservasi diikat ke tanggal kunjungan; terbitkan ulang saat jadwal berubah dan cabut yang lama.
+  function revokeReservationQr(appointmentId: string): void {
+    const store = deps.qrTokensStore;
+    if (!store) return;
+    for (let i = store.length - 1; i >= 0; i -= 1) {
+      if (store[i].kind === 'reservation' && store[i].subject === appointmentId) store.splice(i, 1);
+    }
+  }
+
+  function issueReservationQr(appointmentId: string, visitEndMs: number): string {
+    const qrValue = createSecurePatientQrToken(appointmentId, {
+      kind: 'reservation',
+      ttlMs: Math.max(60_000, visitEndMs + 24 * 60 * 60 * 1000 - Date.now())
+    });
+    deps.qrTokensStore?.unshift({
+      id: hashQrToken(qrValue),
+      tokenHash: hashQrToken(qrValue),
+      subject: appointmentId,
+      kind: 'reservation',
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(visitEndMs + 24 * 60 * 60 * 1000).toISOString(),
+      issuedBy: 'patient-portal'
+    });
+    return qrValue;
+  }
+
+  function isPatientModifiable(a: ServerAppointmentRecord): boolean {
+    return a.status === 'Menunggu' && a.tanggal >= todayIso();
+  }
+
   // Ringkasan antrean publik per poliklinik: HANYA agregat (nomor yang sedang dipanggil
   // dan jumlah menunggu). Jangan pernah menambahkan No. RM, nama, atau ID pasien di sini.
   function buildPublicPoliQueues(): Array<{
@@ -495,11 +640,9 @@ export function registerPatientPortalRoutes(
     sedangDipanggil: string | null;
     totalMenunggu: number;
   }> {
-    return MASTER_POLIKLINIK.map((pol) => {
-      const poliKey = pol.nama.replace('Poli ', '').toLowerCase();
-      const matchingApts = appointmentsStore.filter(
-        (a) => a.poli.toLowerCase().includes(poliKey) || a.nomor_antrian.startsWith(`${pol.kode}-`)
-      );
+    const today = todayIso();
+    return activePoliklinik().map((pol) => {
+      const matchingApts = appointmentsStore.filter((a) => a.tanggal === today && appointmentMatchesPoli(a, pol));
       const activeCall = matchingApts.find((a) => a.status === 'Diperiksa' || a.status === 'Panggil');
       const waiting = matchingApts.filter((a) => a.status === 'Menunggu');
       return {
@@ -514,49 +657,55 @@ export function registerPatientPortalRoutes(
 
   // 1. Public Hospital Catalog (Doctors, Poliklinik, Live Queue Snapshot)
   app.get('/api/public/hospital-catalog', (req, res) => {
-    const doctors = SEMUA_DOKTER.map((doc) => {
-      const boost = doctorServedBoost.get(doc.id) || 0;
-      const served = (doc.pasien_terlayani || 0) + boost;
-      const quota = doc.kuota || 30;
-      return {
-        id: doc.id,
-        nama: doc.nama,
-        spesialis: doc.spesialis,
-        subspesialis: doc.subspesialis,
-        poli: doc.poli,
-        poli_id: doc.poli_id,
-        penempatan: doc.penempatan,
-        jadwal: doc.jadwal,
-        hari: doc.hari,
-        jam: doc.jam,
-        shift: doc.shift,
-        ruangan: doc.ruangan,
-        status_jaga: doc.status_jaga,
-        status: doc.status,
-        pasien_terlayani: served,
-        kuota_tersisa: Math.max(0, quota - served)
-      };
-    });
-
-    const poliQueues = buildPublicPoliQueues();
+    const today = todayIso();
+    const polis = activePoliklinik();
+    const poliById = new Map(polis.map((p) => [p.id, p]));
+    // Hanya data tersimpan; identitas internal dokter (NIP/SIP/STR) tidak pernah dikirim.
+    const doctors = doctorsStore
+      .filter((doc) => doc.aktif !== false && poliById.has(doc.poli_id))
+      .map((doc) => {
+        const quota = doc.kuota || 30;
+        return {
+          id: doc.id,
+          nama: doc.nama,
+          spesialis: doc.spesialis,
+          subspesialis: doc.subspesialis,
+          poli: poliById.get(doc.poli_id)!.nama,
+          poli_id: doc.poli_id,
+          hari: doc.hari,
+          jam: doc.jam,
+          jadwal: `${doc.hari} - ${doc.jam}`,
+          ruangan: doc.ruangan,
+          status: 'Aktif',
+          kuota: quota,
+          kuota_tersisa: Math.max(0, quota - bookedCountForDoctor(doc, today))
+        };
+      });
 
     res.json({
-      hospitalName: 'MYITARU SIMK',
+      hospitalName: deps.hospitalName ?? (process.env.HOSPITAL_NAME?.trim() || null),
       // Nomor IGD per cabang dikelola di katalog publik (src/data/hospitalPublicCatalog.ts).
       // Nomor darurat nasional selalu ditampilkan oleh UI.
       emergencyHotline: null,
       nationalEmergencyNumbers: ['119', '112'],
-      poliklinik: MASTER_POLIKLINIK,
+      poliklinik: polis.map((p) => ({
+        id: p.id,
+        kode: p.kode,
+        nama: p.nama,
+        kategori: p.kategori,
+        deskripsi: p.deskripsi,
+        kapasitas: p.kapasitas
+      })),
       doctors,
-      poliQueues,
+      poliQueues: buildPublicPoliQueues(),
       updatedAt: new Date().toISOString()
     });
   });
 
-  // 1b. Public Queue Status Lookup — hanya dengan kode tiket/nomor antrean milik pasien sendiri.
+  // 1b. Public Queue Status Lookup — hanya dengan kode booking acak milik pasien sendiri.
   // Tidak mendukung pencarian No. RM dan tidak pernah mengembalikan identitas pasien (No. RM, nama, ID).
   app.get('/api/public/queue-status', (req, res) => {
-    const rawQuery = String(req.query.q || '').trim().toUpperCase().slice(0, 32);
+    const rawQuery = normalizeBookingCode(req.query.q);
     const poliQueues = buildPublicPoliQueues();
 
     if (!rawQuery) {
@@ -569,15 +718,12 @@ export function registerPatientPortalRoutes(
       });
     }
 
-    // Kode tiket harus diketik lengkap (mis. "PD-003"); tidak ada pencocokan sebagian.
-    const matches = appointmentsStore
-      .filter((a) => a.nomor_antrian.toUpperCase() === rawQuery)
+    // Kode booking (acak, 10 karakter) harus diketik lengkap. Nomor antrean berurutan (mis. "UMM-003")
+    // mudah ditebak sehingga tidak lagi diterima sebagai kunci pencarian.
+    const matches = (rawQuery.length === BOOKING_CODE_LENGTH ? appointmentsStore : [])
+      .filter((a) => a.kode_booking === rawQuery)
       .map((apt) => {
-        const poliItem = MASTER_POLIKLINIK.find(
-          (m) =>
-            apt.poli.toLowerCase().includes(m.nama.replace('Poli ', '').toLowerCase()) ||
-            apt.nomor_antrian.startsWith(`${m.kode}-`)
-        );
+        const poliItem = poliklinikStore.find((m) => appointmentMatchesPoli(apt, m));
         const queueMeta = poliQueues.find((pq) => pq.id === poliItem?.id);
         const sedangDipanggil =
           apt.status === 'Diperiksa' || apt.status === 'Panggil'
@@ -587,6 +733,7 @@ export function registerPatientPortalRoutes(
         const waitingAheadList = appointmentsStore.filter(
           (other) =>
             other.poli === apt.poli &&
+            other.tanggal === apt.tanggal &&
             other.status === 'Menunggu' &&
             other.nomor_antrian.localeCompare(apt.nomor_antrian) < 0
         );
@@ -621,9 +768,194 @@ export function registerPatientPortalRoutes(
     });
   });
 
-  // 2-3. Login pasien. Belum ada penyedia OTP / identitas pasien yang terpasang, sehingga kedua
-  // endpoint menolak dengan 503 sampai verifikasi kepemilikan akun yang nyata tersedia.
-  // Saat penyedia tersedia, panggil issuePatientSession() setelah verifikasi berhasil.
+  // 2. Login pasien dengan OTP WhatsApp (Meta WhatsApp Cloud API). Lihat src/server/otp/.
+  // Bila WhatsApp atau rahasia HMAC belum dikonfigurasi, kedua endpoint menjawab 503.
+  const memoryOtpStore = new MemoryOtpStore();
+  let otpStoreFor: { persistence: PersistenceRepository; store: OtpKvStore } | undefined;
+
+  function resolveOtpStore(): OtpKvStore {
+    // app.locals.persistence dipasang createApps(); D1/MySQL -> konsisten antar-instance.
+    // Tanpa adapter (mis. unit test yang memanggil fungsi ini langsung) -> memori proses (hanya dev/tes).
+    const persistence = app.locals?.persistence as PersistenceRepository | undefined;
+    if (!persistence) return memoryOtpStore;
+    if (otpStoreFor?.persistence !== persistence) {
+      otpStoreFor = { persistence, store: new PersistenceOtpStore(persistence) };
+    }
+    return otpStoreFor.store;
+  }
+
+  function clientIp(req: express.Request): string {
+    // Header proxy hanya dipercaya di platform yang menimpanya sendiri.
+    const header = (name: string) => {
+      const value = req.headers[name];
+      return (Array.isArray(value) ? value[0] : value)?.split(',')[0]?.trim();
+    };
+    if (process.env.CLOUDFLARE_WORKER) return header('cf-connecting-ip') || req.ip || 'unknown';
+    if (process.env.VERCEL) return header('x-real-ip') || header('x-forwarded-for') || req.ip || 'unknown';
+    return req.ip || req.socket?.remoteAddress || 'unknown';
+  }
+
+  async function writeOtpAudit(entry: OtpAuditEntry, durable: boolean): Promise<void> {
+    const record = { ...entry, role: 'pasien', module: 'Patient Portal Auth' };
+    createAuditLog?.(record);
+    // Respons 4xx membuat middleware persistensi membatalkan perubahan array (termasuk log audit),
+    // jadi kegagalan ditulis langsung ke adapter agar jejak audit tetap tersimpan.
+    const persistence = app.locals?.persistence as PersistenceRepository | undefined;
+    if (durable && persistence && persistence.mode !== 'memory') {
+      const id = `otp-log-${Date.now()}-${randomId(4)}`;
+      await persistence.commit([
+        {
+          entity: 'audit_logs',
+          id,
+          data: {
+            id,
+            timestamp: new Date().toISOString(),
+            ...record
+          }
+        }
+      ]);
+    }
+  }
+
+  function buildOtpService(auditBuffer: OtpAuditEntry[]): OtpLoginService | null {
+    const sender = resolveOtpSender();
+    const secret = resolveOtpSecret();
+    if (!sender || !secret) return null;
+    return new OtpLoginService({
+      store: resolveOtpStore(),
+      sender,
+      secret,
+      patients: {
+        findByRm: (noRm) => {
+          const p = findPatientByRm(noRm);
+          return p ? { no_rm: normalizeRm(p.no_rm), no_hp: p.no_hp } : undefined;
+        },
+        findByPhone: (e164) =>
+          patientsStore
+            .filter((p) => normalizeIndonesianPhone(p.no_hp) === e164)
+            .map((p) => ({ no_rm: normalizeRm(p.no_rm), no_hp: p.no_hp }))
+      },
+      audit: (entry) => {
+        auditBuffer.push(entry);
+      }
+    });
+  }
+
+  // Log audit ditulis setelah status respons diketahui: 4xx/5xx -> langsung ke adapter (lihat writeOtpAudit).
+  async function flushOtpAudit(auditBuffer: OtpAuditEntry[], status: number): Promise<void> {
+    for (const entry of auditBuffer.splice(0)) {
+      try {
+        await writeOtpAudit(entry, status >= 400);
+      } catch (error) {
+        console.warn('[OTP] audit log failed', error);
+      }
+    }
+  }
+
+  const OTP_GENERIC_MESSAGE =
+    'Jika data cocok dengan pasien terdaftar, kode verifikasi telah dikirim via WhatsApp ke nomor yang terdaftar di rumah sakit. ' +
+    'Jika satu nomor dipakai lebih dari satu pasien, masuk dengan No. RM.';
+
+  app.post('/api/patient/otp/request', async (req, res, next) => {
+    try {
+      const auditBuffer: OtpAuditEntry[] = [];
+      const service = buildOtpService(auditBuffer);
+      if (!service) return res.status(503).json(PATIENT_LOGIN_UNAVAILABLE);
+      const result = await service.requestOtp({ no_rm: req.body?.no_rm, no_hp: req.body?.no_hp, ip: clientIp(req) });
+      const statusByKind = { invalid_input: 400, rate_limited: 429, delivery_failed: 502, accepted: 200 } as const;
+      await flushOtpAudit(auditBuffer, statusByKind[result.kind]);
+      switch (result.kind) {
+        case 'invalid_input':
+          return res.status(400).json({
+            success: false,
+            code: 'OTP_INVALID_INPUT',
+            message: 'Masukkan No. RM atau nomor HP (format Indonesia, mis. 0812xxxxxxx).'
+          });
+        case 'rate_limited':
+          res.setHeader('Retry-After', String(result.retryAfterSec));
+          return res.status(429).json({
+            success: false,
+            code: 'OTP_RATE_LIMITED',
+            retry_after: result.retryAfterSec,
+            message: 'Terlalu banyak permintaan kode. Coba lagi nanti.'
+          });
+        case 'delivery_failed':
+          return res.status(502).json({
+            success: false,
+            code: 'OTP_DELIVERY_FAILED',
+            message: 'Kode belum dapat dikirim via WhatsApp. Coba beberapa saat lagi atau hubungi pendaftaran.'
+          });
+        case 'accepted':
+          return res.json({
+            success: true,
+            request_id: result.requestId,
+            masked_phone: result.maskedPhone,
+            channel: 'whatsapp',
+            expires_in: result.expiresInSec,
+            resend_after: result.resendAfterSec,
+            message: OTP_GENERIC_MESSAGE
+          });
+      }
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post('/api/patient/otp/verify', async (req, res, next) => {
+    try {
+      const auditBuffer: OtpAuditEntry[] = [];
+      const service = buildOtpService(auditBuffer);
+      if (!service) return res.status(503).json(PATIENT_LOGIN_UNAVAILABLE);
+      const ip = clientIp(req);
+      const result = await service.verifyOtp({ request_id: req.body?.request_id, code: req.body?.code, ip });
+      const okHasPatient = result.kind === 'ok' && Boolean(findPatientByRm(result.no_rm));
+      await flushOtpAudit(auditBuffer, result.kind === 'ok' && okHasPatient ? 200 : 400);
+      switch (result.kind) {
+        case 'invalid_input':
+          return res.status(400).json({ success: false, code: 'OTP_INVALID_INPUT', message: 'Masukkan 6 digit kode verifikasi.' });
+        case 'rate_limited':
+          res.setHeader('Retry-After', String(result.retryAfterSec));
+          return res.status(429).json({
+            success: false,
+            code: 'OTP_RATE_LIMITED',
+            retry_after: result.retryAfterSec,
+            message: 'Terlalu banyak percobaan. Coba lagi nanti.'
+          });
+        case 'invalid_or_expired':
+          return res.status(400).json({
+            success: false,
+            code: 'OTP_EXPIRED',
+            message: 'Kode sudah tidak berlaku. Minta kode baru.'
+          });
+        case 'wrong_code':
+          return res.status(400).json({
+            success: false,
+            code: 'OTP_INVALID',
+            attempts_remaining: result.attemptsRemaining,
+            message: `Kode salah. Sisa ${result.attemptsRemaining} percobaan.`
+          });
+        case 'locked':
+          return res.status(429).json({
+            success: false,
+            code: 'OTP_LOCKED',
+            message: 'Terlalu banyak kode salah. Minta kode baru.'
+          });
+        case 'ok': {
+          const dossier = buildDossier(result.no_rm, 'otp');
+          if (!dossier) {
+            return res.status(404).json({ success: false, message: 'Data rekam medis pasien tidak ditemukan.' });
+          }
+          const token = issuePatientSession(result.no_rm, 'otp');
+          setPatientSessionCookie(res, token);
+          return res.json({ success: true, token, dossier });
+        }
+      }
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  // 3. Login lama No. RM + tanggal lahir tidak membuktikan kepemilikan akun; tetap dinonaktifkan.
   app.post('/api/patient/verify', (req, res) => {
     return res.status(503).json(PATIENT_LOGIN_UNAVAILABLE);
   });
@@ -634,14 +966,7 @@ export function registerPatientPortalRoutes(
 
   // 4. Refresh Verified Patient Dossier
   app.delete('/api/patient/session', (req, res) => {
-    const authHeader = req.headers.authorization || '';
-    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    const cookieToken = (req.headers.cookie || '')
-      .split(';')
-      .map((part) => part.trim())
-      .find((part) => part.startsWith(`${patientSessionCookieName}=`))
-      ?.slice(patientSessionCookieName.length + 1);
-    const token = bearer || cookieToken || '';
+    const token = readPatientSessionToken(req);
     if (token) patientSessions.delete(token);
     setPatientSessionCookie(res, '', 0);
     return res.status(204).end();
@@ -708,14 +1033,16 @@ export function registerPatientPortalRoutes(
   // 5. Public & Mobile Patient Online Appointment Booking
   app.post('/api/patient/appointments', (req, res) => {
     try {
-      // Booking pasien terdaftar wajib memakai sesi pasien (Authorization: Bearer / cookie sesi).
-      // Tanpa sesi hanya pendaftaran pasien BARU (tanpa No. RM) dari web publik yang diizinkan;
-      // No. RM + tanggal lahir di body tidak lagi diterima sebagai bukti identitas.
-      const session = resolveSessionFromReq(req);
+      // Booking pasien terdaftar wajib memakai sesi pasien. Sesi hanya dipakai bila permintaan
+      // secara eksplisit menyatakan pasien terdaftar: header Authorization: Bearer, atau No. RM di
+      // body (lalu sesi dibaca dari Bearer/cookie). Tanpa keduanya, permintaan selalu diperlakukan
+      // sebagai pendaftaran pasien BARU walaupun browser membawa cookie sesi pasien lain.
       const authHeader = req.headers.authorization || '';
       const hasBearer = authHeader.startsWith('Bearer ') && authHeader.slice(7).trim().length > 0;
       const bodyRm = typeof req.body?.no_rm === 'string' ? req.body.no_rm.trim() : '';
-      if (!session && (hasBearer || bodyRm)) {
+      const isExistingPatientRequest = hasBearer || Boolean(bodyRm);
+      const session = isExistingPatientRequest ? resolveSessionFromReq(req) : undefined;
+      if (isExistingPatientRequest && !session) {
         return res.status(401).json({
           success: false,
           code: 'PATIENT_SESSION_REQUIRED',
@@ -736,7 +1063,6 @@ export function registerPatientPortalRoutes(
         dokter_id,
         dokter_nama,
         tanggal,
-        jam_praktek,
         penjamin,
         keluhan
       } = req.body || {};
@@ -748,24 +1074,19 @@ export function registerPatientPortalRoutes(
         });
       }
 
-      const poliObj = MASTER_POLIKLINIK.find((item) => item.id === poli_id);
-      const doctor = SEMUA_DOKTER.find((item) => item.id === dokter_id && item.poli_id === poli_id);
+      // Validasi terhadap master layanan tersimpan (bukan data contoh).
+      const poliObj = findActivePoli(poli_id);
+      const doctor = poliObj ? findActiveDoctor(dokter_id, poliObj.id) : undefined;
       if (!poliObj || !doctor || (poli_nama && poli_nama !== poliObj.nama) || (dokter_nama && dokter_nama !== doctor.nama)) {
         return res.status(400).json({ success: false, message: 'Dokter dan poliklinik tidak cocok dengan katalog layanan.' });
       }
 
-      const targetDate = tanggal;
-      if (targetDate < new Date().toISOString().slice(0, 10)) {
-        return res.status(400).json({ success: false, message: 'Tanggal kunjungan tidak boleh berada di masa lalu.' });
-      }
-      const targetDateEnd = Date.parse(`${targetDate}T23:59:59.999Z`);
-      const bookingWindowMs = 365 * 24 * 60 * 60 * 1000;
-      if (!Number.isFinite(targetDateEnd) || targetDateEnd > Date.now() + bookingWindowMs) {
-        return res.status(400).json({ success: false, message: 'Pendaftaran hanya dapat dibuat hingga 1 tahun ke depan.' });
-      }
-      const served = (doctor.pasien_terlayani || 0) + (doctorServedBoost.get(doctor.id) || 0);
-      if (served >= (doctor.kuota || 30)) {
-        return res.status(409).json({ success: false, message: 'Kuota dokter untuk jadwal tersebut telah penuh.' });
+      const visit = validateVisitDate(tanggal);
+      if (!visit.ok) return res.status(400).json({ success: false, message: visit.message });
+      const targetDate = visit.date;
+      const targetDateEnd = visit.endMs;
+      if (bookedCountForDoctor(doctor, targetDate) >= (doctor.kuota || 30)) {
+        return res.status(409).json({ success: false, code: 'DOCTOR_QUOTA_FULL', message: 'Kuota dokter untuk jadwal tersebut telah penuh.' });
       }
 
       const resolvedName = typeof nama === 'string' ? nama.trim() : '';
@@ -816,16 +1137,19 @@ export function registerPatientPortalRoutes(
         const yy = String(now.getFullYear()).slice(-2);
         const mm = String(now.getMonth() + 1).padStart(2, '0');
         const dd = String(now.getDate()).padStart(2, '0');
-        const seq = String(patientsStore.length + 101).padStart(4, '0');
-        resolvedRm = `RM-${yy}${mm}${dd}-${seq}`;
+        let seqNumber = patientsStore.length + 101;
+        do {
+          resolvedRm = `RM-${yy}${mm}${dd}-${String(seqNumber).padStart(4, '0')}`;
+          seqNumber += 1;
+        } while (findPatientByRm(resolvedRm));
         patientsStore.unshift({
-          id: `p-${Date.now()}`,
+          id: `p-${crypto.randomUUID()}`,
           no_rm: resolvedRm,
           nik: suppliedNik,
           nama: resolvedName,
           tanggal_lahir: normalizedDob,
           jenis_kelamin: 'L',
-          alamat: 'Pendaftaran Online Portal MYITARU',
+          alamat: 'Pendaftaran Online',
           no_hp: phone,
           golongan_darah: '',
           penjamin: typeof penjamin === 'string' ? penjamin.slice(0, 80) : 'Umum / Mandiri',
@@ -836,11 +1160,8 @@ export function registerPatientPortalRoutes(
         });
       }
 
-      const poliKode = poliObj.kode;
-      const existingForPoli = appointmentsStore.filter((a) =>
-        a.nomor_antrian.startsWith(`${poliKode}-`)
-      ).length;
-      const nomorAntrian = `${poliKode}-${String(existingForPoli + 2).padStart(3, '0')}`;
+      const nomorAntrian = nextQueueNumber(poliObj, targetDate);
+      const kodeBooking = uniqueBookingCode();
 
       const newApt: ServerAppointmentRecord = {
         id: `apt-${crypto.randomUUID()}`,
@@ -848,30 +1169,19 @@ export function registerPatientPortalRoutes(
         pasien_nama: patientName,
         no_rm: resolvedRm,
         poli: poliObj.nama,
+        poli_id: poliObj.id,
         dokter: doctor.nama,
+        dokter_id: doctor.id,
         tanggal: targetDate,
-        jam_praktek: String(doctor.jam || jam_praktek || ''),
+        jam_praktek: doctor.jam,
         nomor_antrian: nomorAntrian,
+        kode_booking: kodeBooking,
         status: 'Menunggu',
         tipe: 'Rawat Jalan',
         created_at: new Date().toISOString()
       };
-      const qrValue = createSecurePatientQrToken(newApt.id, {
-        kind: 'reservation',
-        ttlMs: Math.max(60_000, targetDateEnd + 24 * 60 * 60 * 1000 - Date.now())
-      });
-      deps.qrTokensStore?.unshift({
-        id: hashQrToken(qrValue),
-        tokenHash: hashQrToken(qrValue),
-        subject: newApt.id,
-        kind: 'reservation',
-        issuedAt: new Date().toISOString(),
-        expiresAt: new Date(targetDateEnd + 24 * 60 * 60 * 1000).toISOString(),
-        issuedBy: 'patient-portal'
-      });
+      const qrValue = issueReservationQr(newApt.id, targetDateEnd);
       appointmentsStore.unshift(newApt);
-
-      doctorServedBoost.set(dokter_id, (doctorServedBoost.get(dokter_id) || 0) + 1);
 
       createAuditLog?.({
         user: session ? `Patient:${resolvedRm}` : resolvedName,
@@ -887,6 +1197,8 @@ export function registerPatientPortalRoutes(
         success: true,
         message: 'Janji temu berhasil dibuat dan nomor antrean telah diterbitkan.',
         booking: {
+          id: newApt.id,
+          kode_booking: kodeBooking,
           no_rm: resolvedRm,
           nama: patientName,
           nomor_antrian: nomorAntrian,
@@ -904,6 +1216,133 @@ export function registerPatientPortalRoutes(
         message: err?.message || 'Gagal memproses pendaftaran janji temu.'
       });
     }
+  });
+
+  // 5b. Riwayat kunjungan pasien (sesi wajib; hanya milik pasien yang masuk).
+  const toVisitView = (a: ServerAppointmentRecord) => ({
+    id: a.id,
+    kode_booking: a.kode_booking ?? null,
+    poli: a.poli,
+    dokter: a.dokter,
+    tanggal: a.tanggal,
+    jam_praktek: a.jam_praktek,
+    nomor_antrian: a.nomor_antrian,
+    status: a.status,
+    tipe: a.tipe,
+    created_at: a.created_at,
+    can_cancel: isPatientModifiable(a),
+    can_reschedule: isPatientModifiable(a)
+  });
+
+  const requirePatientSession = (req: express.Request, res: express.Response): PatientSession | undefined => {
+    const session = resolveSessionFromReq(req);
+    if (!session) {
+      res.status(401).json({
+        success: false,
+        code: 'PATIENT_SESSION_REQUIRED',
+        message: 'Sesi pasien tidak valid atau telah berakhir. Silakan masuk kembali.'
+      });
+    }
+    return session;
+  };
+
+  // Janji temu milik pasien yang sedang masuk; janji temu pasien lain diperlakukan sebagai tidak ada.
+  const findOwnAppointment = (session: PatientSession, id: unknown): ServerAppointmentRecord | undefined =>
+    typeof id === 'string'
+      ? appointmentsStore.find((a) => a.id === id && normalizeRm(a.no_rm) === session.no_rm)
+      : undefined;
+
+  app.get('/api/patient/visits', (req, res) => {
+    const session = requirePatientSession(req, res);
+    if (!session) return;
+    const visits = appointmentsStore
+      .filter((a) => normalizeRm(a.no_rm) === session.no_rm)
+      .sort((a, b) => (b.tanggal + b.created_at).localeCompare(a.tanggal + a.created_at))
+      .map(toVisitView);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ success: true, total: visits.length, visits });
+  });
+
+  app.post('/api/patient/appointments/:id/cancel', (req, res) => {
+    const session = requirePatientSession(req, res);
+    if (!session) return;
+    const apt = findOwnAppointment(session, req.params.id);
+    if (!apt) return res.status(404).json({ success: false, code: 'APPOINTMENT_NOT_FOUND' });
+    if (!isPatientModifiable(apt)) {
+      return res.status(409).json({
+        success: false,
+        code: 'APPOINTMENT_NOT_MODIFIABLE',
+        message: 'Hanya janji temu berstatus Menunggu dengan tanggal hari ini atau mendatang yang dapat dibatalkan.'
+      });
+    }
+    const alasan = typeof req.body?.alasan === 'string' ? req.body.alasan.trim().slice(0, 200) : '';
+    apt.status = 'Dibatalkan';
+    apt.cancelled_at = new Date().toISOString();
+    revokeReservationQr(apt.id);
+    createAuditLog?.({
+      user: `Patient:${session.no_rm}`,
+      role: 'Pasien Mobile',
+      action: 'PATIENT_APPOINTMENT_CANCEL',
+      module: 'Portal & App Pasien',
+      ip: req.ip || '127.0.0.1',
+      status: 'SUCCESS',
+      details: `Janji temu ${apt.nomor_antrian} (${apt.poli}, ${apt.tanggal}) dibatalkan pasien${alasan ? `: ${alasan}` : ''}.`
+    });
+    return res.json({ success: true, appointment: toVisitView(apt) });
+  });
+
+  app.post('/api/patient/appointments/:id/reschedule', (req, res) => {
+    const session = requirePatientSession(req, res);
+    if (!session) return;
+    const apt = findOwnAppointment(session, req.params.id);
+    if (!apt) return res.status(404).json({ success: false, code: 'APPOINTMENT_NOT_FOUND' });
+    if (!isPatientModifiable(apt)) {
+      return res.status(409).json({
+        success: false,
+        code: 'APPOINTMENT_NOT_MODIFIABLE',
+        message: 'Hanya janji temu berstatus Menunggu dengan tanggal hari ini atau mendatang yang dapat diubah.'
+      });
+    }
+    if (!isSecurePatientQrConfigured()) {
+      return res.status(503).json({ success: false, code: 'QR_SECRET_NOT_CONFIGURED' });
+    }
+    const visit = validateVisitDate(req.body?.tanggal);
+    if (!visit.ok) return res.status(400).json({ success: false, code: 'INVALID_VISIT_DATE', message: visit.message });
+
+    const poli = poliklinikStore.find((p) => appointmentMatchesPoli(apt, p) && p.aktif !== false);
+    const requestedDoctorId = req.body?.dokter_id ?? apt.dokter_id ??
+      doctorsStore.find((d) => d.nama === apt.dokter && d.poli_id === poli?.id)?.id;
+    const doctor = poli ? findActiveDoctor(requestedDoctorId, poli.id) : undefined;
+    if (!poli || !doctor) {
+      return res.status(400).json({ success: false, code: 'DOCTOR_NOT_AVAILABLE', message: 'Dokter tidak tersedia di poliklinik ini.' });
+    }
+    if (visit.date === apt.tanggal && doctor.id === apt.dokter_id) {
+      return res.status(400).json({ success: false, code: 'NO_CHANGE', message: 'Jadwal baru sama dengan jadwal saat ini.' });
+    }
+    if (bookedCountForDoctor(doctor, visit.date, apt.id) >= (doctor.kuota || 30)) {
+      return res.status(409).json({ success: false, code: 'DOCTOR_QUOTA_FULL', message: 'Kuota dokter untuk jadwal tersebut telah penuh.' });
+    }
+
+    const previous = `${apt.tanggal} ${apt.dokter} (${apt.nomor_antrian})`;
+    if (visit.date !== apt.tanggal) apt.nomor_antrian = nextQueueNumber(poli, visit.date);
+    apt.tanggal = visit.date;
+    apt.dokter = doctor.nama;
+    apt.dokter_id = doctor.id;
+    apt.poli_id = poli.id;
+    apt.jam_praktek = doctor.jam;
+    apt.rescheduled_at = new Date().toISOString();
+    revokeReservationQr(apt.id);
+    const qrValue = issueReservationQr(apt.id, visit.endMs);
+    createAuditLog?.({
+      user: `Patient:${session.no_rm}`,
+      role: 'Pasien Mobile',
+      action: 'PATIENT_APPOINTMENT_RESCHEDULE',
+      module: 'Portal & App Pasien',
+      ip: req.ip || '127.0.0.1',
+      status: 'SUCCESS',
+      details: `Janji temu ${apt.id} dijadwalkan ulang dari ${previous} ke ${apt.tanggal} ${apt.dokter} (${apt.nomor_antrian}).`
+    });
+    return res.json({ success: true, appointment: toVisitView(apt), qr_value: qrValue });
   });
 
   // 6. Register or Update Patient FCM Device Token & Notification Preferences
@@ -1134,7 +1573,8 @@ export function registerPatientPortalRoutes(
   }
 
   // 12. SIMK Staff Dispatch Endpoint (Called from Outpatient Queue Call & Lab Sp.PK Validation)
-  app.post('/api/v1/patient-notifications/dispatch', async (req, res) => {
+  // Hanya di aplikasi inti (di belakang autentikasi staf + RBAC coreAuth). Tidak pernah di web publik.
+  deps.staffApp?.post('/api/v1/patient-notifications/dispatch', async (req, res) => {
     try {
       const {
         no_rm,
@@ -1181,8 +1621,8 @@ export function registerPatientPortalRoutes(
       });
 
       createAuditLog?.({
-        user: dokter || 'Staff Klinis SIMK',
-        role: 'Klinis SIMK',
+        user: req.corePrincipal?.email || 'unknown',
+        role: req.corePrincipal?.roleId || 'unknown',
         action: type === 'queue_call' ? 'FCM_QUEUE_CALL_DISPATCH' : 'FCM_LAB_READY_DISPATCH',
         module: 'FCM Notifikasi Pasien',
         ip: req.ip || '127.0.0.1',

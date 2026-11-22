@@ -4,6 +4,7 @@ import { PWAInstallButton } from '../../PWA/PWAInstallButton';
 import type { PatientDossierPayload } from './types';
 import { EmptyState, SkeletonBlock, SkeletonList } from './ui';
 import { displayValue, formatRupiah, hasBillingData } from './utils';
+import { OnlinePaymentSection } from './payment/OnlinePaymentSection';
 
 function authMethodLabel(dossier: PatientDossierPayload | null): string {
   const method: string | undefined = dossier?.authMethod;
@@ -78,13 +79,18 @@ export const TagihanScreen: React.FC<{
   loading: boolean;
   onLogout: () => void;
   onOpenPortal: () => void;
-}> = ({ dossier, loading, onLogout, onOpenPortal }) => {
+  /** Token sesi pasien; bila tidak diberikan, dibaca dari sessionStorage oleh klien pembayaran. */
+  token?: string | null;
+}> = ({ dossier, loading, onLogout, onOpenPortal, token }) => {
   const patient = dossier?.patient;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-      <div className="lg:col-span-7">
+      <div className="lg:col-span-7 space-y-4">
         {dossier ? (
-          <BillingCard billing={dossier.billing} />
+          <>
+            <OnlinePaymentSection token={token} />
+            {hasBillingData(dossier.billing) && <BillingCard billing={dossier.billing} />}
+          </>
         ) : loading ? (
           <SkeletonList rows={1} label="Memuat tagihan..." />
         ) : null}

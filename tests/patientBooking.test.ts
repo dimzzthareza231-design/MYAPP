@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createTestPatient, createTestPatientSession, type TestPatient } from './helpers/patientFixtures';
+import { createTestDoctor, createTestPatient, createTestPatientSession, type TestPatient } from './helpers/patientFixtures';
 
 process.env.VERCEL = '1'; // cegah server.ts menjalankan listen() sendiri
 process.env.SESSION_SECRET = 'test-secret';
@@ -23,12 +23,20 @@ async function listen(app: http.RequestListener): Promise<string> {
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-async function call(base: string, method: string, path: string, body?: unknown, token?: string): Promise<Res> {
+async function call(
+  base: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  token?: string,
+  cookie?: string
+): Promise<Res> {
   const res = await fetch(base + path, {
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(cookie ? { Cookie: cookie } : {})
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
@@ -72,6 +80,7 @@ before(async () => {
   patient = await createTestPatient(core, 'test-token', { nama: 'Ny. Pasien Sesi Uji' });
   otherPatient = await createTestPatient(core, 'test-token', { nama: 'Tn. Pasien Lain Uji' });
   sessionToken = createTestPatientSession(patient.no_rm);
+  await createTestDoctor(core, 'test-token');
   const catalog = (await call(pub, 'GET', '/api/public/hospital-catalog')).body;
   doctor = (catalog.doctors ?? catalog.data.doctors)[0];
 });
@@ -182,5 +191,138 @@ describe('dossier pasien hanya dari data tersimpan', () => {
   test('sesi untuk No. RM yang tidak tersimpan tidak menghasilkan dossier', async () => {
     const r = await call(pub, 'GET', '/api/patient/dossier', undefined, createTestPatientSession('RM-TIDAK-ADA'));
     assert.equal(r.status, 404);
+  });
+});
+
+function daysFromNow(days: number): string {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+describe('booking pasien baru dari web publik', () => {
+  test('cookie sesi pasien lain tidak dipakai bila tidak ada Bearer maupun No. RM', async () => {
+    const cookie = `myitaru_patient_session=${sessionToken}`;
+    const r = await call(pub, 'POST', '/api/patient/appointments', bookingBody({
+      nama: 'Pasien Baru Berbagi Perangkat',
+      tanggal_lahir: '1995-02-02',
+      no_hp: '081200000077'
+    }), undefined, cookie);
+    assert.equal(r.status, 201);
+    assert.notEqual(r.body.booking.no_rm, patient.no_rm);
+    assert.equal(r.body.booking.nama, 'Pasien Baru Berbagi Perangkat');
+
+    // Janji temu baru tidak muncul di riwayat pemilik cookie.
+    const visits = await call(pub, 'GET', '/api/patient/visits', undefined, sessionToken);
+    assert.equal(visits.body.visits.some((v: any) => v.id === r.body.booking.id), false);
+  });
+
+  test('cookie sesi tetap dipakai bila No. RM disertakan secara eksplisit', async () => {
+    const cookie = `myitaru_patient_session=${sessionToken}`;
+    const r = await call(pub, 'POST', '/api/patient/appointments', bookingBody({
+      no_rm: patient.no_rm,
+      tanggal: daysFromNow(1)
+    }), undefined, cookie);
+    assert.equal(r.status, 201);
+    assert.equal(r.body.booking.no_rm, patient.no_rm);
+  });
+
+  test('kode booking acak dan unik, nomor antrean tetap untuk tampilan', async () => {
+    const codes = new Set<string>();
+    for (let i = 0; i < 2; i += 1) {
+      const r = await call(pub, 'POST', '/api/patient/appointments', bookingBody({
+        nama: `Pasien Kode ${i}`, tanggal_lahir: '1990-01-01', no_hp: '08120000010' + i
+      }));
+      assert.equal(r.status, 201);
+      assert.match(r.body.booking.kode_booking, /^[A-HJKMNP-TV-Z2-9]{10}$/);
+      assert.match(r.body.booking.nomor_antrian, /^[A-Z0-9]+-\d{3}$/);
+      codes.add(r.body.booking.kode_booking);
+    }
+    assert.equal(codes.size, 2);
+  });
+
+  test('dokter yang tidak ada di master tersimpan ditolak', async () => {
+    const r = await call(pub, 'POST', '/api/patient/appointments', bookingBody({
+      dokter_id: 'D-001', nama: 'X Y', tanggal_lahir: '1990-01-01', no_hp: '081200000000'
+    }));
+    assert.equal(r.status, 400);
+  });
+});
+
+describe('riwayat, pembatalan, dan penjadwalan ulang janji temu', () => {
+  let ownerToken = '';
+  let otherToken = '';
+  let appointmentId = '';
+
+  before(async () => {
+    const owner = await createTestPatient(core, 'test-token', { nama: 'Pasien Riwayat Uji' });
+    const other = await createTestPatient(core, 'test-token', { nama: 'Pasien Bukan Pemilik' });
+    ownerToken = createTestPatientSession(owner.no_rm);
+    otherToken = createTestPatientSession(other.no_rm);
+    const r = await call(pub, 'POST', '/api/patient/appointments', bookingBody({ tanggal: daysFromNow(2) }), ownerToken);
+    assert.equal(r.status, 201);
+    appointmentId = r.body.booking.id;
+  });
+
+  test('riwayat kunjungan wajib sesi dan hanya berisi milik sendiri', async () => {
+    assert.equal((await call(pub, 'GET', '/api/patient/visits')).status, 401);
+    const own = await call(pub, 'GET', '/api/patient/visits', undefined, ownerToken);
+    assert.equal(own.status, 200);
+    assert.equal(own.body.visits.length, 1);
+    assert.equal(own.body.visits[0].id, appointmentId);
+    assert.equal(own.body.visits[0].can_cancel, true);
+    assert.equal('no_rm' in own.body.visits[0], false);
+    const other = await call(pub, 'GET', '/api/patient/visits', undefined, otherToken);
+    assert.deepEqual(other.body.visits, []);
+  });
+
+  test('pasien lain tidak dapat membatalkan atau menjadwalkan ulang (404)', async () => {
+    assert.equal((await call(pub, 'POST', `/api/patient/appointments/${appointmentId}/cancel`, {})).status, 401);
+    assert.equal((await call(pub, 'POST', `/api/patient/appointments/${appointmentId}/cancel`, {}, otherToken)).status, 404);
+    assert.equal((await call(pub, 'POST', `/api/patient/appointments/${appointmentId}/reschedule`, {
+      tanggal: daysFromNow(3)
+    }, otherToken)).status, 404);
+  });
+
+  test('jadwal ulang ke tanggal lampau ditolak, ke tanggal mendatang berhasil dan diaudit', async () => {
+    const past = await call(pub, 'POST', `/api/patient/appointments/${appointmentId}/reschedule`, {
+      tanggal: daysFromNow(-1)
+    }, ownerToken);
+    assert.equal(past.status, 400);
+
+    const r = await call(pub, 'POST', `/api/patient/appointments/${appointmentId}/reschedule`, {
+      tanggal: daysFromNow(4)
+    }, ownerToken);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.appointment.tanggal, daysFromNow(4));
+    assert.match(r.body.qr_value, /^MYITARU1\./);
+
+    const logs = await call(core, 'GET', '/api/v1/audit/logs', undefined, 'test-token');
+    assert.match(JSON.stringify(logs.body), /PATIENT_APPOINTMENT_RESCHEDULE/);
+  });
+
+  test('pembatalan hanya sekali; status selain Menunggu tidak dapat diubah', async () => {
+    const r = await call(pub, 'POST', `/api/patient/appointments/${appointmentId}/cancel`, { alasan: 'berhalangan' }, ownerToken);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.appointment.status, 'Dibatalkan');
+    assert.equal(r.body.appointment.can_reschedule, false);
+
+    const again = await call(pub, 'POST', `/api/patient/appointments/${appointmentId}/cancel`, {}, ownerToken);
+    assert.equal(again.status, 409);
+    assert.equal(again.body.code, 'APPOINTMENT_NOT_MODIFIABLE');
+    const resched = await call(pub, 'POST', `/api/patient/appointments/${appointmentId}/reschedule`, {
+      tanggal: daysFromNow(5)
+    }, ownerToken);
+    assert.equal(resched.status, 409);
+
+    const logs = await call(core, 'GET', '/api/v1/audit/logs', undefined, 'test-token');
+    assert.match(JSON.stringify(logs.body), /PATIENT_APPOINTMENT_CANCEL/);
+  });
+
+  test('janji temu yang sudah dipanggil petugas tidak dapat dibatalkan pasien', async () => {
+    const booked = await call(pub, 'POST', '/api/patient/appointments', bookingBody(), ownerToken);
+    assert.equal(booked.status, 201);
+    const patched = await call(core, 'PATCH', `/api/v1/appointments/${booked.body.booking.id}`, { status: 'Panggil' }, 'test-token');
+    assert.equal(patched.status, 200);
+    const r = await call(pub, 'POST', `/api/patient/appointments/${booked.body.booking.id}/cancel`, {}, ownerToken);
+    assert.equal(r.status, 409);
   });
 });

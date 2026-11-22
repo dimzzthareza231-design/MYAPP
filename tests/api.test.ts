@@ -6,7 +6,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createSecurePatientQrToken } from '../src/server/securePatientQr';
 import { FakePrimaryRepository } from './helpers/fakePersistence';
-import { createTestPatient, createTestPatientSession } from './helpers/patientFixtures';
+import { createTestDoctor, createTestPatient, createTestPatientSession } from './helpers/patientFixtures';
 
 process.env.VERCEL = '1'; // cegah server.ts menjalankan listen() sendiri
 process.env.SESSION_SECRET = 'test-secret';
@@ -77,6 +77,8 @@ before(async () => {
   addErrorHandler(publicApp);
   core = await listen(app);
   pub = await listen(publicApp);
+  // Katalog publik kosong sampai petugas mengisi master layanan.
+  await createTestDoctor(core, 'test-token');
 });
 
 after(() => servers.forEach((s) => s.close()));
@@ -343,7 +345,7 @@ describe('web publik pasien', () => {
     assert.deepEqual(byRm.body.matches, []);
   });
 
-  test('cek antrean publik memerlukan kode tiket lengkap dan tidak mengembalikan identitas pasien', async () => {
+  test('cek antrean publik memerlukan kode booking acak lengkap dan tidak mengembalikan identitas pasien', async () => {
     const cat = (await call(pub, 'GET', '/api/public/hospital-catalog')).body;
     const doctor = (cat.doctors ?? cat.data.doctors)[0];
     const patientName = 'Pasien Privasi Antrean';
@@ -360,11 +362,12 @@ describe('web publik pasien', () => {
       penjamin: 'Umum'
     });
     assert.equal(booking.status, 201);
-    const { nomor_antrian: ticket, no_rm: rm } = booking.body.booking;
+    const { nomor_antrian: ticket, kode_booking: code, no_rm: rm } = booking.body.booking;
+    assert.match(code, /^[A-HJKMNP-TV-Z2-9]{10}$/);
 
-    const lookup = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(ticket)}`);
+    const lookup = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(code.toLowerCase())}`);
     assert.equal(lookup.status, 200);
-    assert.ok(lookup.body.matches.length >= 1);
+    assert.equal(lookup.body.matches.length, 1);
     for (const match of lookup.body.matches) {
       assert.equal(match.nomor_antrian, ticket);
       for (const key of ['no_rm', 'pasien_nama', 'pasien_nama_masked', 'pasien_id', 'id']) {
@@ -375,8 +378,11 @@ describe('web publik pasien', () => {
     assert.equal(raw.includes(rm), false);
     assert.equal(raw.includes(patientName), false);
 
-    // Pencarian sebagian (mis. hanya prefiks poli) tidak boleh menampilkan tiket pasien lain.
-    const partial = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(ticket.slice(0, 3))}`);
+    // Nomor antrean berurutan mudah ditebak: tidak lagi bisa dipakai untuk mencari tiket.
+    const bySequentialTicket = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(ticket)}`);
+    assert.deepEqual(bySequentialTicket.body.matches, []);
+    // Pencarian sebagian kode booking tidak boleh menampilkan tiket.
+    const partial = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(code.slice(0, 6))}`);
     assert.deepEqual(partial.body.matches, []);
     const byOwnRm = await call(pub, 'GET', `/api/public/queue-status?q=${encodeURIComponent(rm)}`);
     assert.deepEqual(byOwnRm.body.matches, []);

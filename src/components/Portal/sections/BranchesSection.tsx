@@ -1,13 +1,48 @@
-import React from 'react';
-import { MapPin } from 'lucide-react';
+import React, { useState } from 'react';
+import { ExternalLink, Map, MapPin } from 'lucide-react';
 import { SectionHeading } from './SectionHeading';
 import { SECTION_IDS } from '../portalShared';
 import {
+  buildMapsDirectionsUrl,
+  buildMapsEmbedUrl,
   NATIONAL_EMERGENCY_NUMBERS,
   toTelHref,
   toWhatsAppHref,
   type HospitalBranch
 } from '../../../data/hospitalPublicCatalog';
+
+/**
+ * Peta tersemat hanya bila koordinat dikonfigurasi, dan baru dimuat setelah pengguna menekan tombol
+ * (Google Maps memasang cookie pihak ketiga; tidak dimuat otomatis).
+ */
+const BranchMapEmbed: React.FC<{ branch: HospitalBranch }> = ({ branch }) => {
+  const [show, setShow] = useState(false);
+  const embedUrl = buildMapsEmbedUrl(branch);
+  if (!embedUrl) return null;
+  if (!show) {
+    return (
+      <button
+        type="button"
+        onClick={() => setShow(true)}
+        className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-700 underline hover:text-brand cursor-pointer rounded min-h-[44px]"
+      >
+        <Map className="w-4 h-4" aria-hidden="true" />
+        Tampilkan peta (memuat Google Maps)
+      </button>
+    );
+  }
+  return (
+    <div className="aspect-[4/3] rounded-xl overflow-hidden border border-slate-200">
+      <iframe
+        src={embedUrl}
+        title={`Peta lokasi ${branch.name}`}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        className="w-full h-full border-0"
+      />
+    </div>
+  );
+};
 
 /** Lokasi & kontak cabang. Tidak dirender bila daftar kosong. */
 export const BranchesSection: React.FC<{ branches: HospitalBranch[] }> = ({ branches }) => {
@@ -35,6 +70,22 @@ export const BranchesSection: React.FC<{ branches: HospitalBranch[] }> = ({ bran
                   <span>{branch.address}</span>
                 </address>
               )}
+              {(() => {
+                const directions = buildMapsDirectionsUrl(branch);
+                return directions ? (
+                  <a
+                    href={directions}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm font-bold text-brand underline-offset-2 hover:underline rounded min-h-[44px]"
+                  >
+                    <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                    Petunjuk arah (Google Maps)
+                    <span className="sr-only">, {branch.name}, terbuka di tab baru</span>
+                  </a>
+                ) : null;
+              })()}
+              <BranchMapEmbed branch={branch} />
               <div className="pt-3 border-t border-slate-100 space-y-1.5 text-sm text-slate-700">
                 {branch.hours && <p>{branch.hours}</p>}
                 {branch.appointmentPhone && (

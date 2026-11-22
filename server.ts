@@ -18,6 +18,12 @@ import {
   generateClinicalCopilotReplyDeterministic
 } from './src/server/aiIntelligenceEngine';
 import { registerPatientPortalRoutes } from './src/server/patientPortalService';
+import { registerPaymentRoutes } from './src/server/payments';
+import {
+  registerHospitalMasterRoutes,
+  type ServerDoctorRecord,
+  type ServerPoliklinikRecord
+} from './src/server/hospitalMasterService';
 import { registerEmployeePortalGateway } from './src/server/employeePortalGateway';
 import {
   assertProductionAuthConfiguration,
@@ -26,6 +32,7 @@ import {
   type CoreAuthOptions
 } from './src/server/coreAuth';
 import { LocalAuthService } from './src/server/localAuth';
+import { publicSpaStatus } from './src/server/spaRoutes';
 import {
   createSecurePatientQrToken,
   getDocumentQrScope,
@@ -363,7 +370,12 @@ export async function createApps(
   const auditLogsStore: AuditLogEntry[] = [];
 
   const qrTokensStore: QRTokenRecord[] = [];
+  // Master layanan (poliklinik & dokter): dikelola petugas lewat /api/v1/master/*.
+  const poliklinikStore: ServerPoliklinikRecord[] = [];
+  const doctorsStore: ServerDoctorRecord[] = [];
   const persistentBindings: PersistentArrayBinding[] = [
+    { entity: 'poliklinik', records: poliklinikStore },
+    { entity: 'doctors', records: doctorsStore },
     { entity: 'patients', records: patientsStore },
     { entity: 'registrations', records: appointmentsStore },
     { entity: 'queues', records: appointmentsStore },
@@ -2193,12 +2205,23 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
     });
   });
 
-  // Register Public Hospital Portal & Patient Mobile App Routes (hanya di web publik)
+  const appendAuditLog = (entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) => {
+    auditLogsStore.unshift({ id: `log-${randomUUID()}`, timestamp: new Date().toISOString(), ...entry });
+  };
+
+  // Master poliklinik & dokter (aplikasi inti, staf terautentikasi; tulis hanya admin).
+  registerHospitalMasterRoutes(app, { poliklinikStore, doctorsStore, createAuditLog: appendAuditLog });
+
+  // Register Public Hospital Portal & Patient Mobile App Routes (web publik); endpoint petugas
+  // seperti dispatch notifikasi dipasang di aplikasi inti lewat staffApp.
   registerPatientPortalRoutes(publicApp, {
     patientsStore: patientsStore as any,
     appointmentsStore: appointmentsStore as any,
     bedsStore: bedsStore as any,
     qrTokensStore,
+    doctorsStore,
+    poliklinikStore,
+    staffApp: app,
     createAuditLog: (entry) => {
       auditLogsStore.unshift({
         id: 'log-' + Date.now(),
@@ -2207,6 +2230,9 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
       });
     }
   });
+
+  // Pembayaran online tagihan pasien (Xendit/PayPal) + webhook provider (web publik).
+  registerPaymentRoutes(publicApp, { persistence, createAuditLog: appendAuditLog });
 
   // Register Unified Employee Ecosystem API Gateway (/api/gateway/*)
   registerEmployeePortalGateway(app, {
@@ -2228,7 +2254,13 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
   return { app, publicApp, persistence };
 }
 
+function sendApiNotFound(req: express.Request, res: express.Response) {
+  res.status(404).json({ success: false, code: 'NOT_FOUND' });
+}
+
 export function addErrorHandler(target: express.Application) {
+  // Path /api yang tidak dikenal selalu 404 JSON (bukan halaman SPA).
+  target.use('/api', sendApiNotFound);
   target.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('Global Server Error:', err);
     if (!res.headersSent) {
@@ -2249,9 +2281,13 @@ async function startServer() {
   const mountFrontend = async (target: express.Application, server: http.Server, appTarget: 'core' | 'public') => {
     const htmlFile = appTarget === 'public' ? 'public.html' : 'index.html';
     const distPath = path.join(process.cwd(), 'dist', appTarget);
+    // Web publik: path yang tidak dikenal tetap memuat SPA (halaman 404) tetapi dengan status 404.
+    const spaStatus = (reqPath: string) => (appTarget === 'public' ? publicSpaStatus(reqPath) : 200);
+    target.use('/api', sendApiNotFound);
     const serveStatic = () => {
       target.use(express.static(distPath, { index: false }));
       target.get('*', (req, res) => {
+        res.status(spaStatus(req.path));
         res.sendFile(path.join(distPath, htmlFile), (err) => {
           if (err && !res.headersSent) {
             res.status(500).send(`Gagal memuat ${htmlFile}. Silakan build ulang aplikasi.`);
@@ -2275,7 +2311,7 @@ async function startServer() {
       target.get('*', async (req, res, next) => {
         try {
           const raw = await fs.promises.readFile(path.join(process.cwd(), htmlFile), 'utf-8');
-          res.status(200).set({ 'Content-Type': 'text/html' }).end(await vite.transformIndexHtml(req.originalUrl, raw));
+          res.status(spaStatus(req.path)).set({ 'Content-Type': 'text/html' }).end(await vite.transformIndexHtml(req.originalUrl, raw));
         } catch (e) {
           next(e);
         }

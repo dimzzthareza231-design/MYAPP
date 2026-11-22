@@ -2,6 +2,7 @@ import React from 'react';
 import { AlertCircle, RefreshCw, Search, Ticket } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
+  BOOKING_CODE_LENGTH,
   EASE_OUT_EXPO,
   SECTION_IDS,
   formatTimeLabel,
@@ -49,7 +50,7 @@ export const QueueLookupPanel: React.FC<QueueLookupPanelProps> = ({
         className="space-y-2"
       >
         <label htmlFor="queue-lookup-input" className="block text-sm font-bold text-slate-800">
-          Kode tiket / nomor antrean
+          Kode booking ({BOOKING_CODE_LENGTH} karakter)
         </label>
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
@@ -59,9 +60,12 @@ export const QueueLookupPanel: React.FC<QueueLookupPanelProps> = ({
               type="text"
               value={queueQuery}
               onChange={(e) => onQueryChange(e.target.value)}
-              placeholder="Sesuai bukti pendaftaran Anda"
+              placeholder="Contoh: kode pada bukti pendaftaran"
               aria-describedby="queue-lookup-help"
               autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              maxLength={BOOKING_CODE_LENGTH + 4}
               className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-brand tabular-nums text-sm uppercase outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             />
           </div>
@@ -75,8 +79,9 @@ export const QueueLookupPanel: React.FC<QueueLookupPanelProps> = ({
           </button>
         </div>
         <p id="queue-lookup-help" className="text-xs text-slate-600">
-          Demi privasi, status antrean hanya dapat dilihat dengan mengetik kode tiket lengkap yang tercantum pada bukti
-          pendaftaran Anda. Pencarian dengan No. RM atau nama tidak tersedia.
+          Demi privasi, status antrean hanya dapat dilihat dengan kode booking {BOOKING_CODE_LENGTH} karakter yang
+          tercantum pada bukti pendaftaran Anda (bukan nomor antrean). Pencarian dengan No. RM atau nama tidak
+          tersedia.
         </p>
       </form>
 
@@ -85,12 +90,13 @@ export const QueueLookupPanel: React.FC<QueueLookupPanelProps> = ({
           <span className="font-semibold text-slate-600">Tiket di perangkat ini:</span>
           {recentTickets.map((t) => (
             <button
-              key={t.nomor_antrian}
+              key={t.kode_booking}
               type="button"
-              onClick={() => onLookup(t.nomor_antrian)}
-              className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 tabular-nums font-bold hover:bg-emerald-100 cursor-pointer"
+              onClick={() => onLookup(t.kode_booking)}
+              className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 tabular-nums font-bold hover:bg-emerald-100 cursor-pointer min-h-[44px]"
             >
-              {t.nomor_antrian} · Tiket Anda
+              {t.nomor_antrian} · {t.poli} · {t.tanggal}
+              <span className="sr-only"> (kode booking {t.kode_booking})</span>
             </button>
           ))}
         </div>
@@ -103,10 +109,10 @@ export const QueueLookupPanel: React.FC<QueueLookupPanelProps> = ({
               <div className="rounded-xl bg-amber-50 border border-amber-200 p-5 flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" aria-hidden="true" />
                 <div className="text-sm">
-                  <p className="font-bold text-amber-900">Kode tiket “{searchedQuery}” tidak ditemukan.</p>
+                  <p className="font-bold text-amber-900">Kode booking “{searchedQuery}” tidak ditemukan.</p>
                   <p className="text-xs text-amber-900 mt-1">
-                    Pastikan kode tiket diketik lengkap sesuai bukti pendaftaran, atau buat pendaftaran poliklinik online
-                    terlebih dahulu.
+                    Pastikan kode booking ({BOOKING_CODE_LENGTH} karakter) diketik lengkap sesuai bukti pendaftaran.
+                    Nomor antrean (mis. UMM-003) tidak dapat dipakai untuk pencarian.
                   </p>
                 </div>
               </div>

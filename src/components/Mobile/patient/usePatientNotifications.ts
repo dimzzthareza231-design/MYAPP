@@ -276,31 +276,10 @@ export function usePatientNotifications(params: {
     toast.success('Semua notifikasi ditandai sudah dibaca.');
   }, [notifications, token, authMethod]);
 
-  /** Hanya tersedia di mode pengembangan (lihat NotificationsModal). */
-  const simulatePush = useCallback(
-    async (type: 'queue_call' | 'lab_ready') => {
-      if (!token) return;
-      setSimulatingType(type);
-      try {
-        const res = await fetch('/api/patient/notifications/test', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ type })
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data?.success) {
-          toast.error(data?.message || 'Gagal menjalankan simulasi notifikasi.');
-          return;
-        }
-        if (data.notification) handleIncomingRealtimeAlert(data.notification, true);
-      } catch {
-        toast.error('Koneksi bermasalah saat mengirim uji notifikasi.');
-      } finally {
-        setSimulatingType(null);
-      }
-    },
-    [token, handleIncomingRealtimeAlert]
-  );
+  /** Simulasi notifikasi telah dihapus dari server; fungsi dipertahankan agar UI tetap kompatibel. */
+  const simulatePush = useCallback(async (_type: 'queue_call' | 'lab_ready') => {
+    toast.error('Simulasi notifikasi tidak tersedia.');
+  }, []);
 
   const reset = useCallback(() => {
     setNotifications([]);

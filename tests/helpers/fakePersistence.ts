@@ -19,7 +19,7 @@ export class FakePrimaryRepository implements PrimaryPersistenceRepository {
     for (const entity of [
       'patients', 'registrations', 'queues', 'emr_soap', 'prescriptions',
       'billings', 'qr_tokens', 'audit_logs', 'beds', 'inventory',
-      'documents', 'bookings', 'system_data'
+      'documents', 'bookings', 'system_data', 'doctors', 'poliklinik', 'payments'
     ] as const) {
       this.records.set(entity, new Map());
     }

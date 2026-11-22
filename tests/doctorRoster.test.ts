@@ -2,8 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DATA_DOKTER_JAGA_LENGKAP } from '../src/data/dataDokterJagaLengkap';
-import { SEMUA_DOKTER, SEMUA_PERAWAT } from '../src/data/seedData';
+import { MASTER_POLIKLINIK, PASIEN, SEMUA_DOKTER, SEMUA_PERAWAT } from '../src/data/seedData';
 
 // Semua gambar yang direferensikan kode sumber dari src/assets/images harus benar-benar ada.
 function referencedImages(dir = 'src'): Array<{ from: string; target: string }> {
@@ -24,19 +23,28 @@ function referencedImages(dir = 'src'): Array<{ from: string; target: string }> 
   return found;
 }
 
-describe('data dokter dan aset MYITARU', () => {
-  test('memuat 35 dokter dengan ID unik pada roster dan master aplikasi', () => {
-    assert.equal(DATA_DOKTER_JAGA_LENGKAP.length, 35);
-    assert.equal(SEMUA_DOKTER.length, 35);
-    assert.equal(new Set(DATA_DOKTER_JAGA_LENGKAP.map((doctor) => doctor.id)).size, 35);
-    assert.deepEqual(
-      SEMUA_DOKTER.map((doctor) => doctor.id),
-      DATA_DOKTER_JAGA_LENGKAP.map((doctor) => doctor.id)
-    );
+describe('tanpa data contoh di repo', () => {
+  test('seedData tidak memuat pasien, dokter, atau perawat contoh', () => {
+    assert.deepEqual(PASIEN, []);
+    assert.deepEqual(SEMUA_DOKTER, []);
+    assert.deepEqual(SEMUA_PERAWAT, []);
+    assert.ok(MASTER_POLIKLINIK.length > 0, 'daftar jenis poliklinik referensi tetap tersedia');
   });
 
-  test('foto yang direferensikan kode tersedia dan data perawat tetap terbentuk', () => {
-    assert.ok(SEMUA_PERAWAT.length > 0);
+  test('seedData tidak punya efek samping saat di-import', () => {
+    const source = readFileSync('src/data/seedData.ts', 'utf-8');
+    assert.doesNotMatch(source, /initSeedData|generateAllPatientsWithResumes|storage\.set|localStorage/);
+    assert.doesNotMatch(readFileSync('src/main.tsx', 'utf-8'), /data\/seedData/);
+  });
+
+  test('server tidak membangun katalog dari data contoh', () => {
+    const source = readFileSync('src/server/patientPortalService.ts', 'utf-8');
+    assert.doesNotMatch(source, /seedData|SEMUA_DOKTER|MASTER_POLIKLINIK|MYITARU SIMK/);
+  });
+});
+
+describe('aset gambar', () => {
+  test('foto yang direferensikan kode tersedia', () => {
     for (const { from, target } of referencedImages()) {
       assert.equal(existsSync(target), true, `${target} (dirujuk ${from}) tersedia`);
     }

@@ -1,4 +1,3 @@
-import { MASTER_POLIKLINIK, SEMUA_DOKTER, Doctor, PoliklinikItem } from './seedData';
 
 export interface HospitalServiceItem {
   id: string;
@@ -77,10 +76,20 @@ export interface HospitalBranch {
   /** Status akreditasi resmi (kosongkan bila belum terverifikasi). */
   accreditation?: string;
   hours: string;
+  /**
+   * Koordinat resmi lokasi (derajat desimal). Bila diisi, tautan petunjuk arah memakai koordinat
+   * dan peta tersemat (embed) ditampilkan. Kosongkan bila belum diverifikasi.
+   */
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface HealthArticle {
   id: string;
+  /** Slug URL (/artikel/:slug). Opsional; bila kosong diturunkan dari judul. */
+  slug?: string;
+  /** Nama tenaga medis peninjau isi artikel (opsional, tampil bila diisi). */
+  reviewedBy?: string;
   category: string;
   title: string;
   readMinutes: number;
@@ -118,8 +127,75 @@ export const HOSPITAL_PROFILE = {
   /** Nomor WhatsApp layanan pasien, mis. "0811-xxxx-xxxx". */
   whatsappPhone: '', // TODO: isi nomor resmi
   /** Alamat singkat untuk footer. */
-  address: '' // TODO: isi alamat resmi
+  address: '', // TODO: isi alamat resmi
+  /** Email layanan pasien resmi. */
+  email: '' // TODO: isi email resmi
 };
+
+/**
+ * Alamat publik situs (tanpa garis miring di akhir). Dipakai untuk tautan kanonis.
+ * TODO: ganti bila domain resmi sudah tersedia (perbarui juga public.html, robots.txt, sitemap.xml).
+ */
+export const PUBLIC_SITE_URL = 'https://myitaru-public.myappv1.workers.dev';
+
+/**
+ * Data hukum & privasi untuk halaman Kebijakan Privasi, Syarat Layanan, dan Pengaduan.
+ * String kosong / daftar kosong = belum dikonfigurasi; UI menyembunyikan baris terkait
+ * atau menampilkan arahan umum untuk menghubungi rumah sakit.
+ */
+export const HOSPITAL_LEGAL_CONFIG = {
+  /** Nama badan hukum pengelola RS (pengendali data pribadi menurut UU PDP). */
+  legalEntityName: '', // TODO: mis. "PT ..."
+  /** Tanggal berlaku Kebijakan Privasi, mis. "1 Januari 2027". */
+  privacyEffectiveDate: '', // TODO
+  /** Tanggal berlaku Syarat Layanan. */
+  termsEffectiveDate: '', // TODO
+  /** Pejabat/petugas pelindungan data pribadi (PPDP/DPO). */
+  dpoName: '', // TODO
+  dpoEmail: '', // TODO
+  dpoPhone: '', // TODO
+  dpoAddress: '', // TODO
+  /**
+   * Masa retensi data non-rekam-medis (mis. data pendaftaran online yang tidak berlanjut ke kunjungan,
+   * log teknis). Contoh isi: "12 bulan sejak pendaftaran". Kosong = baris disembunyikan.
+   */
+  nonMedicalRetention: '', // TODO
+  /**
+   * Penyedia layanan pihak ketiga yang memproses data atas nama RS (mis. hosting, SMS gateway).
+   * Tampil hanya bila diisi.
+   */
+  dataProcessors: [] as Array<{ name: string; purpose: string }>, // TODO
+  /** Kanal pengaduan resmi. */
+  complaintPhone: '', // TODO
+  complaintWhatsapp: '', // TODO
+  complaintEmail: '', // TODO
+  complaintAddress: '', // TODO: mis. "Unit Pengaduan / Customer Service, Lobi Utama"
+  complaintHours: '', // TODO: mis. "Senin–Jumat 08:00–16:00 WIB"
+  /** Target waktu tanggapan pengaduan sesuai SOP RS, mis. "3 hari kerja". */
+  complaintResponseTime: '' // TODO
+};
+
+/**
+ * Pengaturan pemberitahuan privasi/cookie. Web publik saat ini TIDAK memakai analitik atau
+ * cookie pihak ketiga, sehingga hanya ditampilkan pemberitahuan singkat. Ubah ke true hanya
+ * bila analitik/penyimpanan non-esensial ditambahkan; UI lalu meminta persetujuan (setuju/tolak).
+ */
+export const PUBLIC_PRIVACY_SETTINGS = {
+  usesAnalytics: false
+};
+
+/** Status kerja sama BPJS Kesehatan (JKN). null = belum dikonfigurasi (UI menampilkan arahan umum). */
+export const HOSPITAL_BPJS_CONFIG: {
+  isBpjsPartner: boolean | null;
+  /** Catatan tambahan resmi, mis. lokasi loket BPJS atau jam layanan. */
+  notes: string[];
+} = {
+  isBpjsPartner: null, // TODO: true bila RS bekerja sama dengan BPJS Kesehatan
+  notes: [] // TODO
+};
+
+/** Tanya-jawab khusus rumah sakit (jam besuk, parkir, dsb.). TODO: isi dari informasi resmi. */
+export const HOSPITAL_FAQS: Array<{ question: string; answer: string }> = [];
 
 /** Direktori unit layanan medis. TODO: isi dengan unit layanan resmi. */
 export const HOSPITAL_SERVICES: HospitalServiceItem[] = [];
@@ -171,6 +247,40 @@ export function toWhatsAppHref(phone: string): string {
   return `https://wa.me/${digits}`;
 }
 
+/**
+ * Tautan petunjuk arah Google Maps (https://www.google.com/maps/search/?api=1&query=...).
+ * Memakai koordinat bila tersedia, selain itu nama + alamat + kota. '' bila tidak ada data lokasi.
+ */
+export function buildMapsDirectionsUrl(
+  branch: Pick<HospitalBranch, 'name' | 'address' | 'city' | 'latitude' | 'longitude'>
+): string {
+  const hasCoords =
+    typeof branch.latitude === 'number' &&
+    typeof branch.longitude === 'number' &&
+    Number.isFinite(branch.latitude) &&
+    Number.isFinite(branch.longitude);
+  let query = '';
+  if (hasCoords) {
+    query = `${branch.latitude},${branch.longitude}`;
+  } else if ((branch.address || '').trim()) {
+    query = [branch.name, branch.address, branch.city].map((v) => (v || '').trim()).filter(Boolean).join(', ');
+  }
+  return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : '';
+}
+
+/** URL peta tersemat; hanya bila koordinat dikonfigurasi (tidak ada embed berbasis alamat bebas). */
+export function buildMapsEmbedUrl(branch: Pick<HospitalBranch, 'latitude' | 'longitude'>): string {
+  if (
+    typeof branch.latitude !== 'number' ||
+    typeof branch.longitude !== 'number' ||
+    !Number.isFinite(branch.latitude) ||
+    !Number.isFinite(branch.longitude)
+  ) {
+    return '';
+  }
+  return `https://www.google.com/maps?q=${branch.latitude},${branch.longitude}&z=16&output=embed`;
+}
+
 /** Lokasi/cabang resmi. TODO: isi alamat, nomor telepon, dan jam layanan yang terverifikasi. */
 export const HOSPITAL_BRANCHES: HospitalBranch[] = [];
 
@@ -183,14 +293,5 @@ export const HEALTH_ARTICLES: HealthArticle[] = [];
  */
 export const PATIENT_STORIES: PatientStory[] = [];
 
-/**
- * Daftar poliklinik/dokter dari data master aplikasi. Dipakai aplikasi mobile pasien
- * sebagai cadangan; portal publik hanya menampilkan data dari API.
- */
-export function getPublicPoliklinik(): PoliklinikItem[] {
-  return MASTER_POLIKLINIK;
-}
-
-export function getPublicDoctors(): Doctor[] {
-  return SEMUA_DOKTER;
-}
+// Dokter & poliklinik TIDAK dikonfigurasi di file ini: web publik membacanya dari
+// GET /api/public/hospital-catalog (data master tersimpan di server).

@@ -146,7 +146,7 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
                   <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                     <div className="text-xs">
                       <span className="font-semibold text-emerald-700">
-                        {doc.status_jaga || doc.status || 'Status belum tersedia'}
+                        {doc.status || 'Status belum tersedia'}
                       </span>
                       <span className="text-slate-400 mx-1.5" aria-hidden="true">
                         ·

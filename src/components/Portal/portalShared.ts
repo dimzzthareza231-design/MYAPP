@@ -1,11 +1,34 @@
-import type { Doctor, PoliklinikItem } from '../../data/seedData';
 
-/** Dokter seperti dipublikasikan oleh GET /api/public/hospital-catalog. */
-export interface LiveDoctor extends Doctor {
+/** Dokter seperti dipublikasikan oleh GET /api/public/hospital-catalog (semua selain id/nama/poli opsional). */
+export interface LiveDoctor {
+  id: string;
+  nama: string;
+  poli_id: string;
+  poli: string;
+  spesialis?: string;
+  subspesialis?: string;
+  jadwal?: string;
+  hari?: string;
+  jam?: string;
+  ruangan?: string;
+  status?: string;
+  kuota?: number;
+  pasien_terlayani?: number;
   kuota_tersisa?: number;
+  /** Field profil opsional (tampil hanya bila server mengirimkannya). */
+  slug?: string;
+  foto_url?: string;
+  bahasa?: string[] | string;
+  pendidikan?: string[] | string;
+  profil?: string;
 }
 
-export type PublicPoli = Pick<PoliklinikItem, 'id' | 'kode' | 'nama'> & { kategori?: string };
+export interface PublicPoli {
+  id: string;
+  kode?: string;
+  nama: string;
+  kategori?: string;
+}
 
 export interface PoliQueueSnapshot {
   id: string;
@@ -30,6 +53,8 @@ export interface QueueLookupMatch {
 }
 
 export interface RecentTicketSummary {
+  /** Kode booking acak 10 karakter: satu-satunya kunci cek antrean publik. */
+  kode_booking: string;
   nomor_antrian: string;
   poli: string;
   dokter: string;
@@ -38,6 +63,7 @@ export interface RecentTicketSummary {
 }
 
 export interface BookingSuccess {
+  kode_booking: string;
   no_rm: string;
   tanggal_lahir: string;
   nama: string;
@@ -58,6 +84,14 @@ export interface BookingFormState {
   tanggal: string;
   penjamin: string;
   keluhan: string;
+}
+
+/** Panjang kode booking dari server (lihat generateBookingCode di patientPortalService). */
+export const BOOKING_CODE_LENGTH = 10;
+
+/** Normalisasi input kode booking: huruf besar, tanpa spasi/tanda hubung. */
+export function normalizeBookingCode(value: string): string {
+  return (value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, BOOKING_CODE_LENGTH);
 }
 
 export type WorkspaceMode = 'daftar' | 'antrean';

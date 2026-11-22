@@ -16,16 +16,49 @@ export interface PortalNavItem {
   mode?: WorkspaceMode;
   /** Tampilkan di navigasi desktop (default true). */
   desktop?: boolean;
+  /** Rute halaman (mis. "/dokter"); bila diisi, item dirender sebagai tautan rute, bukan jangkar. */
+  to?: string;
 }
 
 interface SiteHeaderProps {
   navItems: PortalNavItem[];
   onNavigate: (item: PortalNavItem) => void;
+  /** true di halaman selain beranda: jangkar diarahkan ke "/#id". */
+  onSubpage?: boolean;
 }
+
+/** Tautan navigasi: rute (Link) atau jangkar section di beranda. */
+export const PortalNavLink: React.FC<{
+  item: PortalNavItem;
+  onSubpage?: boolean;
+  onNavigate: (item: PortalNavItem) => void;
+  className?: string;
+  children: React.ReactNode;
+}> = ({ item, onSubpage, onNavigate, className, children }) => {
+  if (item.to) {
+    return (
+      <Link to={item.to} onClick={() => onNavigate({ ...item, target: '' })} className={className}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a
+      href={`${onSubpage ? '/' : ''}#${item.target}`}
+      onClick={(e) => {
+        if (onSubpage) e.preventDefault();
+        onNavigate(item);
+      }}
+      className={className}
+    >
+      {children}
+    </a>
+  );
+};
 
 const MOBILE_MENU_ID = 'portal-mobile-menu';
 
-export const SiteHeader: React.FC<SiteHeaderProps> = ({ navItems, onNavigate }) => {
+export const SiteHeader: React.FC<SiteHeaderProps> = ({ navItems, onNavigate, onSubpage = false }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -39,44 +72,53 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({ navItems, onNavigate }) 
 
   const handleItem = (item: PortalNavItem) => {
     setMobileMenuOpen(false);
-    onNavigate(item);
+    // Item rute ditangani <Link>; target kosong menandakan tidak perlu menggulir.
+    if (item.target) onNavigate(item);
   };
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-6">
-        <a href="#top" className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
+        <Link
+          to="/"
+          onClick={() => {
+            if (!onSubpage) window.scrollTo({ top: 0 });
+          }}
+          className="flex items-center gap-2.5 whitespace-nowrap shrink-0 rounded-lg"
+        >
           <BrandLogo alt="" className="w-9 h-9 rounded-xl shadow-xs object-cover" />
           <span className="text-lg sm:text-xl font-extrabold tracking-tight text-brand">
             {HOSPITAL_PROFILE.name}
           </span>
-          <span className="sr-only">— kembali ke atas</span>
-        </a>
+          <span className="sr-only">— beranda</span>
+        </Link>
 
         <nav aria-label="Navigasi utama" className="hidden lg:flex items-center gap-6 text-sm font-semibold text-slate-700">
           {navItems
             .filter((item) => item.desktop !== false)
             .map((item) => (
-              <a
-                key={`${item.target}-${item.label}`}
-                href={`#${item.target}`}
-                onClick={() => handleItem(item)}
-                className="hover:text-brand transition whitespace-nowrap shrink-0"
+              <PortalNavLink
+                key={`${item.to || item.target}-${item.label}`}
+                item={item}
+                onSubpage={onSubpage}
+                onNavigate={handleItem}
+                className="hover:text-brand transition whitespace-nowrap shrink-0 rounded"
               >
                 {item.label}
-              </a>
+              </PortalNavLink>
             ))}
         </nav>
 
         <div className="flex items-center gap-3 shrink-0">
-          <a
-            href={`#${SECTION_IDS.bookingForm}`}
-            onClick={() => handleItem({ target: SECTION_IDS.bookingForm, label: 'Daftar Online', mode: 'daftar' })}
+          <PortalNavLink
+            item={{ target: SECTION_IDS.bookingForm, label: 'Daftar Online', mode: 'daftar' }}
+            onSubpage={onSubpage}
+            onNavigate={handleItem}
             className="inline-flex items-center gap-2 bg-brand hover:bg-brand-hover text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-xs transition whitespace-nowrap shrink-0 min-h-[44px]"
           >
             <CalendarCheck className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span>Daftar Online</span>
-          </a>
+          </PortalNavLink>
 
           <button
             type="button"
@@ -104,14 +146,18 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({ navItems, onNavigate }) 
           >
             <ul className="px-4 py-4 space-y-1.5">
               {navItems.map((item) => (
-                <li key={`m-${item.target}-${item.label}`}>
-                  <a
-                    href={`#${item.target}`}
-                    onClick={() => handleItem(item)}
+                <li key={`m-${item.to || item.target}-${item.label}`}>
+                  <PortalNavLink
+                    item={item}
+                    onSubpage={onSubpage}
+                    onNavigate={(it) => {
+                      setMobileMenuOpen(false);
+                      if (it.target) onNavigate(it);
+                    }}
                     className="block w-full px-3 py-3 rounded-xl font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     {item.mobileLabel || item.label}
-                  </a>
+                  </PortalNavLink>
                 </li>
               ))}
               <li>

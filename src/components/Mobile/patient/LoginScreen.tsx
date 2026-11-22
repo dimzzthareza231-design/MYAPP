@@ -1,5 +1,5 @@
-import React, { useId, useState } from 'react';
-import { ArrowLeft, PhoneCall, UserCheck } from 'lucide-react';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { ArrowLeft, MessageCircle, PhoneCall, UserCheck } from 'lucide-react';
 import { PWAInstallButton } from '../../PWA/PWAInstallButton';
 import { BrandLogo } from '../../Common/BrandLogo';
 import { localTodayIso } from './utils';
@@ -74,16 +74,216 @@ const RmDobFields: React.FC<{
   );
 };
 
+export type OtpRequestOutcome =
+  | { ok: true; requestId: string; maskedPhone: string; resendAfter: number; message?: string }
+  | { ok: false; message: string; retryAfter?: number };
+
+export type OtpVerifyOutcome = { ok: true } | { ok: false; message: string; mustRestart?: boolean };
+
+const OTP_LENGTH = 6;
+
+/** Login dua langkah: No. RM / No. HP -> kode 6 digit yang dikirim via WhatsApp ke nomor terdaftar. */
+const WhatsAppOtpForm: React.FC<{
+  onRequestOtp: (identifier: string) => Promise<OtpRequestOutcome>;
+  onVerifyOtp: (requestId: string, code: string) => Promise<OtpVerifyOutcome>;
+}> = ({ onRequestOtp, onVerifyOtp }) => {
+  const identifierId = useId();
+  const codeId = useId();
+  const errorId = useId();
+  const hintId = useId();
+  const [step, setStep] = useState<'identify' | 'code'>('identify');
+  const [identifier, setIdentifier] = useState('');
+  const [code, setCode] = useState('');
+  const [request, setRequest] = useState<{ requestId: string; maskedPhone: string } | null>(null);
+  const [info, setInfo] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const codeInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = window.setTimeout(() => setCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
+
+  useEffect(() => {
+    if (step === 'code') codeInputRef.current?.focus();
+  }, [step]);
+
+  const sendCode = async () => {
+    if (!identifier.trim()) {
+      setError('Masukkan No. RM atau nomor HP yang terdaftar.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    const outcome = await onRequestOtp(identifier);
+    setBusy(false);
+    if (!outcome.ok) {
+      setError(outcome.message);
+      if (outcome.retryAfter) setCooldown(outcome.retryAfter);
+      return;
+    }
+    setRequest({ requestId: outcome.requestId, maskedPhone: outcome.maskedPhone });
+    setInfo(outcome.message || '');
+    setCode('');
+    setCooldown(outcome.resendAfter);
+    setStep('code');
+  };
+
+  const verify = async (value: string) => {
+    if (!request || value.length !== OTP_LENGTH || busy) return;
+    setBusy(true);
+    setError('');
+    const outcome = await onVerifyOtp(request.requestId, value);
+    setBusy(false);
+    if (outcome.ok) return;
+    setError(outcome.message);
+    setCode('');
+    if (outcome.mustRestart) {
+      setRequest(null);
+      setStep('identify');
+    } else {
+      codeInputRef.current?.focus();
+    }
+  };
+
+  if (step === 'identify' || !request) {
+    return (
+      <form
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void sendCode();
+        }}
+        className="space-y-4"
+      >
+        <div>
+          <label htmlFor={identifierId} className="block text-sm font-bold text-slate-700 mb-1.5">
+            No. Rekam Medis atau No. HP
+          </label>
+          <input
+            id={identifierId}
+            type="text"
+            required
+            autoComplete="username"
+            autoCapitalize="characters"
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
+            placeholder="mis. RM-240101-0001 atau 0812xxxxxxx"
+            aria-invalid={Boolean(error)}
+            aria-describedby={`${hintId}${error ? ` ${errorId}` : ''}`}
+            className={`${inputClass} font-mono placeholder:font-sans`}
+          />
+          <p id={hintId} className="mt-1.5 text-xs text-slate-500 leading-relaxed">
+            Kode dikirim via WhatsApp hanya ke nomor HP yang terdaftar di rumah sakit. Nomor berubah? Perbarui di loket
+            pendaftaran.
+          </p>
+        </div>
+        {error && (
+          <p id={errorId} role="alert" className="text-sm font-semibold text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            {error}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={busy || cooldown > 0}
+          className="w-full py-3.5 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm transition disabled:opacity-60 cursor-pointer min-h-[48px] inline-flex items-center justify-center gap-2"
+        >
+          <MessageCircle className="w-4 h-4" aria-hidden="true" />
+          {busy ? 'Mengirim kode...' : cooldown > 0 ? `Coba lagi dalam ${cooldown} dtk` : 'Kirim kode via WhatsApp'}
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <form
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        void verify(code);
+      }}
+      className="space-y-4"
+    >
+      <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-sm text-slate-700" aria-live="polite">
+        <p className="font-bold text-emerald-800">Kode dikirim via WhatsApp ke {request.maskedPhone}</p>
+        {info && <p className="mt-1 text-slate-600">{info}</p>}
+      </div>
+      <div>
+        <label htmlFor={codeId} className="block text-sm font-bold text-slate-700 mb-1.5">
+          Kode verifikasi 6 digit
+        </label>
+        <input
+          ref={codeInputRef}
+          id={codeId}
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          pattern="[0-9]{6}"
+          maxLength={OTP_LENGTH}
+          required
+          value={code}
+          onChange={(e) => {
+            const next = e.target.value.replace(/\D/g, '').slice(0, OTP_LENGTH);
+            setCode(next);
+            if (next.length === OTP_LENGTH) void verify(next);
+          }}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? errorId : undefined}
+          className={`${inputClass} font-mono text-2xl tracking-[0.5em] text-center`}
+        />
+      </div>
+      {error && (
+        <p id={errorId} role="alert" className="text-sm font-semibold text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+          {error}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={busy || code.length !== OTP_LENGTH}
+        className="w-full py-3.5 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm transition disabled:opacity-60 cursor-pointer min-h-[48px]"
+      >
+        {busy ? 'Memverifikasi...' : 'Verifikasi & Masuk'}
+      </button>
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <button
+          type="button"
+          onClick={() => {
+            setStep('identify');
+            setRequest(null);
+            setError('');
+          }}
+          className="font-semibold text-slate-600 hover:text-slate-900 min-h-[44px] px-1 cursor-pointer"
+        >
+          Ganti No. RM / No. HP
+        </button>
+        <button
+          type="button"
+          disabled={busy || cooldown > 0}
+          onClick={() => void sendCode()}
+          aria-live="polite"
+          className="font-bold text-[#0B3D91] disabled:text-slate-400 min-h-[44px] px-1 cursor-pointer disabled:cursor-not-allowed"
+        >
+          {cooldown > 0 ? `Kirim ulang (${cooldown} dtk)` : 'Kirim ulang kode'}
+        </button>
+      </div>
+    </form>
+  );
+};
+
 export const LoginScreen: React.FC<{
   pendingGoogleUser: { email: string; displayName: string } | null;
   isVerifying: boolean;
   authLoading: boolean;
   onBack: () => void;
-  onVerifyRmDob: (noRm: string, dob: string) => void;
+  onRequestOtp: (identifier: string) => Promise<OtpRequestOutcome>;
+  onVerifyOtp: (requestId: string, code: string) => Promise<OtpVerifyOutcome>;
   onGoogleLogin: () => void;
   onBindGoogle: (noRm: string, dob: string) => void;
-}> = ({ pendingGoogleUser, isVerifying, authLoading, onBack, onVerifyRmDob, onGoogleLogin, onBindGoogle }) => {
-  const [authMode, setAuthMode] = useState<'rm_dob' | 'google'>('rm_dob');
+}> = ({ pendingGoogleUser, isVerifying, authLoading, onBack, onRequestOtp, onVerifyOtp, onGoogleLogin, onBindGoogle }) => {
+  const [authMode, setAuthMode] = useState<'otp' | 'google'>('otp');
   const [noRmInput, setNoRmInput] = useState('');
   const [dobInput, setDobInput] = useState('');
 
@@ -157,7 +357,7 @@ export const LoginScreen: React.FC<{
               <div role="group" aria-label="Metode masuk" className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-100">
                 {(
                   [
-                    { id: 'rm_dob', label: 'No. RM & Tgl Lahir' },
+                    { id: 'otp', label: 'WhatsApp OTP' },
                     { id: 'google', label: 'Akun Google' }
                   ] as const
                 ).map((mode) => (
@@ -175,29 +375,8 @@ export const LoginScreen: React.FC<{
                 ))}
               </div>
 
-              {authMode === 'rm_dob' ? (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    onVerifyRmDob(noRmInput, dobInput);
-                  }}
-                  className="space-y-4"
-                >
-                  <RmDobFields
-                    noRm={noRmInput}
-                    dob={dobInput}
-                    onNoRmChange={setNoRmInput}
-                    onDobChange={setDobInput}
-                    required
-                  />
-                  <button
-                    type="submit"
-                    disabled={isVerifying}
-                    className="w-full py-3.5 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm transition disabled:opacity-60 cursor-pointer min-h-[48px]"
-                  >
-                    {isVerifying ? 'Memverifikasi Identitas...' : 'Verifikasi & Masuk'}
-                  </button>
-                </form>
+              {authMode === 'otp' ? (
+                <WhatsAppOtpForm onRequestOtp={onRequestOtp} onVerifyOtp={onVerifyOtp} />
               ) : (
                 <div className="space-y-4 py-2">
                   <p className="text-sm text-slate-600 text-center leading-relaxed">

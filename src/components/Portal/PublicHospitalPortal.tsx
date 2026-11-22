@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MotionConfig } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
@@ -15,7 +15,9 @@ import {
   VISITING_HOURS_INFO
 } from '../../data/hospitalPublicCatalog';
 import {
+  BOOKING_CODE_LENGTH,
   SECTION_IDS,
+  normalizeBookingCode,
   scrollToId,
   todayIso,
   type BookingFormState,
@@ -43,6 +45,9 @@ import { InsuranceSection } from './sections/InsuranceSection';
 import { ArticlesSection } from './sections/ArticlesSection';
 import { BranchesSection } from './sections/BranchesSection';
 import { SiteFooter } from './sections/SiteFooter';
+import { HOME_NAV_ITEMS } from './publicNav';
+import { isPublicDoctor } from './publicDirectory';
+import { useDocumentMeta } from './useDocumentMeta';
 
 const RECENT_TICKETS_KEY = 'myitaru_public_recent_tickets';
 
@@ -56,31 +61,16 @@ const EMPTY_BOOKING_FORM: BookingFormState = {
   keluhan: ''
 };
 
-/** Navigasi hanya memuat section yang benar-benar dirender (data tidak kosong). */
-function buildNavItems(): PortalNavItem[] {
-  const items: PortalNavItem[] = [
-    { target: SECTION_IDS.workspace, label: 'Jadwal Dokter', mobileLabel: 'Jadwal Dokter & Daftar Online', mode: 'daftar' },
-    { target: SECTION_IDS.workspace, label: 'Cek Antrean', mobileLabel: 'Cek Nomor Antrean', mode: 'antrean' }
-  ];
-  if (HOSPITAL_SERVICES.length > 0) items.push({ target: SECTION_IDS.services, label: 'Layanan Medis' });
-  if (CENTERS_OF_EXCELLENCE.length > 0) items.push({ target: SECTION_IDS.centers, label: 'Pusat Unggulan' });
-  if (INPATIENT_ROOMS.length > 0 || VISITING_HOURS_INFO.morningSession || VISITING_HOURS_INFO.eveningSession) {
-    items.push({ target: SECTION_IDS.inpatient, label: 'Rawat Inap', mobileLabel: 'Rawat Inap & Jam Besuk' });
-  }
-  if (HOSPITAL_PROMOS.length > 0 || MCU_PACKAGES.length > 0) {
-    items.push({ target: SECTION_IDS.promo, label: MCU_PACKAGES.length > 0 ? 'Paket MCU' : 'Promo' });
-  }
-  items.push({ target: SECTION_IDS.mobileApp, label: 'Aplikasi Pasien', desktop: false });
-  if (INSURANCE_PARTNERS.length > 0) items.push({ target: SECTION_IDS.insurance, label: 'Mitra Penjamin', desktop: false });
-  if (HEALTH_ARTICLES.length > 0 || PATIENT_STORIES.length > 0) items.push({ target: SECTION_IDS.articles, label: 'Edukasi', desktop: false });
-  if (HOSPITAL_BRANCHES.length > 0) items.push({ target: SECTION_IDS.branches, label: 'Lokasi & Kontak' });
-  return items;
-}
+const NAV_ITEMS = HOME_NAV_ITEMS;
 
-const NAV_ITEMS = buildNavItems();
+const HOME_TITLE = 'MYITARU — Jadwal Dokter, Pendaftaran Online & Cek Antrean Pasien';
+const HOME_DESCRIPTION =
+  'Situs resmi pasien MYITARU: lihat jadwal dokter, daftar poliklinik secara online, cek nomor antrean, dan akses Aplikasi Pasien dari ponsel.';
 
 export const PublicHospitalPortal: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  useDocumentMeta(HOME_TITLE, HOME_DESCRIPTION);
   const [activeMode, setActiveMode] = useState<WorkspaceMode>('daftar');
 
   // Data jadwal & antrean hanya dari server; tidak ada data cadangan karangan.
@@ -104,7 +94,14 @@ export const PublicHospitalPortal: React.FC = () => {
   const [recentTickets, setRecentTickets] = useState<RecentTicketSummary[]>(() => {
     try {
       const saved = localStorage.getItem(RECENT_TICKETS_KEY);
-      return saved ? JSON.parse(saved) : [];
+      const parsed: unknown = saved ? JSON.parse(saved) : [];
+      // Tiket lama (sebelum ada kode booking) tidak bisa dicek lagi; abaikan.
+      return Array.isArray(parsed)
+        ? parsed.filter(
+            (t): t is RecentTicketSummary =>
+              !!t && typeof t.kode_booking === 'string' && t.kode_booking.length === BOOKING_CODE_LENGTH
+          )
+        : [];
     } catch {
       return [];
     }
@@ -126,7 +123,7 @@ export const PublicHospitalPortal: React.FC = () => {
 
       if (catalogRes.status === 'fulfilled' && catalogRes.value.ok) {
         const catData = await catalogRes.value.json();
-        if (Array.isArray(catData?.doctors)) setDoctors(catData.doctors);
+        if (Array.isArray(catData?.doctors)) setDoctors(catData.doctors.filter(isPublicDoctor));
         if (Array.isArray(catData?.poliklinik)) setPoliklinikList(catData.poliklinik);
       } else {
         problems.push('jadwal dokter');
@@ -169,10 +166,28 @@ export const PublicHospitalPortal: React.FC = () => {
     return () => window.removeEventListener('hashchange', applyHash);
   }, []);
 
+  // "Buat Janji" dari profil dokter: /?dokter=<id>#formulir-pendaftaran → pilih dokter tsb.
+  const requestedDoctorId = searchParams.get('dokter');
+  useEffect(() => {
+    if (!requestedDoctorId || doctors.length === 0) return;
+    const doc = doctors.find((d) => d.id === requestedDoctorId);
+    if (doc) {
+      setSelectedDoctor(doc);
+      setBookingSuccess(null);
+      setActiveMode('daftar');
+      scrollToId(SECTION_IDS.bookingForm);
+    }
+    // Bersihkan ?dokter= tanpa membuang #jangkar (agar tidak memicu gulir ke atas).
+    const next = new URLSearchParams(searchParams);
+    next.delete('dokter');
+    const search = next.toString();
+    navigate({ search: search ? `?${search}` : '', hash: window.location.hash }, { replace: true, preventScrollReset: true });
+  }, [requestedDoctorId, doctors, searchParams, navigate]);
+
   // Pilih dokter pertama secara default setelah data dari server tersedia.
   useEffect(() => {
-    if (!selectedDoctor && doctors.length > 0) setSelectedDoctor(doctors[0]);
-  }, [doctors, selectedDoctor]);
+    if (!selectedDoctor && doctors.length > 0 && !requestedDoctorId) setSelectedDoctor(doctors[0]);
+  }, [doctors, selectedDoctor, requestedDoctorId]);
 
   const categories = useMemo(() => {
     const cats = Array.from(new Set(poliklinikList.map((p) => p.kategori).filter((k): k is string => Boolean(k))));
@@ -265,29 +280,39 @@ export const PublicHospitalPortal: React.FC = () => {
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (res.status === 409 && data?.code === 'DOCTOR_QUOTA_FULL') {
+        toast.error('Kuota dokter pada tanggal tersebut sudah penuh. Silakan pilih tanggal lain atau dokter lain.', {
+          duration: 6000
+        });
+        fetchCatalogAndQueues();
+        return;
+      }
       if (!res.ok || !data?.success) {
         toast.error(data?.message || 'Gagal memproses pendaftaran online.');
         return;
       }
 
       const ticket: RecentTicketSummary = {
+        kode_booking: data.booking.kode_booking,
         nomor_antrian: data.booking.nomor_antrian,
         poli: data.booking.poli,
         dokter: data.booking.dokter,
         tanggal: data.booking.tanggal,
         jam_praktek: data.booking.jam_praktek
       };
-      const nextTickets = [ticket, ...recentTickets.filter((t) => t.nomor_antrian !== ticket.nomor_antrian)].slice(0, 5);
-      setRecentTickets(nextTickets);
-      try {
-        localStorage.setItem(RECENT_TICKETS_KEY, JSON.stringify(nextTickets));
-      } catch {
-        // Abaikan kegagalan penyimpanan lokal.
+      if (typeof ticket.kode_booking === 'string' && ticket.kode_booking) {
+        const nextTickets = [ticket, ...recentTickets.filter((t) => t.kode_booking !== ticket.kode_booking)].slice(0, 5);
+        setRecentTickets(nextTickets);
+        try {
+          localStorage.setItem(RECENT_TICKETS_KEY, JSON.stringify(nextTickets));
+        } catch {
+          // Abaikan kegagalan penyimpanan lokal.
+        }
       }
 
       setBookingSuccess(data.booking);
-      toast.success(`Nomor Antrean ${data.booking.nomor_antrian} berhasil diterbitkan!`);
+      toast.success(`Pendaftaran berhasil. Simpan kode booking ${data.booking.kode_booking}.`);
       fetchCatalogAndQueues();
     } catch {
       toast.error('Koneksi ke server terganggu. Silakan coba beberapa saat lagi.');
@@ -297,9 +322,9 @@ export const PublicHospitalPortal: React.FC = () => {
   };
 
   const handleQueueLookup = async (overrideQuery?: string) => {
-    const q = (overrideQuery ?? queueQuery).trim();
-    if (!q) {
-      toast.error('Masukkan kode tiket / nomor antrean Anda secara lengkap.');
+    const q = normalizeBookingCode(overrideQuery ?? queueQuery);
+    if (q.length !== BOOKING_CODE_LENGTH) {
+      toast.error(`Masukkan kode booking ${BOOKING_CODE_LENGTH} karakter sesuai bukti pendaftaran Anda.`);
       return;
     }
     if (overrideQuery !== undefined) setQueueQuery(overrideQuery);
@@ -383,8 +408,8 @@ export const PublicHospitalPortal: React.FC = () => {
                   isSubmitting={isSubmittingBooking}
                   bookingSuccess={bookingSuccess}
                   onSubmit={handleBookingSubmit}
-                  onCheckQueue={(nomor) => {
-                    handleQueueLookup(nomor);
+                  onCheckQueue={(kode) => {
+                    handleQueueLookup(kode);
                     scrollToId(SECTION_IDS.queue);
                   }}
                   onReset={() => setBookingSuccess(null)}
@@ -394,7 +419,7 @@ export const PublicHospitalPortal: React.FC = () => {
             queueContent={
               <QueueLookupPanel
                 queueQuery={queueQuery}
-                onQueryChange={setQueueQuery}
+                onQueryChange={(v) => setQueueQuery(normalizeBookingCode(v))}
                 onLookup={handleQueueLookup}
                 searching={queueSearching}
                 searchedQuery={queueSearchedQuery}
@@ -423,11 +448,7 @@ export const PublicHospitalPortal: React.FC = () => {
           <PromoMcuSection promos={HOSPITAL_PROMOS} packages={MCU_PACKAGES} onBook={handlePresetBooking} />
           <MobileAppSection />
           <InsuranceSection partners={INSURANCE_PARTNERS} />
-          <ArticlesSection
-            articles={HEALTH_ARTICLES}
-            stories={PATIENT_STORIES}
-            onBookRelated={() => goTo('daftar', SECTION_IDS.workspace)}
-          />
+          <ArticlesSection articles={HEALTH_ARTICLES} stories={PATIENT_STORIES} />
           <BranchesSection branches={HOSPITAL_BRANCHES} />
         </main>
 

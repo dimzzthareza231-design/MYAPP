@@ -166,6 +166,18 @@ npm run dev
 | `PUBLIC_PORT` / `CORE_PORT` | Tidak | Port lokal/Docker, bawaan `3000` dan `3001`. |
 | `VITE_FIREBASE_*` | Mode Firebase | Konfigurasi klien Firebase. Bila `VITE_FIREBASE_API_KEY` kosong, Firebase Auth tidak diinisialisasi. |
 | `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY` | Jika Turnstile aktif | Site key publik widget; secret verifikasi tetap di environment server. |
+| `WHATSAPP_ACCESS_TOKEN` | Login pasien | Token System User permanen Meta (izin `whatsapp_business_messaging`). Hanya di secret server (`wrangler secret put`, env Vercel). |
+| `WHATSAPP_PHONE_NUMBER_ID` | Login pasien | Phone Number ID pengirim dari WhatsApp Manager / App Dashboard (bukan nomor telepon). |
+| `WHATSAPP_OTP_TEMPLATE` | Login pasien | Nama template kategori **Authentication** (tombol *copy code*) yang sudah disetujui Meta. |
+| `WHATSAPP_TEMPLATE_LANG` | Tidak | Kode bahasa template, bawaan `id`. |
+| `WHATSAPP_API_VERSION` | Tidak | Versi Graph API, bawaan `v23.0`. |
+| `OTP_HASH_SECRET` | Tidak | Kunci HMAC untuk hash OTP & kunci rate limit; bila kosong memakai `SESSION_SECRET`. |
+
+### Login pasien via OTP WhatsApp
+
+Aplikasi pasien masuk dengan No. RM atau No. HP, lalu kode 6 digit dikirim lewat **WhatsApp Cloud API (Meta)** hanya ke nomor HP yang **terdaftar** di rekam pasien (`POST /api/patient/otp/request`, lalu `POST /api/patient/otp/verify` yang menerbitkan sesi pasien HttpOnly). Bila `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, atau `WHATSAPP_OTP_TEMPLATE` kosong, kedua endpoint menjawab `503 PATIENT_LOGIN_UNAVAILABLE`; tidak ada mode demo. Server hanya menyimpan HMAC-SHA256 kode (berlaku 5 menit, maks 5 percobaan, sekali pakai) di tabel `system_data` lewat adapter persistensi (D1/MySQL), sehingga konsisten di semua instance Worker. Batas: kirim ulang 60 detik, 3 permintaan per pasien/nomor dan 10 per IP setiap 15 menit.
+
+Persiapan di Meta: (1) buat WhatsApp Business Account + nomor pengirim terverifikasi di Meta Business Suite; (2) buat System User dengan token permanen berizin `whatsapp_business_messaging`; (3) buat template kategori *Authentication*, bahasa Indonesia (`id`), dengan rekomendasi keamanan aktif, masa berlaku kode 5 menit, dan tombol *Copy code* (isi teks template autentikasi adalah teks baku dari Meta, kurang lebih "{{1}} adalah kode verifikasi Anda" + imbauan keamanan; tidak bisa diubah bebas); (4) tunggu template berstatus *Approved*, lalu isi env di atas.
 
 Untuk XAMPP, impor [init_myitaru_xampp.sql](./database/init_myitaru_xampp.sql) lewat phpMyAdmin. File ini menyertakan skema legacy dan tabel adapter, tanpa data demo. MySQL menjadi sumber utama pada mode `hybrid`; perubahan cloud yang gagal dikirim tetap berada di `sync_outbox` untuk dicoba ulang. Bila XAMPP belum aktif, server lokal tetap dapat menyajikan health check, tetapi operasi tulis akan ditolak—data tidak dialihkan diam-diam ke memori.
 

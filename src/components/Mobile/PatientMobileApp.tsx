@@ -22,7 +22,7 @@ import { fadeSlideTransition, fadeSlideVariants, formatClock } from './patient/u
 import { EmptyState } from './patient/ui';
 import { useHospitalCatalog } from './patient/useHospitalCatalog';
 import { usePatientNotifications } from './patient/usePatientNotifications';
-import { LoginScreen } from './patient/LoginScreen';
+import { LoginScreen, type OtpRequestOutcome, type OtpVerifyOutcome } from './patient/LoginScreen';
 import { AppHeader, BottomNav } from './patient/Navigation';
 import { LiveAlertBanner } from './patient/LiveAlertBanner';
 import { BerandaScreen } from './patient/BerandaScreen';
@@ -253,31 +253,65 @@ export const PatientMobileApp: React.FC = () => {
   });
 
   // ── Autentikasi ───────────────────────────────────────────────────────────
-  const handleVerifyRmDob = async (noRm: string, dob: string) => {
-    if (!noRm.trim() || !dob.trim()) {
-      toast.error('No. Rekam Medis dan Tanggal Lahir wajib diisi.');
-      return;
-    }
-    setIsVerifying(true);
+  // Login OTP WhatsApp: LoginScreen mengelola langkah & pesan galat, fungsi ini hanya memanggil API.
+  const handleRequestOtp = async (identifier: string): Promise<OtpRequestOutcome> => {
+    const value = identifier.trim();
+    const looksLikePhone = /^\+?[\d\s().-]{8,}$/.test(value);
     try {
-      const res = await fetch('/api/patient/verify', {
+      const res = await fetch('/api/patient/otp/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ no_rm: noRm.trim(), tanggal_lahir: dob.trim() })
+        credentials: 'same-origin',
+        body: JSON.stringify(looksLikePhone ? { no_hp: value } : { no_rm: value })
       });
-      if (res.status === 503) {
-        toast.error(PATIENT_LOGIN_UNAVAILABLE_MESSAGE);
-        return;
-      }
       const data = await res.json().catch(() => null);
+      if (res.status === 503) return { ok: false, message: PATIENT_LOGIN_UNAVAILABLE_MESSAGE };
+      if (res.status === 429) {
+        return {
+          ok: false,
+          retryAfter: Number(data?.retry_after) || undefined,
+          message: data?.message || 'Terlalu banyak permintaan kode. Coba lagi nanti.'
+        };
+      }
+      if (!res.ok || !data?.success || !data?.request_id) {
+        return { ok: false, message: data?.message || 'Kode verifikasi belum dapat dikirim.' };
+      }
+      return {
+        ok: true,
+        requestId: data.request_id,
+        maskedPhone: data.masked_phone,
+        resendAfter: Number(data.resend_after) || 60,
+        message: data.message
+      };
+    } catch {
+      return { ok: false, message: 'Tidak dapat menghubungi server. Periksa koneksi internet Anda.' };
+    }
+  };
+
+  const handleVerifyOtp = async (requestId: string, code: string): Promise<OtpVerifyOutcome> => {
+    setIsVerifying(true);
+    try {
+      const res = await fetch('/api/patient/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ request_id: requestId, code })
+      });
+      const data = await res.json().catch(() => null);
+      if (res.status === 503) return { ok: false, message: PATIENT_LOGIN_UNAVAILABLE_MESSAGE };
       if (!res.ok || !data?.success || !data?.dossier || !data?.token) {
-        toast.error(data?.message || 'Verifikasi No. RM dan Tanggal Lahir gagal.');
-        return;
+        const code = data?.code;
+        return {
+          ok: false,
+          mustRestart: code === 'OTP_LOCKED' || code === 'OTP_EXPIRED',
+          message: data?.message || 'Verifikasi kode gagal.'
+        };
       }
       persistSession(data.token, data.dossier);
       toast.success(`Selamat datang, ${data.dossier.patient?.nama ?? 'Pasien'}`);
+      return { ok: true };
     } catch {
-      toast.error('Tidak dapat menghubungi server verifikasi.');
+      return { ok: false, message: 'Tidak dapat menghubungi server verifikasi.' };
     } finally {
       setIsVerifying(false);
     }
@@ -452,7 +486,8 @@ export const PatientMobileApp: React.FC = () => {
         isVerifying={isVerifying}
         authLoading={authLoading}
         onBack={() => navigate('/')}
-        onVerifyRmDob={handleVerifyRmDob}
+        onRequestOtp={handleRequestOtp}
+        onVerifyOtp={handleVerifyOtp}
         onGoogleLogin={handleGooglePatientLogin}
         onBindGoogle={handleBindGoogleToRm}
       />

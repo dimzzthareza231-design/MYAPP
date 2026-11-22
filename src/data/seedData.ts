@@ -1,12 +1,7 @@
-import { storage } from '../utils/storage';
-import {
-  generateAllPatientsWithResumes,
-  generate50IGDPatients,
-  generate50InpatientBeds,
-  generate50SurgeryPatients,
-  generate50LabAndRadRequests
-} from './patientPelayananData';
-import { DATA_DOKTER_JAGA_LENGKAP } from './dataDokterJagaLengkap';
+// Data referensi aplikasi inti. Tidak ada data contoh (pasien, dokter, perawat) di repo:
+// tenaga medis dan pasien hanya berasal dari data tersimpan (persistensi server / input petugas).
+// Modul ini tidak boleh punya efek samping saat di-import (tidak menulis penyimpanan browser).
+import type { PatientFullRecord } from './patientPelayananData';
 
 export interface PoliklinikItem {
   id: string;
@@ -304,201 +299,15 @@ export const MASTER_POLIKLINIK: PoliklinikItem[] = [
   }
 ];
 
-const FIRST_NAMES = [
-  'Andi', 'Budi', 'Citra', 'Doni', 'Eka', 'Fajar', 'Gita', 'Hendra', 'Indah', 'Joko',
-  'Kartika', 'Lukman', 'Maya', 'Nugroho', 'Olivia', 'Pratama', 'Rina', 'Siti', 'Taufik', 'Utami',
-  'Vina', 'Wahyu', 'Yuliana', 'Zulfikar', 'Bambang', 'Dian', 'Fachri', 'Hany', 'Irawan', 'Kurniawan'
-];
+/** Tidak ada pasien contoh. Daftar pasien berasal dari data tersimpan. */
+export const PASIEN: PatientFullRecord[] = [];
 
-const LAST_NAMES = [
-  'Pratama', 'Wijaya', 'Kusuma', 'Santoso', 'Putri', 'Hidayat', 'Savitri', 'Gunawan', 'Permata', 'Susanto',
-  'Wulandari', 'Hakim', 'Lestari', 'Saputra', 'Siregar', 'Alamsyah', 'Setiawan', 'Aminah', 'Ramadhan', 'Nugraha',
-  'Mahendra', 'Purnomo', 'Syahputra', 'Firmansyah', 'Sudrajat', 'Suharto', 'Yudhistira', 'Anwar', 'Chandra', 'Darsono'
-];
+/** Tidak ada dokter contoh. Dokter dikelola petugas lewat API master (/api/v1/master/doctors). */
+export const SEMUA_DOKTER: Doctor[] = [];
 
-const STREETS = ['Jl. Sudirman', 'Jl. Thamrin', 'Jl. Gatot Subroto', 'Jl. Melawai', 'Jl. Kemang', 'Jl. Kebon Jeruk', 'Jl. Menteng', 'Jl. Kuningan', 'Jl. Senayan', 'Jl. Asia Afrika'];
-
-// 1. DATA PASIEN LENGKAP DENGAN RESUME MEDIS & PROFIL KLINIS 100+ PASIEN
-export const PASIEN = generateAllPatientsWithResumes();
-
-// 2. MASTER DOKTER DARI PAKET ASET MYITARU
-export const SEMUA_DOKTER: Doctor[] = DATA_DOKTER_JAGA_LENGKAP.map((record) => ({
-  id: record.id,
-  nip: record.nip,
-  sip: record.sip,
-  str: record.str,
-  nama: record.nama,
-  spesialis: record.spesialis || record.spesialisasi,
-  subspesialis: record.subspesialis,
-  poli: record.poli_nama || record.unit_tugas,
-  poli_id: record.poli_id || 'POL-01',
-  penempatan: record.penempatan || record.unit_tugas,
-  jabatan: record.peran,
-  jadwal: `${record.hari_praktik} - ${record.jam_praktik}`,
-  hari: record.hari_praktik,
-  jam: record.jam_praktik,
-  shift: record.shift,
-  ruangan: record.ruangan,
-  kuota: record.kuota_pasien,
-  pasien_terlayani: record.pasien_terlayani,
-  status_jaga: record.status_kehadiran,
-  kontak: record.kontak_darurat,
-  email: record.email,
-  status: 'Aktif'
-}));
-
-// 3. DATA PERAWAT LENGKAP & SINKRON
-export const SEMUA_PERAWAT: Nurse[] = MASTER_POLIKLINIK.flatMap((poli, idx) => {
-  return [1, 2].map(nNum => {
-    const nIdx = idx * 2 + nNum;
-    const fName = FIRST_NAMES[(nIdx * 2) % FIRST_NAMES.length];
-    const lName = LAST_NAMES[(nIdx * 5) % LAST_NAMES.length];
-    const isBidan = poli.kode === 'OBG' || poli.kode === 'FTM';
-
-    return {
-      id: `NUR-${nIdx}`,
-      nip: `NIP-${String(2000 + nIdx)}`,
-      nama: `${isBidan ? 'Bdn.' : 'Ns.'} ${fName} ${lName}, S.Tr.Kep`,
-      jabatan: isBidan ? 'Bidan Pelaksana' : (nNum === 1 ? 'Penanggung Jawab Poli (PJ)' : 'Perawat Pelaksana'),
-      unit: poli.nama,
-      shift: nNum === 1 ? 'Pagi (07:00 - 14:00)' : 'Siang (14:00 - 21:00)',
-      status: 'Aktif'
-    };
-  });
-});
+/** Tidak ada perawat contoh. */
+export const SEMUA_PERAWAT: Nurse[] = [];
 
 export function dokterByPenempatan(penempatan: 'Poli' | 'IGD' | 'Operasi' | 'Rawat Inap' | string): Doctor[] {
   return SEMUA_DOKTER.filter(d => d.penempatan.includes(penempatan));
 }
-
-export function initSeedData() {
-  try {
-    // Check if initial master data is already loaded to prevent redundant writes
-    const existingPasien = storage.get('hospital_pasien', null);
-    if (!existingPasien || !Array.isArray(existingPasien) || existingPasien.length === 0) {
-      // 1. Sync Doctors & Nurses
-      storage.set('db_dokter', SEMUA_DOKTER);
-      storage.set('db_dokter_igd', SEMUA_DOKTER.filter(d => d.penempatan.includes('IGD')));
-      storage.set('hospital_dokter', SEMUA_DOKTER);
-      storage.set('db_perawat', SEMUA_PERAWAT);
-      storage.set('hospital_perawat', SEMUA_PERAWAT);
-      storage.set('hospital_poli_master', MASTER_POLIKLINIK);
-
-      // 2. Sync 100+ Patients with Full Medical Resumes & Clinical Profiles
-      storage.set('db_pasien', PASIEN);
-      storage.set('hospital_pasien', PASIEN);
-      
-      const resumes = PASIEN.map(p => p.resume_medis).filter(Boolean);
-      storage.set('hospital_resumes', resumes);
-      storage.set('db_resumes', resumes);
-
-      // 3. Sync 50+ IGD / Emergency Cases
-      const igdPatients = generate50IGDPatients();
-      storage.set('myitaru_igd_triase', igdPatients);
-      storage.set('hospital_emergency_triage', igdPatients);
-      storage.set('hospital_igd_Penanganan IGD', igdPatients.map(p => ({
-        waktu: p.waktu,
-        nama_pasien: p.nama_pasien,
-        no_rm: p.no_rm,
-        kondisi: p.kondisi,
-        tindakan: p.tindakan,
-        status: p.status
-      })));
-      storage.set('hospital_igd_Observasi', igdPatients.map(p => ({
-        waktu: p.waktu,
-        nama_pasien: p.nama_pasien,
-        tensi: p.tensi,
-        nadi: p.nadi,
-        suhu: p.suhu,
-        rr: p.rr,
-        spo2: p.spo2,
-        dokter_jaga: p.dokter_jaga,
-        status: p.status
-      })));
-      storage.set('hospital_igd_Dokter IGD', igdPatients.map(p => ({
-        waktu: p.waktu,
-        nama_pasien: p.nama_pasien,
-        triage: p.triage,
-        diagnosa: p.diagnosa,
-        dokter_dpjp: p.dokter_jaga,
-        tindakan: p.tindakan,
-        status: p.status
-      })));
-
-      // 4. Sync 50+ Rawat Inap (Inpatient Beds & Admisi & Visite & Discharge)
-      const beds = generate50InpatientBeds();
-      storage.set('hospital_beds', beds);
-      storage.set('hospital_ranap_Admisi', beds.filter(b => b.status === 'Terisi').map(b => ({
-        tanggal: b.tanggal,
-        nama_pasien: b.nama_pasien,
-        no_rm: b.no_rm,
-        ruangan: b.ruangan,
-        diagnosa: b.diagnosa,
-        penjamin: b.penjamin,
-        status: 'Dirawat'
-      })));
-      storage.set('hospital_ranap_Visite', beds.filter(b => b.status === 'Terisi').map(b => ({
-        tanggal: b.tanggal,
-        nama_pasien: b.nama_pasien,
-        ruangan: b.ruangan,
-        dpjp: b.dpjp,
-        catatan_visite: `S: Pasien mengeluh nyeri berkurang. O: TD 120/80, Nadi 80x/m, afebris. A: ${b.diagnosa} perbaikan. P: Lanjutkan terapi antibiotik & analgetik oral.`,
-        status: 'Selesai Visite'
-      })));
-      storage.set('hospital_ranap_Asuhan Keperawatan', beds.filter(b => b.status === 'Terisi').map((b, idx) => ({
-        tanggal: b.tanggal,
-        nama_pasien: b.nama_pasien,
-        ruangan: b.ruangan,
-        diagnosa_keperawatan: idx % 2 === 0 ? 'Nyeri Akut b.d Agen Pencedera Fisiologis (SDKI D.0077)' : 'Risiko Ketidakseimbangan Cairan (SDKI D.0036)',
-        intervensi: idx % 2 === 0 ? 'Manajemen Nyeri (SIKI I.08238): Observasi skala nyeri, ajarkan teknik relaksasi napas dalam' : 'Manajemen Cairan (SIKI I.03098): Monitor intake & output per 8 jam, observasi turgor kulit',
-        perawat: idx % 2 === 0 ? 'Ns. Rina Wulandari, S.Kep' : 'Ns. Hendra Saputra, S.Kep',
-        status: 'Terlaksana'
-      })));
-      storage.set('hospital_ranap_Discharge Planning', beds.filter(b => b.status === 'Terisi').map(b => ({
-        tanggal: b.tanggal,
-        nama_pasien: b.nama_pasien,
-        ruangan: b.ruangan,
-        resume_pulang: `Pasien telah dirawat dengan diagnosis ${b.diagnosa}. Kondisi saat ini stabil dan siap pulang rawat jalan.`,
-        kondisi_keluar: 'Perbaikan',
-        jadwal_kontrol: '3 hari pasca pulang di Poli Spesialis Terkait',
-        status: 'Siap Discharge'
-      })));
-
-      // 5. Sync 50+ Kamar Operasi / Bedah Cases
-      const surgeries = generate50SurgeryPatients();
-      storage.set('hospital_ok_jadwal', surgeries);
-      storage.set('hospital_ok_Pasien Operasi', surgeries);
-      storage.set('hospital_ok_Laporan Operasi', surgeries.map(s => ({
-        nomor: s.nomor,
-        nama_pasien: s.nama_pasien,
-        tindakan: s.tindakan,
-        kode_icd9: s.kode_icd9,
-        operator: s.operator,
-        anastesi: s.anastesi,
-        tanggal: s.tanggal,
-        durasi: s.durasi,
-        status: s.status
-      })));
-      storage.set('hospital_ok_Paket Operasi', [
-        { nama_paket: 'Paket Laparoskopi Kolesistektomi', jenis: 'Bedah Digestif Mayor', kelas: 'Kelas 1 / VIP', estimasi_biaya: 'Rp 22.500.000', status: 'Tersedia' },
-        { nama_paket: 'Paket Seksio Sesarea Cito & ERACS', jenis: 'Obstetri & Ginekologi', kelas: 'Kelas 1 / VIP', estimasi_biaya: 'Rp 18.000.000', status: 'Tersedia' },
-        { nama_paket: 'Paket ORIF Fraktur Ekstremitas', jenis: 'Orthopedi & Traumatologi', kelas: 'Kelas 1 / Kelas 2', estimasi_biaya: 'Rp 25.000.000', status: 'Tersedia' },
-        { nama_paket: 'Paket Fakoemulsifikasi Katarak + IOL', jenis: 'Bedah Mata Mikro', kelas: 'One Day Care', estimasi_biaya: 'Rp 9.500.000', status: 'Tersedia' },
-        { nama_paket: 'Paket TURP Prostat Endourologi', jenis: 'Urologi', kelas: 'Kelas 1 / Kelas 2', estimasi_biaya: 'Rp 16.500.000', status: 'Tersedia' }
-      ]);
-
-      // 6. Sync 55 Lab & Radiology Requests and Results
-      const labRad = generate50LabAndRadRequests();
-      storage.set('hospital_lab_rad', labRad);
-      storage.set('hospital_laboratorium_Permintaan Lab', labRad.filter(x => x.type === 'Lab'));
-      storage.set('hospital_laboratorium_Hasil Lab', labRad.filter(x => x.type === 'Lab'));
-      storage.set('hospital_laboratorium_Validasi Hasil', labRad.filter(x => x.type === 'Lab' && x.status === 'Tervalidasi'));
-      storage.set('hospital_radiologi_Permintaan Radiologi', labRad.filter(x => x.type === 'Radiologi'));
-      storage.set('hospital_radiologi_Hasil Radiologi', labRad.filter(x => x.type === 'Radiologi'));
-    }
-  } catch (e) {
-    console.warn('[seedData] Failed to initialize seed data safely', e);
-  }
-}
-
-initSeedData();
