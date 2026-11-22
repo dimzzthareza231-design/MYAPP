@@ -3,6 +3,9 @@
 [![CI](https://github.com/dimzzthareza231-design/MYAPP/actions/workflows/ci.yml/badge.svg)](https://github.com/dimzzthareza231-design/MYAPP/actions/workflows/ci.yml)
 ![Cloudflare Workers](https://img.shields.io/badge/hosting-Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)
 ![Cloudflare D1](https://img.shields.io/badge/database-Cloudflare%20D1-F38020?logo=cloudflare&logoColor=white)
+![Node.js](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=nodedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Sistem informasi manajemen dan rekam medis elektronik (RME) berbasis web, dilengkapi fitur kecerdasan buatan untuk mendukung pelayanan dan manajemen operasional. MYITARU terdiri atas dua aplikasi yang dibangun dari satu kode sumber dan kini berjalan di **Cloudflare Workers** dengan database **Cloudflare D1**:
 
@@ -27,6 +30,8 @@ Kode yang sama tetap dapat dijalankan secara lokal, dengan Docker, atau di Verce
 - [Pengujian](#pengujian)
 - [Deployment](#deployment)
 - [Keamanan dan keterbatasan](#keamanan-dan-keterbatasan)
+- [Kontribusi](#kontribusi)
+- [Lisensi dan kredit](#lisensi-dan-kredit)
 
 ## Fitur
 
@@ -255,4 +260,12 @@ Mode `NODE_ENV=production` hanya dapat startup bila `STORAGE_MODE` menunjuk ke p
 - Keluaran AI belum dievaluasi akurasinya terhadap standar klinis dan wajib diverifikasi tenaga kesehatan.
 - Portal karyawan masih prototipe dan belum memiliki integrasi identitas HRIS.
 
-Laporkan celah keamanan secara pribadi kepada pemilik repositori, bukan melalui issue publik.
+Laporkan celah keamanan secara pribadi sesuai [SECURITY.md](SECURITY.md), bukan melalui issue publik.
+
+## Kontribusi
+
+Kontribusi terbuka. Baca [CONTRIBUTING.md](CONTRIBUTING.md) untuk penyiapan, konvensi branch/commit, dan pemeriksaan sebelum pull request. Riwayat perubahan dicatat di [CHANGELOG.md](CHANGELOG.md); keputusan arsitektur (ADR) dan spec ada di [`.10x/`](.10x/).
+
+## Lisensi dan kredit
+
+Dirilis di bawah [Apache License 2.0](LICENSE). Dirancang dan dikembangkan pertama kali oleh **Dimas Pangestu Putra Alifia** (RMIK, Institut Tarumanagara, 2026). Setiap penggunaan, modifikasi, atau distribusi ulang wajib mempertahankan [LICENSE](LICENSE), [NOTICE](NOTICE), dan kredit di [AUTHORS.md](AUTHORS.md).

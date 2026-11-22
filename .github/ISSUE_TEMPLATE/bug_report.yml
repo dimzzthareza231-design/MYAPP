@@ -1,0 +1,32 @@
+name: Laporan bug
+description: Laporkan perilaku yang salah di MYITARU
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Jangan sertakan data pasien nyata, secret, atau kredensial. Celah keamanan dilaporkan lewat SECURITY.md."
+  - type: dropdown
+    id: app
+    attributes:
+      label: Aplikasi
+      options: [Web publik, Aplikasi inti, Keduanya, Server/API]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Langkah reproduksi
+      placeholder: "1. Buka ...\n2. Klik ...\n3. Muncul ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Yang diharapkan vs yang terjadi
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Lingkungan
+      placeholder: "Cloudflare / lokal / Docker, browser, versi/commit"

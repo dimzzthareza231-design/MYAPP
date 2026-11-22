@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Laporkan celah keamanan
+    url: https://github.com/dimzzthareza231-design/MYAPP/security/advisories/new
+    about: Laporkan secara pribadi, jangan lewat issue publik.
