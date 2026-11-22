@@ -1,6 +1,6 @@
 # Panduan Kontribusi
 
-Terima kasih ingin berkontribusi pada MYITARU.
+Terima kasih ingin berkontribusi pada MYITARU. Dengan berpartisipasi, Anda setuju mengikuti [Kode Etik](CODE_OF_CONDUCT.md).
 
 ## Penyiapan
 
