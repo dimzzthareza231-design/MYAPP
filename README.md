@@ -46,9 +46,9 @@ Kode yang sama tetap dapat dijalankan secara lokal, dengan Docker, atau di Verce
 - QR pasien, reservasi, dan dokumen/surat memakai token terenkripsi tanpa No. RM/NIK atau metadata dokumen pada payload. Token wajib cocok dengan catatan penerbitan aktif di server; pemindaian dicatat pada audit server. QR reservasi hanya dapat check-in satu kali pada tanggal kunjungan. QR dokumen memverifikasi referensi yang tercatat di MYITARU, bukan tanda tangan elektronik tersertifikasi.
 - Rekam medis elektronik: resume medis, kodefikasi ICD-10/ICD-9-CM, audit kelengkapan (KLPCM), peminjaman dan retensi berkas.
 - Penunjang dan keuangan: laboratorium, radiologi/PACS, farmasi, kasir, klaim BPJS.
-- Integrasi (mode simulasi): BPJS VClaim, SATUSEHAT, Orthanc, WA Gateway, dan lainnya.
+- Integrasi BPJS VClaim dan SATUSEHAT belum terpasang; endpoint server menjawab 503 `*_NOT_CONFIGURED` sampai kredensial dan bridge resmi dikonfigurasi (tidak ada respons tiruan).
 - Manajemen: laporan, audit trail, pencadangan, pemantauan sistem, kendali akses berbasis peran (17 peran).
-- Portal karyawan masih prototipe; login OTP demo dibatasi ke lingkungan lokal dan integrasi identitas pegawai/MFA belum tersedia untuk produksi.
+- Portal karyawan masih prototipe; login dan MFA pegawai menjawab 503 `EMPLOYEE_LOGIN_UNAVAILABLE` sampai integrasi identitas pegawai/MFA tersedia. Tidak ada akun atau kode OTP bawaan.
 
 **Kecerdasan buatan** (`/api/ai/*`, hanya di aplikasi inti)
 
@@ -62,7 +62,7 @@ Kode yang sama tetap dapat dijalankan secara lokal, dengan Docker, atau di Verce
 | Ringkasan pulang | `POST /api/ai/clinical-summary` |
 | Asisten klinis | `POST /api/ai/copilot` |
 
-Fitur AI menggunakan Google Gemini 2.5 Flash sebagai model utama, dengan Gemini 3.1 Flash Lite sebagai failover model. Mesin aturan deterministik menjadi cadangan bila kunci API tidak tersedia atau seluruh pemanggilan model gagal. Keluaran AI bersifat pendukung keputusan dan tetap harus diverifikasi tenaga kesehatan.
+Fitur AI menggunakan Google Gemini 2.5 Flash sebagai model utama, dengan Gemini 3.1 Flash Lite sebagai failover model. Mesin aturan deterministik menjadi cadangan bila kunci API tidak tersedia atau seluruh pemanggilan model gagal, kecuali analisis radiologi dan ringkasan pulang yang menjawab 503 `AI_UNAVAILABLE` agar tidak mengarang temuan atau tanda vital. Keluaran AI bersifat pendukung keputusan dan tetap harus diverifikasi tenaga kesehatan.
 
 ## Arsitektur
 
@@ -85,7 +85,7 @@ flowchart LR
 - **Cloudflare (utama):** dua Worker, `myitaru-public` dan `myitaru-core`, dibangun dari satu `wrangler.jsonc`. `worker/index.ts` menjalankan Express yang sama lewat `cloudflare:node`; frontend disajikan sebagai Workers Static Assets. Keduanya berbagi satu database D1 (`myitaru-db`) melalui `D1Adapter`.
 - **Lokal/Docker:** kedua aplikasi berjalan dalam satu proses pada port `3000` (publik) dan `3001` (inti).
 - **Vercel:** dua proyek terpisah. `api/index.ts` adalah satu Vercel Function yang memilih aplikasi lewat variabel `APP_TARGET`.
-- Sesi pasien dan beberapa komponen prototipe memakai token bertanda tangan HMAC-SHA256 (`src/server/signedStore.ts`). Token stateless tidak menyediakan pencabutan global; jangan gunakan sesi demo untuk data nyata.
+- Sesi pasien dan beberapa komponen prototipe memakai token bertanda tangan HMAC-SHA256 (`src/server/signedStore.ts`). Token stateless tidak menyediakan pencabutan global. Login pasien (`/api/patient/verify`, `/api/patient/google-session`) menjawab 503 `PATIENT_LOGIN_UNAVAILABLE` sampai penyedia OTP pasien tersedia; mesin sesi (`issuePatientSession`) sudah siap dipakai alur OTP tersebut.
 - Autentikasi staf dapat memakai `AUTH_MODE=local` untuk intranet tanpa Firebase atau `AUTH_MODE=firebase` untuk Firebase Auth. Mode lokal menyimpan akun dan sesi di MySQL, memverifikasi sandi scrypt di server, dan memakai cookie HttpOnly yang dapat dicabut. Mode Firebase memverifikasi ID token/session cookie dan profil aktif/role dari Firestore; akses operasional memerlukan MFA TOTP.
 - Kartu peran pada login hanya mengisi username. Role efektif selalu berasal dari akun yang diverifikasi server; browser tidak dapat memilih atau menaikkan hak akses sendiri.
 
@@ -106,7 +106,7 @@ flowchart LR
 ```
 ├── .10x/                   Spec, ADR, dan catatan keputusan tim
 ├── api/                    Vercel Function untuk seluruh /api/*
-├── database/schemas/       Skema SQL untuk migrasi ke basis data relasional
+├── database/schemas/       Skema SQL (tanpa data contoh) untuk migrasi ke basis data relasional
 ├── migrations/             Migrasi skema Cloudflare D1
 ├── public/                 Aset statis (ikon, service worker FCM)
 ├── scripts/                Pemeriksaan pra-deployment
@@ -142,7 +142,7 @@ npm run dev
 - Aplikasi inti: http://localhost:3001.
 - Untuk mode intranet tanpa Firebase, pertahankan `AUTH_MODE=local`, `VITE_AUTH_MODE=local`, dan `STORAGE_MODE=mysql`. Aktifkan MySQL/MariaDB dan isi enam sandi unik kuat (`LOCAL_AUTH_ADMIN_PASSWORD`, `LOCAL_AUTH_DOKTER_PASSWORD`, `LOCAL_AUTH_PERAWAT_PASSWORD`, `LOCAL_AUTH_RMIK_PASSWORD`, `LOCAL_AUTH_APOTEKER_PASSWORD`, `LOCAL_AUTH_KASIR_PASSWORD`) sebelum menjalankan server. Email akun admin dapat dikonfigurasi lewat `LOCAL_AUTH_ADMIN_EMAIL`. Server membuat akun bawaan sekali dan menyimpan hash scrypt ke tabel `local_auth_users`; tidak ada sandi default yang ditanam di kode. Login awal: `admin`, `dokter`, `perawat`, `rmik`, `apoteker`, atau `kasir`, lalu masukkan sandi yang Anda konfigurasi.
 - Untuk Firebase, set `AUTH_MODE=firebase`, `VITE_AUTH_MODE=firebase`, isi `VITE_FIREBASE_API_KEY` serta konfigurasi Firebase Admin, dan provision akun beserta MFA TOTP. Tombol Google hanya tampil bila konfigurasi Firebase tersedia.
-- `ALLOW_INSECURE_DEMO_AUTH=true` hanya membuka jalur autentikasi demo pasien dan gateway karyawan untuk pengujian lokal. Jangan pernah mengaktifkannya di produksi; API inti tetap memerlukan identitas Firebase.
+- Tidak ada jalur autentikasi demo. Server tidak membawa pasien, akun, stok, atau data klinis contoh; semua data berasal dari adapter persistensi.
 
 ## Variabel lingkungan
 
@@ -153,12 +153,11 @@ npm run dev
 | `LOCAL_AUTH_*_PASSWORD` | Mode lokal | Sandi awal unik kuat untuk enam akun peran; hanya dibaca server lalu di-hash dengan scrypt. Jangan memasukkan nilai sandi ke repositori. |
 | `LOCAL_AUTH_ADMIN_EMAIL` | Tidak | Alamat email akun admin lokal; bawaan `admin@myitaru.local`. |
 | `MYITARU_QR_SECRET` | Produksi | Kunci enkripsi QR khusus server; bila kosong, QR memakai `SESSION_SECRET`. |
-| `STORAGE_MODE` / `VITE_STORAGE_MODE` | Produksi | Set nilainya sama. Cloudflare memakai `d1`; mode lokal memakai `mysql`; Firebase/hybrid untuk integrasi cloud, sedangkan `memory` hanya untuk demo dan tes. |
+| `STORAGE_MODE` / `VITE_STORAGE_MODE` | Produksi | Set nilainya sama. Cloudflare memakai `d1`; mode lokal memakai `mysql`; Firebase/hybrid untuk integrasi cloud, sedangkan `memory` hanya untuk tes (mulai kosong, tidak menyimpan data). |
 | `DB_HOST` / `DB_PORT` | Jika MySQL aktif | Host dan port MySQL/MariaDB (bawaan `127.0.0.1:3306`). |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Jika MySQL aktif | Kredensial dan nama database (bawaan database `db_myitaru`). |
 | `FIREBASE_PROJECT_ID` | Mode Firebase | ID project Firebase Admin untuk verifikasi sesi staf. |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Mode Firebase | Kredensial service account Firebase Admin dalam format JSON; simpan hanya di secret manager. |
-| `ALLOW_INSECURE_DEMO_AUTH` | Tidak | Hanya untuk pengujian gateway lokal; konfigurasi ini ditolak di produksi. |
 | `CLOUDFLARE_TURNSTILE_SECRET_KEY` | Opsional | Rahasia verifikasi Turnstile sisi server. |
 | `CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME` | Jika Turnstile aktif | Hostname yang harus dikembalikan Cloudflare. |
 | `CLOUDFLARE_TURNSTILE_EXPECTED_ACTION` | Tidak | Aksi widget yang diharapkan (bawaan `login`). |
@@ -167,6 +166,18 @@ npm run dev
 | `PUBLIC_PORT` / `CORE_PORT` | Tidak | Port lokal/Docker, bawaan `3000` dan `3001`. |
 | `VITE_FIREBASE_*` | Mode Firebase | Konfigurasi klien Firebase. Bila `VITE_FIREBASE_API_KEY` kosong, Firebase Auth tidak diinisialisasi. |
 | `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY` | Jika Turnstile aktif | Site key publik widget; secret verifikasi tetap di environment server. |
+| `WHATSAPP_ACCESS_TOKEN` | Login pasien | Token System User permanen Meta (izin `whatsapp_business_messaging`). Hanya di secret server (`wrangler secret put`, env Vercel). |
+| `WHATSAPP_PHONE_NUMBER_ID` | Login pasien | Phone Number ID pengirim dari WhatsApp Manager / App Dashboard (bukan nomor telepon). |
+| `WHATSAPP_OTP_TEMPLATE` | Login pasien | Nama template kategori **Authentication** (tombol *copy code*) yang sudah disetujui Meta. |
+| `WHATSAPP_TEMPLATE_LANG` | Tidak | Kode bahasa template, bawaan `id`. |
+| `WHATSAPP_API_VERSION` | Tidak | Versi Graph API, bawaan `v23.0`. |
+| `OTP_HASH_SECRET` | Tidak | Kunci HMAC untuk hash OTP & kunci rate limit; bila kosong memakai `SESSION_SECRET`. |
+
+### Login pasien via OTP WhatsApp
+
+Aplikasi pasien masuk dengan No. RM atau No. HP, lalu kode 6 digit dikirim lewat **WhatsApp Cloud API (Meta)** hanya ke nomor HP yang **terdaftar** di rekam pasien (`POST /api/patient/otp/request`, lalu `POST /api/patient/otp/verify` yang menerbitkan sesi pasien HttpOnly). Bila `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, atau `WHATSAPP_OTP_TEMPLATE` kosong, kedua endpoint menjawab `503 PATIENT_LOGIN_UNAVAILABLE`; tidak ada mode demo. Server hanya menyimpan HMAC-SHA256 kode (berlaku 5 menit, maks 5 percobaan, sekali pakai) di tabel `system_data` lewat adapter persistensi (D1/MySQL), sehingga konsisten di semua instance Worker. Batas: kirim ulang 60 detik, 3 permintaan per pasien/nomor dan 10 per IP setiap 15 menit.
+
+Persiapan di Meta: (1) buat WhatsApp Business Account + nomor pengirim terverifikasi di Meta Business Suite; (2) buat System User dengan token permanen berizin `whatsapp_business_messaging`; (3) buat template kategori *Authentication*, bahasa Indonesia (`id`), dengan rekomendasi keamanan aktif, masa berlaku kode 5 menit, dan tombol *Copy code* (isi teks template autentikasi adalah teks baku dari Meta, kurang lebih "{{1}} adalah kode verifikasi Anda" + imbauan keamanan; tidak bisa diubah bebas); (4) tunggu template berstatus *Approved*, lalu isi env di atas.
 
 Untuk XAMPP, impor [init_myitaru_xampp.sql](./database/init_myitaru_xampp.sql) lewat phpMyAdmin. File ini menyertakan skema legacy dan tabel adapter, tanpa data demo. MySQL menjadi sumber utama pada mode `hybrid`; perubahan cloud yang gagal dikirim tetap berada di `sync_outbox` untuk dicoba ulang. Bila XAMPP belum aktif, server lokal tetap dapat menyajikan health check, tetapi operasi tulis akan ditolak—data tidak dialihkan diam-diam ke memori.
 
@@ -256,7 +267,7 @@ Mode `NODE_ENV=production` hanya dapat startup bila `STORAGE_MODE` menunjuk ke p
 
 - **Jangan gunakan data pasien nyata.** Walau beberapa endpoint kini memakai persistent adapter dan API inti memerlukan autentikasi server-side, sejumlah modul klinis masih belum terhubung ke persistence tersebut.
 - Mode autentikasi lokal tidak mewajibkan MFA. Batasi ke intranet tersegmentasi, gunakan sandi unik kuat, lindungi akses jaringan dan database, serta jaga kerahasiaan `SESSION_SECRET`. Akun awal dibuat dari variabel `LOCAL_AUTH_*_PASSWORD` dan tidak memiliki sandi bawaan.
-- **Ketahanan operasional belum lengkap.** Backup/pemulihan dan integrasi BPJS, SATUSEHAT, serta QRIS belum tervalidasi end-to-end; integrasi yang belum tersedia harus tetap dianggap simulasi.
+- **Ketahanan operasional belum lengkap.** Backup/pemulihan dan integrasi BPJS, SATUSEHAT, serta QRIS belum tervalidasi end-to-end; integrasi yang belum tersedia menjawab 503 dan tidak boleh dianggap berfungsi.
 - Keluaran AI belum dievaluasi akurasinya terhadap standar klinis dan wajib diverifikasi tenaga kesehatan.
 - Portal karyawan masih prototipe dan belum memiliki integrasi identitas HRIS.
 

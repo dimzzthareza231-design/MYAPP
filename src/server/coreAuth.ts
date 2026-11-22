@@ -169,6 +169,11 @@ function scopeForPath(path: string, req?: express.Request): string | null {
   }
   if (path === '/api/v1/health' || path === '/api/v1/system/stats' || path.startsWith('/api/v1/health-updates')) return 'dashboard';
   if (path.startsWith('/api/v1/system-data')) return 'dashboard';
+  if (path === '/api/v1/patient-notifications/dispatch') {
+    return req?.body?.type === 'lab_ready' ? 'laboratorium' : 'rawat-jalan';
+  }
+  if (path.startsWith('/api/v1/patient-feedback') || path.startsWith('/api/v1/patient-complaints')) return 'mutu';
+  if (path.startsWith('/api/v1/master/')) return 'pendaftaran';
   if (path.startsWith('/api/v1/patients')) return 'pendaftaran';
   if (path.startsWith('/api/v1/appointments')) return 'pendaftaran';
   if (path.startsWith('/api/v1/patient-qr')) return 'rekam-medis';
@@ -199,6 +204,10 @@ function isWriteDenied(principal: CorePrincipal, method: string, path: string): 
   if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return false;
   if (principal.roleId === 'viewer') return true;
   if (path.startsWith('/api/v1/system-data')) {
+    return !['super_admin', 'admin', 'it_support'].includes(principal.roleId);
+  }
+  if (path.startsWith('/api/v1/master/')) {
+    // Master layanan (poliklinik/dokter) memengaruhi katalog publik: hanya admin yang boleh mengubah.
     return !['super_admin', 'admin', 'it_support'].includes(principal.roleId);
   }
   if (path.startsWith('/api/v1/backup') || path.startsWith('/api/v1/audit')) {
@@ -407,9 +416,6 @@ export function registerCoreAuthentication(
 
 export function assertProductionAuthConfiguration(authMode = getCoreAuthMode()): void {
   if (process.env.NODE_ENV !== 'production') return;
-  if (process.env.ALLOW_INSECURE_DEMO_AUTH === 'true') {
-    throw new Error('ALLOW_INSECURE_DEMO_AUTH must not be enabled in production.');
-  }
   if (authMode === 'local') {
     if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
       throw new Error('SESSION_SECRET must contain at least 32 characters for production local authentication.');

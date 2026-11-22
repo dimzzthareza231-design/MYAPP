@@ -224,11 +224,11 @@ export function getDoctorForPoli(poliOrUnit?: string, fallbackDoctor?: string): 
   // Default fallback
   const defaultDoc = SEMUA_DOKTER.find(d => d.poli_id === 'POL-16') || SEMUA_DOKTER[0];
   return {
-    doctor: fallbackDoctor || defaultDoc.nama,
-    gelar: defaultDoc.spesialis || 'Sp.PD (Penyakit Dalam)',
-    sip: defaultDoc.sip || 'SIP: 445/DS/101/2025',
-    unit: targetUnit || defaultDoc.poli,
-    spesialisasi: defaultDoc.spesialis
+    doctor: fallbackDoctor || defaultDoc?.nama || '',
+    gelar: defaultDoc?.spesialis || '',
+    sip: defaultDoc?.sip || '',
+    unit: targetUnit || defaultDoc?.poli || '',
+    spesialisasi: defaultDoc?.spesialis || ''
   };
 }
 

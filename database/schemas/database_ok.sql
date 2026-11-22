@@ -202,21 +202,3 @@ CREATE TABLE ok_billing_item (
     total DECIMAL(15,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA INSERTION
-INSERT INTO ok_ruangan (id_ruangan, kode_ruangan, nama_ruangan, lantai, kapasitas_operasi_sehari) VALUES 
-('OK-01', 'OK1', 'Kamar Operasi 1 (Mayor)', 3, 4),
-('OK-02', 'OK2', 'Kamar Operasi 2 (Minor)', 3, 6),
-('OK-03', 'OK3', 'Kamar Operasi 3 (IGD)', 1, 10);
-
-INSERT INTO ok_jenis_operasi (id_jenis, kode_icd9cm, nama_operasi, kategori, durasi_estimasi_menit, tingkat_risiko, tarif_dasar) VALUES
-('OP-01', '47.09', 'Appendiktomi', 'Mayor', 60, 'Sedang', 5000000.00),
-('OP-02', '51.22', 'Kolesistektomi', 'Mayor', 90, 'Sedang', 7500000.00),
-('OP-03', '53.00', 'Repair Hernia', 'Mayor', 60, 'Sedang', 6000000.00),
-('OP-04', '74.1', 'Sectio Caesarea', 'Mayor', 60, 'Sedang', 8000000.00);
-
--- Insert 15 dummy jadwal... (skipping full insert for brevity, provided a few)
-INSERT INTO ok_jadwal_operasi (id_jadwal, id_kunjungan, id_pasien, id_dokter_operator, id_ruangan, id_jenis_operasi, tanggal_operasi, jam_mulai, status_jadwal, jenis_operasi) VALUES
-('JDW-01', 'K-001', 'P1', 'D1', 'OK-01', 'OP-01', CURDATE(), '08:00:00', 'Scheduled', 'Elektif'),
-('JDW-02', 'K-002', 'P2', 'D2', 'OK-02', 'OP-02', CURDATE(), '10:00:00', 'In Progress', 'Elektif'),
-('JDW-03', 'K-003', 'P3', 'D3', 'OK-03', 'OP-04', CURDATE(), '13:00:00', 'Scheduled', 'Emergency');

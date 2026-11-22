@@ -91,35 +91,3 @@ CREATE TABLE branch_consolidated_report (
     generated_by VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- DUMMY DATA
-INSERT INTO branch_facility (id_facility, kode_facility, nama_facility, kota, provinsi, tipe) VALUES 
-('FAC-001', 'HQ-JKT', 'Klinik MyItaru Pusat Jakarta', 'Jakarta Selatan', 'DKI Jakarta', 'Pusat'),
-('FAC-002', 'BR-BDG', 'Klinik MyItaru Cabang Bandung', 'Bandung', 'Jawa Barat', 'Cabang'),
-('FAC-003', 'CL-BKS', 'Klinik Utama MyItaru Bekasi', 'Bekasi', 'Jawa Barat', 'Klinik');
-
-INSERT INTO branch_config (id_config, id_facility, config_key, config_value, config_type) VALUES 
-('CFG-001', 'FAC-001', 'TIMEZONE', 'Asia/Jakarta', 'String'),
-('CFG-002', 'FAC-001', 'MAX_BED_CAPACITY', '500', 'Number'),
-('CFG-003', 'FAC-002', 'TIMEZONE', 'Asia/Jakarta', 'String'),
-('CFG-004', 'FAC-002', 'MAX_BED_CAPACITY', '200', 'Number');
-
-INSERT INTO branch_user_assignment (id_assignment, id_user, id_facility, is_primary, tanggal_mulai) VALUES 
-('UA-001', 'USR-001', 'FAC-001', TRUE, '2025-01-01'),
-('UA-002', 'USR-002', 'FAC-002', TRUE, '2025-02-01'),
-('UA-003', 'USR-003', 'FAC-001', TRUE, '2025-01-15');
-
-INSERT INTO branch_patient_registry (id_registry, id_pasien, id_facility, no_rm_cabang, tanggal_daftar, status) VALUES 
-('PR-001', 'PAT-001', 'FAC-001', 'RM-JKT-0001', '2025-01-10', 'Active'),
-('PR-002', 'PAT-002', 'FAC-002', 'RM-BDG-0001', '2025-02-15', 'Active');
-
-INSERT INTO branch_transfer (id_transfer, id_pasien, facility_asal, facility_tujuan, tanggal_transfer, alasan, status) VALUES 
-('TRF-001', 'PAT-001', 'FAC-002', 'FAC-001', '2026-08-01 10:00:00', 'Rujukan spesialis jantung', 'Completed'),
-('TRF-002', 'PAT-002', 'FAC-003', 'FAC-001', '2026-08-05 09:00:00', 'Fasilitas ICU penuh', 'Requested');
-
-INSERT INTO branch_inventory (id_inventory, id_facility, id_item, jumlah_stok, minimum_stock, maximum_stock, last_updated) VALUES 
-('INV-001', 'FAC-001', 'ITEM-001', 5000, 1000, 10000, '2026-08-05 08:00:00'),
-('INV-002', 'FAC-002', 'ITEM-001', 2000, 500, 5000, '2026-08-05 08:00:00');
-
-INSERT INTO branch_consolidated_report (id_report, jenis_report, periode, data, generated_at) VALUES 
-('RPT-001', 'Kunjungan', '2026-07', '{"total": 12500, "by_branch": {"FAC-001": 8000, "FAC-002": 3500, "FAC-003": 1000}}', '2026-08-01 01:00:00');

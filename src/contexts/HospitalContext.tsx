@@ -108,32 +108,8 @@ const dummyPenjamin: MasterPenjamin[] = [
 
 const today = new Date().toISOString().split('T')[0];
 
+// Tidak ada kunjungan contoh: daftar kunjungan hanya berasal dari data tersimpan.
 const dummyKunjungan: Kunjungan[] = [];
-MASTER_POLI_LIST.forEach((targetPoli, pIdx) => {
-  const targetDokter = MASTER_DOKTER_LIST.find(d => d.poli_id === targetPoli.id) || MASTER_DOKTER_LIST[pIdx % MASTER_DOKTER_LIST.length] || MASTER_DOKTER_LIST[0];
-  const queueCode = targetPoli.kode || targetPoli.nama.substring(0, 3).toUpperCase();
-  const statuses: ('Menunggu' | 'Panggil' | 'Diperiksa' | 'Selesai')[] = ['Menunggu', 'Menunggu', 'Panggil', 'Diperiksa', 'Selesai'];
-  
-  for (let q = 0; q < 5; q++) {
-    const patientIndex = (pIdx * 4 + q) % PASIEN.length;
-    const p = PASIEN[patientIndex];
-    const penjaminItem = dummyPenjamin[(pIdx + q) % dummyPenjamin.length];
-    const queueNum = String(q + 1).padStart(3, '0');
-
-    dummyKunjungan.push({
-      id: `K-${targetPoli.kode || 'POL'}-${queueNum}`,
-      pasien_id: String(p.id),
-      tanggal: today,
-      poli_id: targetPoli.id,
-      dokter_id: targetDokter.id,
-      penjamin_id: penjaminItem.id,
-      status: statuses[q % statuses.length],
-      tipe: targetPoli.kode === 'IGD' ? ('IGD' as const) : ('Rawat Jalan' as const),
-      nomor_antrian: `${queueCode}-${queueNum}`,
-      keluhan_utama: p.keluhan_utama || `Konsultasi & pemeriksaan klinis di ${targetPoli.nama}`
-    });
-  }
-});
 
 const dummyArtikel: BantuanArtikel[] = [
   { id: 'H1', kategori: 'Poliklinik', judul: 'Panduan Penggunaan AI Scribe Talk-to-Text', konten: 'Tekan tombol "Mulai Rekaman" pada form SOAP, dokter berbicara secara alami, dan AI otomatis mengekstrak Subjective, Objective, Diagnosis ICD-10, dan Resep Obat.', tags: ['talk-to-text', 'ai', 'soap', 'poliklinik'] },

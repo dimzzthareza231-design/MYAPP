@@ -157,35 +157,3 @@ CREATE TABLE safety_education (
     evaluasi TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
-
--- DUMMY DATA
-INSERT INTO safety_incident (id_incident, nomor_incident, id_pasien, id_kunjungan, tanggal_kejadian, jenis_kejadian, kategori, lokasi_kejadian, deskripsi_kejadian, dampak_ke_pasien, tindakan_segera, pelapor_id, nama_pelapor, status) VALUES
-('INC-260801', 'SI-2026-08-001', 'P1', 'K-01', '2026-08-01 10:00:00', 'KTD-Jatuh', 'Clinical', 'Ruang Rawat Melati', 'Pasien jatuh saat menuju kamar mandi tanpa pendampingan.', 'Ringan', 'Dilakukan pemeriksaan tanda vital dan fisik. Tidak ada luka serius. Edukasi keluarga.', 'NS-001', 'Suster Rina', 'Reported');
-
-INSERT INTO safety_investigation (id_investigation, id_incident, investigator_id, tanggal_mulai, fakta_kejadian, pihak_terlibat, wawancara, dokumen_pendukung, temuan, status) VALUES
-('INV-001', 'INC-260801', 'QM-01', '2026-08-01', 'Pasien bangun dari tempat tidur tanpa memanggil perawat. Lantai tidak licin.', '["NS-001", "Keluarga Pasien"]', '[{"orang": "Suster Rina", "waktu": "10:30", "hasil": "Bell pasien tidak ditekan."}]', '["Foto lokasi kejadian", "Rekam medis pasien"]', 'Pasien tidak memahami cara memanggil perawat atau merasa bisa sendiri.', 'Completed');
-
-INSERT INTO safety_rca (id_rca, id_incident, tanggal_rca, tim_rca, metode, akar_masalah, faktor_kontribusi, rekomendasi, action_plan, status) VALUES
-('RCA-001', 'INC-260801', '2026-08-02', '["QM-01", "NS-Kepala"]', '5-Why', '["Edukasi penggunaan bel panggil kurang efektif"]', '{"human": "Pasien merasa mandiri", "environment": "Cahaya redup", "equipment": "Bel fungsi", "process": "Edukasi tidak didokumentasi dengan baik", "external": "Tidak ada"}', '["Tingkatkan edukasi resiko jatuh", "Pasang tanda risiko jatuh di bed"]', '[{"action": "Re-edukasi pasien dan keluarga", "PIC": "NS-001", "deadline": "2026-08-02", "status": "Completed"}]', 'Completed');
-
-INSERT INTO safety_action_plan (id_action, id_rca, id_incident, deskripsi_action, pic_id, deadline, status, catatan) VALUES
-('AP-001', 'RCA-001', 'INC-260801', 'Re-edukasi pasien dan keluarga terkait risiko jatuh', 'NS-001', '2026-08-02', 'Completed', 'Sudah dilakukan dan didokumentasikan di RM');
-
-INSERT INTO safety_risk_register (id_risk, kode_risk, deskripsi_risk, kategori, likelihood, impact, risk_score, level_risk, mitigation_strategy, risk_owner_id, status) VALUES
-('RSK-001', 'R-CLN-01', 'Risiko kesalahan pemberian obat High Alert', 'Clinical', '2-Unlikely', '4-Major', 8, 'Medium', 'Double check system, pelabelan khusus', 'PHAR-01', 'Active');
-
-INSERT INTO safety_psi (id_psi, periode, indikator, nilai, target, unit_pengukur, data_source, status) VALUES
-('PSI-001', '2026-Q3', 'Fall Rate', 1.5, 0.0, 'Per 1000 hari rawat', 'Insiden report bulanan', 'Off Track');
-
-INSERT INTO safety_patient_safety_goal (id_goal, kode_goal, nama_goal, deskripsi, compliance_rate, tanggal_audit) VALUES
-('PSG-001', 'IPSG-1', 'Identifikasi Pasien dengan Benar', 'Pastikan identifikasi menggunakan 2 identifier', 98.5, '2026-07-30');
-
-INSERT INTO safety_audit_checklist (id_audit, id_goal, tanggal_audit, auditor_id, unit_diaudit, checklist, total_compliant, total_items, compliance_percentage, status) VALUES
-('AUD-001', 'PSG-001', '2026-07-30', 'QM-01', 'Rawat Inap Melati', '[{"item": "Gelang identitas terpasang", "compliant": true}, {"item": "Perawat mengkonfirmasi 2 identifier sblm tindakan", "compliant": true}]', 10, 10, 100.00, 'Submitted');
-
-INSERT INTO safety_safety_rounds (id_round, tanggal_round, pemimpin_round, peserta, area_dikunjungi, temuan, tindakan_segera, status) VALUES
-('RND-001', '2026-08-01 14:00:00', 'DIR-01', '["QM-01", "NS-Kepala"]', '["IGD", "Farmasi"]', '[{"area": "IGD", "temuan": "Kabel EKG menjuntai", "risiko": "Tersandung", "rekomendasi": "Rapikan kabel"}]', 'Kabel dirapikan langsung', 'Completed');
-
-INSERT INTO safety_education (id_education, judul, kategori, target_audience, materi, tanggal, trainer_id, peserta_count) VALUES
-('EDU-001', 'Induction Safety Training', 'Induction', '["Perawat Baru", "Dokter Baru"]', 'Pengenalan IPSG dan sistem pelaporan insiden', '2026-08-01', 'QM-01', 25);
