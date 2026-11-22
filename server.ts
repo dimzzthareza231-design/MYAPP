@@ -2,10 +2,12 @@ import express from 'express';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import {
   executeResilientGemini,
+  getGeminiModelFallbackChain,
   parseSafeJson,
   analyzeClinicalNoteDeterministic,
   generateClinicalDecisionSupportDeterministic,
@@ -21,27 +23,212 @@ import {
 } from './src/server/aiIntelligenceEngine';
 import { registerPatientPortalRoutes } from './src/server/patientPortalService';
 import { registerEmployeePortalGateway } from './src/server/employeePortalGateway';
+import {
+  assertProductionAuthConfiguration,
+  getCoreAuthMode,
+  registerCoreAuthentication,
+  type CoreAuthOptions
+} from './src/server/coreAuth';
+import { LocalAuthService } from './src/server/localAuth';
+import {
+  createSecurePatientQrToken,
+  getDocumentQrScope,
+  isSecurePatientQrConfigured,
+  readSecurePatientQrToken
+} from './src/server/securePatientQr';
+import {
+  createPersistenceRepository,
+  HybridAdapter,
+  hashQrToken,
+  type PersistenceChange,
+  type PersistenceFactoryOptions,
+  type PersistenceEntity,
+  type PersistenceRepository
+} from './src/server/databaseAdapter';
 
 dotenv.config();
 
+interface PersistentArrayBinding {
+  entity: PersistenceEntity;
+  records: Array<{ id: string }>;
+}
+
+function arraySnapshot(records: Array<{ id: string }>): Array<{ id: string }> {
+  return JSON.parse(JSON.stringify(records)) as Array<{ id: string }>;
+}
+
+function diffPersistentArrays(
+  entity: PersistenceEntity,
+  before: Array<{ id: string }>,
+  after: Array<{ id: string }>
+): PersistenceChange[] {
+  const beforeById = new Map(before.map((record) => [record.id, JSON.stringify(record)]));
+  const afterById = new Map(after.map((record) => [record.id, JSON.stringify(record)]));
+  const changes: PersistenceChange[] = [];
+
+  for (const id of new Set([...beforeById.keys(), ...afterById.keys()])) {
+    const previous = beforeById.get(id);
+    const current = afterById.get(id);
+    if (previous === current) continue;
+    changes.push({
+      entity,
+      id,
+      data: current === undefined ? null : JSON.parse(current) as unknown
+    });
+  }
+  return changes;
+}
+
+function restorePersistentArrays(
+  bindings: PersistentArrayBinding[],
+  snapshots: Array<Array<{ id: string }>>
+): void {
+  bindings.forEach((binding, index) => {
+    binding.records.splice(0, binding.records.length, ...snapshots[index]);
+  });
+}
+
+function installPersistenceMiddleware(
+  targets: express.Express[],
+  persistence: PersistenceRepository,
+  bindings: PersistentArrayBinding[]
+): void {
+  if (persistence.mode === 'memory') return;
+
+  let writeQueue = Promise.resolve();
+  for (const target of targets) {
+    target.use(async (req, res, next) => {
+      if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+
+      let release!: () => void;
+      const currentWrite = new Promise<void>((resolve) => { release = resolve; });
+      const previousWrite = writeQueue;
+      writeQueue = currentWrite;
+      await previousWrite;
+
+      const snapshots = bindings.map((binding) => arraySnapshot(binding.records));
+      const sendJson = res.json.bind(res);
+      let finalized = false;
+      const finish = (body: unknown) => {
+        if (finalized) return res;
+        finalized = true;
+        void (async () => {
+          if (res.statusCode >= 400) {
+            restorePersistentArrays(bindings, snapshots);
+            sendJson(body);
+            return;
+          }
+          const changes = bindings.flatMap((binding, index) =>
+            diffPersistentArrays(binding.entity, snapshots[index], binding.records)
+          );
+          await persistence.commit(changes);
+          sendJson(body);
+        })().catch((error: unknown) => {
+          restorePersistentArrays(bindings, snapshots);
+          console.error('[Persistence] Write-through failed; API mutation rolled back.', error);
+          if (!res.headersSent) {
+            res.status(503);
+            sendJson({
+              success: false,
+              code: 'PERSISTENCE_UNAVAILABLE',
+              message: 'Data belum tersimpan. Periksa koneksi penyimpanan lalu coba kembali.'
+            });
+          }
+        }).finally(release);
+        return res;
+      };
+
+      res.json = finish as typeof res.json;
+      res.once('close', () => {
+        if (finalized) return;
+        finalized = true;
+        restorePersistentArrays(bindings, snapshots);
+        release();
+      });
+      return next();
+    });
+  }
+}
+
 // Membangun kedua Express app tanpa listen; dipakai server lokal/Docker (startServer) dan Vercel Function (api/index.ts).
-export async function createApps() {
+export async function createApps(
+  authOptions: CoreAuthOptions = {},
+  persistenceOptions: PersistenceFactoryOptions = {}
+) {
+  const authMode = authOptions.authMode || (authOptions.resolvePrincipal ? 'firebase' : getCoreAuthMode());
+  assertProductionAuthConfiguration(authMode);
+  const persistence = await createPersistenceRepository(persistenceOptions);
+  const startupStorageHealth = await persistence.health();
+  if (process.env.NODE_ENV === 'production' && !startupStorageHealth.persistentReady) {
+    throw new Error(
+      `Production startup requires healthy durable, access-controlled persistence (mode=${startupStorageHealth.mode}).`
+    );
+  }
   // Aplikasi inti (SIMK/RME + API /api/v1, /api/ai, /api/gateway) dan web publik pasien
   // (/api/public, /api/patient) dilayani oleh dua Express app di dua port berbeda.
   // Keduanya satu proses agar tetap berbagi data store in-memory di bawah.
   // shortcut: satu proses = data bersama; pecah jadi dua layanan setelah data pindah ke database.
   const app = express();
   const publicApp = express();
+  const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+  const resolvedAuthOptions: CoreAuthOptions = { ...authOptions, authMode };
+  if (authMode === 'local') {
+    if (persistence.mode === 'firebase' || persistence.mode === 'hybrid') {
+      throw new Error('AUTH_MODE=local supports only MySQL, D1 or in-memory development storage; Firebase and hybrid storage are not supported for offline local authentication.');
+    }
+    resolvedAuthOptions.localAuth ||= new LocalAuthService(persistence);
+    await resolvedAuthOptions.localAuth.initialize();
+  }
 
   for (const target of [app, publicApp]) {
-  target.use(express.json({ limit: '50mb' }));
-  target.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  target.use(express.json({ limit: '5mb' }));
+  target.use(express.urlencoded({ extended: false, limit: '256kb', parameterLimit: 100 }));
+  target.use('/api', (req, res, next) => {
+    const limits: Record<string, { max: number; windowMs: number }> = {
+      '/auth/session': { max: 20, windowMs: 15 * 60 * 1000 },
+      '/auth/login': { max: 10, windowMs: 15 * 60 * 1000 },
+      '/auth/logout': { max: 20, windowMs: 15 * 60 * 1000 },
+      '/patient/verify': { max: 10, windowMs: 15 * 60 * 1000 },
+      '/patient/google-session': { max: 10, windowMs: 15 * 60 * 1000 },
+      '/patient/appointments': { max: 20, windowMs: 15 * 60 * 1000 },
+      '/v1/patient-qr/issue': { max: 30, windowMs: 15 * 60 * 1000 },
+      '/v1/patient-qr/resolve': { max: 60, windowMs: 15 * 60 * 1000 },
+      '/v1/patient-qr/redeem': { max: 60, windowMs: 15 * 60 * 1000 },
+      '/v1/dossier/document-qr/issue': { max: 30, windowMs: 15 * 60 * 1000 },
+      '/gateway/auth/login': { max: 10, windowMs: 15 * 60 * 1000 },
+      '/gateway/auth/verify-mfa': { max: 10, windowMs: 15 * 60 * 1000 },
+      '/cloudflare/verify-turnstile': { max: 20, windowMs: 60 * 1000 }
+    };
+    const limit = req.method === 'POST' ? limits[req.path] : undefined;
+    if (!limit) return next();
+
+    const now = Date.now();
+    const key = `${req.ip || req.socket.remoteAddress || 'unknown'}:${req.path}`;
+    let bucket = rateLimitBuckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 0, resetAt: now + limit.windowMs };
+      rateLimitBuckets.set(key, bucket);
+    }
+
+    if (bucket.count >= limit.max) {
+      res.setHeader('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+      return res.status(429).json({ success: false, code: 'RATE_LIMITED' });
+    }
+    bucket.count += 1;
+    if (rateLimitBuckets.size > 5000) {
+      for (const [bucketKey, value] of rateLimitBuckets) {
+        if (value.resetAt <= now) rateLimitBuckets.delete(bucketKey);
+      }
+    }
+    return next();
+  });
 
   // Security Headers Middleware
   target.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     next();
   });
 
@@ -58,6 +245,8 @@ export async function createApps() {
     next();
   });
   }
+
+  registerCoreAuthentication(app, resolvedAuthOptions);
 
   // =========================================================================
   // 🏥 IN-MEMORY KLINIK DATA STORE (Simulated Enterprise SIMK State)
@@ -90,9 +279,10 @@ export async function createApps() {
     tanggal: string;
     jam_praktek: string;
     nomor_antrian: string;
-    status: 'Menunggu' | 'Diperiksa' | 'Selesai' | 'Dibatalkan';
+    status: 'Menunggu' | 'Panggil' | 'Diperiksa' | 'Farmasi' | 'Kasir' | 'Selesai' | 'Batal' | 'Dibatalkan';
     tipe: 'Rawat Jalan' | 'IGD' | 'Konsultasi';
     created_at: string;
+    checked_in_at?: string;
   }
 
   interface BedRecord {
@@ -145,6 +335,26 @@ export async function createApps() {
     ip: string;
     status: 'SUCCESS' | 'FAILED' | 'WARNING';
     details: string;
+  }
+
+  interface QRTokenRecord {
+    id: string;
+    tokenHash: string;
+    subject: string;
+    kind: 'patient' | 'reservation' | 'document';
+    issuedAt: string;
+    expiresAt?: string;
+    issuedBy: string;
+    consumedAt?: string;
+    document?: {
+      verificationCode: string;
+      documentType: string;
+      documentNumber: string;
+      title: string;
+      signer: string;
+      issuedAt: string;
+      facility: string;
+    };
   }
 
   // Initial Seed Patients
@@ -338,35 +548,319 @@ export async function createApps() {
     }
   ];
 
+  const qrTokensStore: QRTokenRecord[] = [];
+  const persistentBindings: PersistentArrayBinding[] = [
+    { entity: 'patients', records: patientsStore },
+    { entity: 'registrations', records: appointmentsStore },
+    { entity: 'queues', records: appointmentsStore },
+    { entity: 'beds', records: bedsStore },
+    { entity: 'inventory', records: inventoryStore },
+    { entity: 'documents', records: dossierStore },
+    { entity: 'audit_logs', records: auditLogsStore },
+    { entity: 'qr_tokens', records: qrTokensStore }
+  ];
+
+  if (persistence.mode !== 'memory') {
+    for (const binding of persistentBindings) binding.records.splice(0, binding.records.length);
+    if (startupStorageHealth.persistentReady) {
+      try {
+        if (persistence instanceof HybridAdapter) {
+          await persistence.syncPending();
+          await persistence.syncExternalBookings();
+        }
+        for (const binding of persistentBindings) {
+          if (binding.entity === 'queues') continue;
+          const stored = await persistence.list<Record<string, unknown>>(binding.entity);
+          for (const record of stored) {
+            if (!record.data || typeof record.data !== 'object' || Array.isArray(record.data)) {
+              throw new Error(`Invalid persisted ${binding.entity} record ${record.id}.`);
+            }
+            binding.records.push({ ...record.data, id: record.id });
+          }
+        }
+      } catch (error) {
+        await persistence.close();
+        throw new Error('Configured persistence is reachable but its records could not be loaded safely.', { cause: error });
+      }
+    } else {
+      console.warn('[Persistence] Persistent storage is unavailable; demo seeds are disabled and writes will fail closed.');
+    }
+  }
+
+  installPersistenceMiddleware([app, publicApp], persistence, persistentBindings);
+  app.locals.persistence = persistence;
+  publicApp.locals.persistence = persistence;
+  if (persistence instanceof HybridAdapter) {
+    persistence.setBookingsImportedHandler((bookings) => {
+      const currentIds = new Set(appointmentsStore.map((appointment) => appointment.id));
+      for (const booking of bookings) {
+        if (currentIds.has(booking.id) || !booking.data || typeof booking.data !== 'object') continue;
+        appointmentsStore.unshift({ ...booking.data, id: booking.id } as AppointmentRecord);
+        currentIds.add(booking.id);
+      }
+    });
+    persistence.startSyncWorker();
+  }
+
   let sepCounter = 100245;
+
+  const findActiveQrRecord = (
+    token: string,
+    claims: ReturnType<typeof readSecurePatientQrToken>
+  ): QRTokenRecord | undefined => {
+    if (!claims) return undefined;
+    const tokenHash = hashQrToken(token);
+    const record = qrTokensStore.find((item) =>
+      item.tokenHash === tokenHash &&
+      item.kind === claims.kind &&
+      item.subject === claims.subject
+    );
+    if (!record) return undefined;
+    if (record.expiresAt !== undefined) {
+      const expiresAt = Date.parse(record.expiresAt);
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
+    }
+    return record;
+  };
+
+  const auditQrAccess = (req: express.Request, action: string, subject: string) => {
+    const principal = req.corePrincipal;
+    auditLogsStore.unshift({
+      id: `log-${randomUUID()}`,
+      timestamp: new Date().toISOString(),
+      user: principal?.email || 'unknown',
+      role: principal?.roleId || 'unknown',
+      action,
+      module: 'Rekam Medis',
+      ip: req.ip || 'unknown',
+      status: 'SUCCESS',
+      details: `Akses QR untuk identitas internal ${subject}.`
+    });
+  };
+
+  app.post('/api/v1/dossier/document-qr/issue', (req, res) => {
+    if (!isSecurePatientQrConfigured()) {
+      return res.status(503).json({ success: false, code: 'QR_SECRET_NOT_CONFIGURED' });
+    }
+
+    const body = req.body || {};
+    const documentType = typeof body.documentType === 'string' ? body.documentType.trim() : '';
+    const documentNumber = typeof body.documentNumber === 'string' ? body.documentNumber.trim() : '';
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    const signer = typeof body.signer === 'string' ? body.signer.trim() : '';
+    const issuedAt = typeof body.issuedAt === 'string' ? body.issuedAt.trim() : '';
+    const facility = typeof body.facility === 'string' ? body.facility.trim() : '';
+    if (!/^[a-z0-9_-]{1,64}$/i.test(documentType) ||
+        !documentNumber || documentNumber.length > 128 ||
+        !title || title.length > 160 ||
+        !signer || signer.length > 120 ||
+        !issuedAt || issuedAt.length > 64 ||
+        !facility || facility.length > 160) {
+      return res.status(400).json({ success: false, code: 'INVALID_DOCUMENT_METADATA' });
+    }
+
+    const subject = randomUUID();
+    const verificationCode = `MYT-${new Date().getFullYear()}-${randomBytes(6).toString('hex').toUpperCase()}`;
+    const qrValue = createSecurePatientQrToken(subject, {
+      kind: 'document',
+      scope: getDocumentQrScope(documentType)
+    });
+    const tokenHash = hashQrToken(qrValue);
+    qrTokensStore.unshift({
+      id: tokenHash,
+      tokenHash,
+      subject,
+      kind: 'document',
+      issuedAt: new Date().toISOString(),
+      issuedBy: req.corePrincipal?.email || 'unknown',
+      document: {
+        verificationCode,
+        documentType,
+        documentNumber,
+        title,
+        signer,
+        issuedAt,
+        facility
+      }
+    });
+    auditQrAccess(req, 'DOCUMENT_QR_ISSUED', subject);
+    return res.status(201).json({ success: true, qrValue, verificationCode });
+  });
+
+  app.post('/api/v1/patient-qr/issue', (req, res) => {
+    if (!isSecurePatientQrConfigured()) {
+      return res.status(503).json({ success: false, code: 'QR_SECRET_NOT_CONFIGURED' });
+    }
+    const noRm = typeof req.body?.no_rm === 'string' ? req.body.no_rm.trim() : '';
+    if (!noRm || noRm.length > 32) {
+      return res.status(400).json({ success: false, code: 'INVALID_PATIENT_REFERENCE' });
+    }
+    const patient = patientsStore.find((item) => item.no_rm.toLowerCase() === noRm.toLowerCase());
+    if (!patient) {
+      return res.status(404).json({ success: false, code: 'PATIENT_NOT_FOUND' });
+    }
+    if (!patient.id || patient.id.length > 128) {
+      return res.status(500).json({ success: false, code: 'PATIENT_IDENTIFIER_INVALID' });
+    }
+
+    const qrValue = createSecurePatientQrToken(patient.id);
+    const tokenHash = hashQrToken(qrValue);
+    qrTokensStore.unshift({
+      id: tokenHash,
+      tokenHash,
+      subject: patient.id,
+      kind: 'patient',
+      issuedAt: new Date().toISOString(),
+      issuedBy: req.corePrincipal?.email || 'unknown'
+    });
+    auditQrAccess(req, 'PATIENT_QR_ISSUED', patient.id);
+    return res.json({ success: true, qrValue });
+  });
+
+  app.post('/api/v1/patient-qr/resolve', (req, res) => {
+    if (typeof req.body?.token !== 'string') {
+      return res.status(400).json({ success: false, code: 'INVALID_QR_TOKEN' });
+    }
+    const claims = readSecurePatientQrToken(req.body.token);
+    if (!claims || claims.kind !== 'patient' || !findActiveQrRecord(req.body.token, claims)) {
+      return res.status(400).json({ success: false, code: 'INVALID_QR_TOKEN' });
+    }
+    const patient = patientsStore.find((item) => item.id === claims.subject);
+    if (!patient) {
+      return res.status(404).json({ success: false, code: 'PATIENT_NOT_FOUND' });
+    }
+    auditQrAccess(req, 'PATIENT_QR_ACCESSED', patient.id);
+    return res.json({ success: true, patient });
+  });
+
+  app.post('/api/v1/patient-qr/redeem', (req, res) => {
+    if (typeof req.body?.token !== 'string') {
+      return res.status(400).json({ success: false, code: 'INVALID_QR_TOKEN' });
+    }
+    const claims = readSecurePatientQrToken(req.body.token);
+    if (!claims) {
+      return res.status(400).json({ success: false, code: 'INVALID_QR_TOKEN' });
+    }
+    const qrRecord = findActiveQrRecord(req.body.token, claims);
+    if (!qrRecord) {
+      return res.status(400).json({ success: false, code: 'INVALID_QR_TOKEN' });
+    }
+
+    if (claims.kind === 'patient') {
+      const patient = patientsStore.find((item) => item.id === claims.subject);
+      if (!patient) return res.status(404).json({ success: false, code: 'PATIENT_NOT_FOUND' });
+      auditQrAccess(req, 'PATIENT_QR_ACCESSED', patient.id);
+      return res.json({ success: true, kind: 'patient', patient });
+    }
+
+    if (claims.kind === 'document') {
+      if (!qrRecord.document) {
+        return res.status(404).json({ success: false, code: 'DOCUMENT_VERIFICATION_NOT_FOUND' });
+      }
+      auditQrAccess(req, 'DOCUMENT_QR_VERIFIED', claims.subject);
+      return res.json({
+        success: true,
+        kind: 'document',
+        document: { ...qrRecord.document, status: 'valid' }
+      });
+    }
+
+    const appointment = appointmentsStore.find((item) => item.id === claims.subject);
+    if (!appointment || appointment.status === 'Dibatalkan') {
+      return res.status(404).json({ success: false, code: 'RESERVATION_NOT_FOUND' });
+    }
+    if (appointment.tanggal !== new Date().toISOString().slice(0, 10)) {
+      return res.status(409).json({ success: false, code: 'CHECKIN_DATE_MISMATCH' });
+    }
+    if (appointment.checked_in_at) {
+      return res.status(409).json({ success: false, code: 'RESERVATION_ALREADY_CHECKED_IN' });
+    }
+    if (qrRecord.consumedAt) {
+      return res.status(409).json({ success: false, code: 'RESERVATION_ALREADY_CHECKED_IN' });
+    }
+
+    const patient = patientsStore.find((item) => item.no_rm === appointment.no_rm);
+    if (!patient) return res.status(404).json({ success: false, code: 'PATIENT_NOT_FOUND' });
+    appointment.checked_in_at = new Date().toISOString();
+    if (qrRecord) qrRecord.consumedAt = appointment.checked_in_at;
+    auditLogsStore.unshift({
+      id: `log-${Date.now()}`,
+      timestamp: appointment.checked_in_at,
+      user: req.corePrincipal?.email || 'unknown',
+      role: req.corePrincipal?.roleId || 'unknown',
+      action: 'PATIENT_RESERVATION_CHECK_IN',
+      module: 'Pendaftaran',
+      ip: req.ip || 'unknown',
+      status: 'SUCCESS',
+      details: `Check-in antrean ${appointment.nomor_antrian} untuk No. RM ${appointment.no_rm}.`
+    });
+    return res.json({
+      success: true,
+      kind: 'reservation',
+      patient,
+      booking: {
+        no_rm: appointment.no_rm,
+        nomor_antrian: appointment.nomor_antrian,
+        poli: appointment.poli,
+        dokter: appointment.dokter,
+        tanggal: appointment.tanggal,
+        checked_in_at: appointment.checked_in_at
+      }
+    });
+  });
 
   // =========================================================================
   // 🚀 REST API V1 ENDPOINTS (Enterprise Klinik Information System Backend)
   // =========================================================================
 
   // 1. System Health Check Endpoint
-  app.get('/api/v1/health', (req, res) => {
-    const memory = process.memoryUsage();
+  app.get('/api/v1/health', async (req, res) => {
+    const storage = await persistence.health();
     res.json({
-      status: 'HEALTHY',
-      uptime: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString(),
-      version: '1.0.0',
-      nodeVersion: process.version,
-      platform: process.platform,
-      memory: {
-        rss: `${Math.round(memory.rss / 1024 / 1024)} MB`,
-        heapTotal: `${Math.round(memory.heapTotal / 1024 / 1024)} MB`,
-        heapUsed: `${Math.round(memory.heapUsed / 1024 / 1024)} MB`
-      },
-      services: {
-        database: 'ONLINE (Firestore / Local Data Engine)',
-        ai_engine: process.env.GEMINI_API_KEY ? 'ACTIVE (Google Gemini API)' : 'SANDBOX_FALLBACK',
-        bpjs_vclaim_bridge: 'READY',
-        satusehat_ihs_bridge: 'READY',
-        cloudflare_edge: 'CONNECTED'
-      }
+      status: storage.persistentReady ? 'HEALTHY' : 'DEGRADED',
+      storage,
+      timestamp: new Date().toISOString()
     });
+  });
+
+  app.get('/api/v1/system-data/:key', async (req, res) => {
+    if (req.get('x-storage-mode') && req.get('x-storage-mode') !== persistence.mode) {
+      return res.status(503).json({ success: false, code: 'STORAGE_MODE_MISMATCH' });
+    }
+    const key = req.params.key;
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(key)) {
+      return res.status(400).json({ success: false, code: 'INVALID_SYSTEM_DATA_KEY' });
+    }
+    try {
+      const record = await persistence.get<{ key: string; data: string; updatedAt: string }>('system_data', key);
+      if (!record) return res.status(404).json({ success: false, code: 'SYSTEM_DATA_NOT_FOUND' });
+      return res.json({ success: true, ...record });
+    } catch (error) {
+      console.error('[Persistence] Could not read system data.', error);
+      return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
+    }
+  });
+
+  app.put('/api/v1/system-data/:key', async (req, res) => {
+    if (req.get('x-storage-mode') && req.get('x-storage-mode') !== persistence.mode) {
+      return res.status(503).json({ success: false, code: 'STORAGE_MODE_MISMATCH' });
+    }
+    const key = req.params.key;
+    const data = req.body?.data;
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(key)) {
+      return res.status(400).json({ success: false, code: 'INVALID_SYSTEM_DATA_KEY' });
+    }
+    if (typeof data !== 'string' || Buffer.byteLength(data, 'utf8') > 900_000) {
+      return res.status(413).json({ success: false, code: 'INVALID_SYSTEM_DATA_PAYLOAD' });
+    }
+    const record = { key, data, updatedAt: new Date().toISOString() };
+    try {
+      await persistence.commit([{ entity: 'system_data', id: key, data: record }]);
+      return res.json({ success: true, updatedAt: record.updatedAt });
+    } catch (error) {
+      console.error('[Persistence] Could not write system data.', error);
+      return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
+    }
   });
 
   // 2. High-Level System Analytics & Operational Stats
@@ -485,7 +979,7 @@ export async function createApps() {
       });
     }
 
-    if (nik && nik.length !== 16) {
+    if (nik && !/^\d{16}$/.test(nik)) {
       return res.status(422).json({
         success: false,
         error: 'Nomor Induk Kependudukan (NIK) harus terdiri dari tepat 16 digit angka.'
@@ -543,6 +1037,55 @@ export async function createApps() {
       message: 'Pasien berhasil didaftarkan ke SIMK.',
       data: newPatient
     });
+  });
+
+  app.patch('/api/v1/patients/:idOrRm', (req, res) => {
+    const patient = patientsStore.find((item) =>
+      item.id === req.params.idOrRm || item.no_rm === req.params.idOrRm
+    );
+    if (!patient) return res.status(404).json({ success: false, code: 'PATIENT_NOT_FOUND' });
+
+    const allowedFields = new Set([
+      'nik', 'nama', 'tanggal_lahir', 'jenis_kelamin', 'alamat', 'no_hp',
+      'golongan_darah', 'penjamin', 'no_bpjs', 'status', 'alergi', 'riwayat_penyakit'
+    ]);
+    const entries = Object.entries(req.body || {});
+    if (!entries.length || entries.some(([key]) => !allowedFields.has(key))) {
+      return res.status(400).json({ success: false, code: 'INVALID_PATIENT_UPDATE' });
+    }
+    if (typeof req.body.nik === 'string') {
+      if (req.body.nik && !/^\d{16}$/.test(req.body.nik)) {
+        return res.status(422).json({ success: false, code: 'INVALID_NIK' });
+      }
+      if (req.body.nik && patientsStore.some((item) => item.id !== patient.id && item.nik === req.body.nik)) {
+        return res.status(409).json({ success: false, code: 'DUPLICATE_NIK' });
+      }
+    }
+    const stringLimits: Record<string, number> = {
+      nik: 16, nama: 160, tanggal_lahir: 32, jenis_kelamin: 1,
+      alamat: 500, no_hp: 40, golongan_darah: 10, penjamin: 80,
+      no_bpjs: 40, status: 30
+    };
+    for (const [key, value] of entries) {
+      if (key in stringLimits && (typeof value !== 'string' || value.length > stringLimits[key])) {
+        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
+      }
+      if (key === 'jenis_kelamin' && value !== 'L' && value !== 'P') {
+        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
+      }
+      if (key === 'status' && !['Aktif', 'Rawat Jalan', 'Rawat Inap', 'IGD', 'Selesai', 'Nonaktif'].includes(String(value))) {
+        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
+      }
+      if (['alergi', 'riwayat_penyakit'].includes(key) && !Array.isArray(value)) {
+        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
+      }
+      if (['alergi', 'riwayat_penyakit'].includes(key) &&
+          ((value as unknown[]).length > 100 || (value as unknown[]).some((item) => typeof item !== 'string' || item.length > 200))) {
+        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
+      }
+    }
+    Object.assign(patient, req.body);
+    return res.json({ success: true, data: patient });
   });
 
   // 6. Appointments & Queue API
@@ -604,6 +1147,17 @@ export async function createApps() {
       message: `Nomor antrian berhasil diterbitkan: ${nomor_antrian}`,
       data: newAppointment
     });
+  });
+
+  app.patch('/api/v1/appointments/:id', (req, res) => {
+    const appointment = appointmentsStore.find((item) => item.id === req.params.id);
+    if (!appointment) return res.status(404).json({ success: false, code: 'APPOINTMENT_NOT_FOUND' });
+    if (typeof req.body?.status !== 'string' ||
+        !['Menunggu', 'Panggil', 'Diperiksa', 'Farmasi', 'Kasir', 'Selesai', 'Batal'].includes(req.body.status)) {
+      return res.status(400).json({ success: false, code: 'INVALID_APPOINTMENT_STATUS' });
+    }
+    appointment.status = req.body.status === 'Batal' ? 'Dibatalkan' : req.body.status;
+    return res.json({ success: true, data: appointment });
   });
 
   // 7. Bed Management API (Rawat Inap)
@@ -704,41 +1258,68 @@ export async function createApps() {
   app.post('/api/v1/inventory/dispense', (req, res) => {
     const { items, recipeId, no_rm } = req.body;
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
+    if (!Array.isArray(items) || items.length === 0 || items.length > 100) {
       return res.status(400).json({ success: false, error: 'Daftar item obat yang akan dikeluarkan diperlukan.' });
     }
 
-    const dispensed: any[] = [];
     const errors: string[] = [];
+    const requested = new Map<InventoryItem, number>();
 
     for (const item of items) {
-      const stockItem = inventoryStore.find(i => i.kode === item.kode || i.nama.toLowerCase() === (item.nama || '').toLowerCase());
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        errors.push('Setiap item obat harus berupa objek yang valid.');
+        continue;
+      }
+
+      const hasCode = typeof item.kode === 'string' && item.kode.trim().length > 0;
+      const hasName = typeof item.nama === 'string' && item.nama.trim().length > 0;
+      if ((!hasCode && !hasName) || !Number.isSafeInteger(item.qty) || item.qty <= 0) {
+        errors.push('Setiap item harus memiliki kode atau nama obat serta kuantitas bilangan bulat positif.');
+        continue;
+      }
+
+      const stockItem = inventoryStore.find(i =>
+        (hasCode && i.kode.toLowerCase() === item.kode.trim().toLowerCase()) ||
+        (hasName && i.nama.toLowerCase() === item.nama.trim().toLowerCase())
+      );
       if (!stockItem) {
-        errors.push(`Item obat ${item.nama || item.kode} tidak ditemukan dalam inventaris.`);
+        errors.push(`Item obat ${hasName ? item.nama : item.kode} tidak ditemukan dalam inventaris.`);
         continue;
       }
-      if (stockItem.stok < item.qty) {
-        errors.push(`Stok obat ${stockItem.nama} tidak mencukupi (Tersedia: ${stockItem.stok}, Diminta: ${item.qty}).`);
+
+      const combinedQty = (requested.get(stockItem) || 0) + item.qty;
+      if (!Number.isSafeInteger(combinedQty)) {
+        errors.push(`Total kuantitas obat ${stockItem.nama} tidak valid.`);
         continue;
       }
-      stockItem.stok -= item.qty;
-      dispensed.push({
-        kode: stockItem.kode,
-        nama: stockItem.nama,
-        qty: item.qty,
-        sisa_stok: stockItem.stok
-      });
+      requested.set(stockItem, combinedQty);
     }
 
-    if (errors.length > 0 && dispensed.length === 0) {
+    for (const [stockItem, qty] of requested) {
+      if (stockItem.stok < qty) {
+        errors.push(`Stok obat ${stockItem.nama} tidak mencukupi (Tersedia: ${stockItem.stok}, Diminta: ${qty}).`);
+      }
+    }
+
+    if (errors.length > 0) {
       return res.status(422).json({ success: false, errors });
     }
+
+    const dispensed = [...requested].map(([stockItem, qty]) => {
+      stockItem.stok -= qty;
+      return {
+        kode: stockItem.kode,
+        nama: stockItem.nama,
+        qty,
+        sisa_stok: stockItem.stok
+      };
+    });
 
     auditLogsStore.unshift({
       id: `log-${Date.now()}`,
       timestamp: new Date().toISOString(),
-      user: 'Petugas Farmasi',
-      role: 'Farmasi',
+      user: req.corePrincipal?.email || 'unknown',
+      role: req.corePrincipal?.roleId || 'unknown',
       action: 'DISPENSE_MEDICATION',
       module: 'Farmasi',
       ip: req.ip || '127.0.0.1',
@@ -894,7 +1475,7 @@ export async function createApps() {
       },
       serviceProvider: {
         reference: 'Organization/10000004',
-        display: 'MYITARU KLINIK SIMK'
+        display: 'MYITARU SIMK'
       },
       syncMetadata: {
         syncedAt: new Date().toISOString(),
@@ -906,27 +1487,10 @@ export async function createApps() {
 
   // 11. Payment Gateway & QRIS Callback Webhook
   app.post('/api/v1/billing/qris/callback', (req, res) => {
-    const { invoiceNo, amount, paymentStatus, transactionId, signature } = req.body;
-
-    console.log(`[QRIS-WEBHOOK] Callback received for Invoice: ${invoiceNo}, Status: ${paymentStatus}, Amount: Rp ${amount}`);
-
-    auditLogsStore.unshift({
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      user: 'Payment Gateway (Duitku / Midtrans)',
-      role: 'SYSTEM',
-      action: 'PAYMENT_RECEIVED',
-      module: 'Kasir & Billing',
-      ip: req.ip || '127.0.0.1',
-      status: 'SUCCESS',
-      details: `Pembayaran QRIS lunas untuk Invoice ${invoiceNo || 'INV-DIRECT'} sejumlah Rp ${amount || 0}`
-    });
-
-    res.json({
-      success: true,
-      statusCode: '00',
-      message: 'Notifikasi pembayaran berhasil diproses dan billing pasien terupdate lunas.',
-      transactionId: transactionId || `TX-${Date.now()}`
+    return res.status(503).json({
+      success: false,
+      code: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+      message: 'Callback pembayaran dinonaktifkan sampai provider dan verifikasi tanda tangannya dikonfigurasi.'
     });
   });
 
@@ -1013,35 +1577,19 @@ export async function createApps() {
 
   // 14. Database Backup & Disaster Recovery API
   app.post('/api/v1/backup/create', (req, res) => {
-    const backupId = `BKP-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-    const payload = {
-      patientsCount: patientsStore.length,
-      appointmentsCount: appointmentsStore.length,
-      bedsCount: bedsStore.length,
-      inventoryCount: inventoryStore.length,
-      dossierDocumentsCount: dossierStore.length,
-      auditLogsCount: auditLogsStore.length
-    };
-
-    res.status(201).json({
-      success: true,
-      backupId,
-      timestamp: new Date().toISOString(),
-      type: 'FULL_SNAPSHOT',
-      size: '2.4 MB',
-      checksum: 'sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      summary: payload,
-      message: 'Snapshot backup basis data SIMK berhasil dibuat dan diarsipkan dengan aman.'
+    return res.status(503).json({
+      success: false,
+      code: 'BACKUP_NOT_CONFIGURED',
+      message: 'Backup dinonaktifkan karena penyimpanan persisten dan tujuan backup belum dikonfigurasi.'
     });
   });
 
   app.get('/api/v1/backup/status', (req, res) => {
-    res.json({
-      lastBackupTime: new Date(Date.now() - 3600000 * 2).toISOString(),
-      frequency: 'Setiap 6 Jam (Automatis)',
-      destination: 'Encrypted Cloud Storage + Offsite Mirror',
-      status: 'OPTIMAL',
-      totalBackupsStored: 14
+    return res.status(503).json({
+      success: false,
+      code: 'BACKUP_NOT_CONFIGURED',
+      status: 'UNAVAILABLE',
+      message: 'Belum ada layanan backup yang dikonfigurasi.'
     });
   });
 
@@ -1351,7 +1899,7 @@ Instructions:
 `;
 
       let response: any = null;
-      for (const modelName of ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']) {
+      for (const modelName of getGeminiModelFallbackChain()) {
         try {
           response = await ai.models.generateContent({
             model: modelName,
@@ -1451,7 +1999,7 @@ Instructions:
       }
 
       let response: any = null;
-      for (const modelName of ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']) {
+      for (const modelName of getGeminiModelFallbackChain()) {
         try {
           response = await ai.models.generateContent({
             model: modelName,
@@ -1667,7 +2215,7 @@ Berdasarkan pencarian: **"${q}"** (Area sekitar koordinat ${userLat.toFixed(4)},
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.5-transcribe',
+        model: getGeminiModelFallbackChain()[0],
         contents: [
           {
             role: 'user',
@@ -2031,37 +2579,24 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
 
   // Cloudflare Turnstile Verification API
   app.post('/api/cloudflare/verify-turnstile', async (req, res) => {
-    try {
-      const { token, secretKey } = req.body;
+    const secret = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
+    const expectedHostname = process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME;
+    if (!secret || !expectedHostname) {
+      return res.status(503).json({ success: false, code: 'TURNSTILE_NOT_CONFIGURED' });
+    }
 
-      if (!token) {
+    try {
+      const { token } = req.body || {};
+
+      if (typeof token !== 'string' || token.length === 0 || token.length > 4096) {
         return res.status(400).json({ success: false, message: 'Turnstile token is required.' });
       }
 
-      const effectiveSecret = 
-        process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY || 
-        secretKey || 
-        '1x0000000000000000000000000000000AA'; // Cloudflare test secret key (always passes)
-
-      // In development / demo testing or mock token
-      if (token.startsWith('CF_TURNSTILE_DEMO') || effectiveSecret.startsWith('1x00000000')) {
-        return res.json({
-          success: true,
-          challenge_ts: new Date().toISOString(),
-          hostname: req.hostname || 'localhost',
-          action: 'login',
-          cdata: 'myitaru_verified',
-          message: 'Verifikasi Turnstile berhasil (Cloudflare Verified).'
-        });
-      }
-
-      // Call Cloudflare Turnstile Siteverify endpoint
       const formData = new URLSearchParams();
-      formData.append('secret', effectiveSecret);
+      formData.append('secret', secret);
       formData.append('response', token);
-      const remoteIp = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-      if (remoteIp && typeof remoteIp === 'string') {
-        formData.append('remoteip', remoteIp.split(',')[0].trim());
+      if (req.ip) {
+        formData.append('remoteip', req.ip);
       }
 
       const cfResponse = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
@@ -2069,20 +2604,21 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
         body: formData,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        },
+        signal: AbortSignal.timeout(10_000)
       });
 
-      const cfData = await cfResponse.json();
-      res.json(cfData);
-    } catch (err: any) {
+      if (!cfResponse.ok) {
+        return res.status(502).json({ success: false, code: 'TURNSTILE_PROVIDER_ERROR' });
+      }
+      const cfData = await cfResponse.json() as { success?: boolean; hostname?: string; action?: string };
+      const valid = cfData.success === true &&
+        cfData.hostname === expectedHostname &&
+        cfData.action === (process.env.CLOUDFLARE_TURNSTILE_EXPECTED_ACTION || 'login');
+      return res.status(200).json({ success: valid });
+    } catch (err) {
       console.error('Cloudflare Turnstile verification error:', err);
-      // Sandbox fallback on network failure
-      res.json({
-        success: true,
-        challenge_ts: new Date().toISOString(),
-        hostname: req.hostname,
-        message: 'Verifikasi Turnstile disetujui (Fallback).'
-      });
+      return res.status(502).json({ success: false, code: 'TURNSTILE_VERIFICATION_FAILED' });
     }
   });
 
@@ -2110,6 +2646,8 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
     patientsStore: patientsStore as any,
     appointmentsStore: appointmentsStore as any,
     bedsStore: bedsStore as any,
+    qrTokensStore,
+    useDemoData: persistence.mode === 'memory',
     createAuditLog: (entry) => {
       auditLogsStore.unshift({
         id: 'log-' + Date.now(),
@@ -2136,7 +2674,7 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
     }
   });
 
-  return { app, publicApp };
+  return { app, publicApp, persistence };
 }
 
 export function addErrorHandler(target: express.Application) {
@@ -2149,7 +2687,7 @@ export function addErrorHandler(target: express.Application) {
 }
 
 async function startServer() {
-  const { app, publicApp } = await createApps();
+  const { app, publicApp, persistence } = await createApps();
   const httpServer = http.createServer(app);
   const publicHttpServer = http.createServer(publicApp);
   const CORE_PORT = Number(process.env.CORE_PORT) || 3001;
@@ -2209,9 +2747,22 @@ async function startServer() {
   publicHttpServer.listen(PUBLIC_PORT, '0.0.0.0', () => {
     console.log("Web publik pasien running on port " + PUBLIC_PORT);
   });
+
+  const shutdown = async () => {
+    await Promise.all([
+      new Promise<void>((resolve) => httpServer.close(() => resolve())),
+      new Promise<void>((resolve) => publicHttpServer.close(() => resolve()))
+    ]);
+    await persistence.close();
+  };
+  process.once('SIGINT', () => void shutdown());
+  process.once('SIGTERM', () => void shutdown());
 }
 
-// Di Vercel, server tidak listen sendiri; request masuk lewat api/index.ts.
-if (!process.env.VERCEL) {
-  startServer().catch(console.error);
+// Di Vercel/Cloudflare, server tidak listen sendiri; request masuk lewat api/index.ts atau worker/index.ts.
+if (!process.env.VERCEL && !process.env.CLOUDFLARE_WORKER) {
+  startServer().catch((error) => {
+    console.error('Server startup failed:', error);
+    process.exitCode = 1;
+  });
 }

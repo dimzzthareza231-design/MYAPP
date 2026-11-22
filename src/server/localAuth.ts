@@ -1,0 +1,303 @@
+import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import type { CorePrincipal } from './coreAuth';
+import type { PersistenceChange, PersistenceRepository } from './databaseAdapter';
+
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const SCRYPT_KEY_LENGTH = 64;
+const SCRYPT_OPTIONS = { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+
+interface LocalStaffUserRecord {
+  id: string;
+  username: string;
+  email: string;
+  nama: string;
+  roleId: string;
+  passwordSalt: string;
+  passwordHash: string;
+  aktif: boolean;
+  dibuatPada: string;
+}
+
+interface LocalAuthSessionRecord {
+  userId: string;
+  expiresAt: number;
+  createdAt: string;
+}
+
+export interface LocalAuthPublicUser {
+  id: string;
+  username: string;
+  email: string;
+  nama: string;
+  roleId: string;
+  aktif: true;
+  dibuatPada: string;
+}
+
+export interface LocalAuthLoginResult {
+  token: string;
+  user: LocalAuthPublicUser;
+  principal: CorePrincipal;
+}
+
+export interface LocalAuthSession {
+  user: LocalAuthPublicUser;
+  principal: CorePrincipal;
+}
+
+export interface LocalAuthProvider {
+  initialize(): Promise<void>;
+  login(identifier: string, password: string): Promise<LocalAuthLoginResult | null>;
+  resolveSession(token: string): Promise<LocalAuthSession | null>;
+  logout(token: string): Promise<void>;
+}
+
+interface LocalAuthBootstrapUser {
+  username: string;
+  email: string;
+  nama: string;
+  roleId: string;
+  password: string;
+}
+
+interface LocalAuthOptions {
+  sessionSecret?: string;
+  sessionTtlMs?: number;
+  bootstrapUsers?: LocalAuthBootstrapUser[];
+}
+
+const ROLE_SEEDS = [
+  { username: 'admin', email: process.env.LOCAL_AUTH_ADMIN_EMAIL?.trim() || 'admin@myitaru.local', nama: 'Administrator SIMK', roleId: 'admin', passwordEnv: 'LOCAL_AUTH_ADMIN_PASSWORD' },
+  { username: 'dokter', email: 'dokter@myitaru.local', nama: 'Dokter MYITARU', roleId: 'dokter', passwordEnv: 'LOCAL_AUTH_DOKTER_PASSWORD' },
+  { username: 'perawat', email: 'perawat@myitaru.local', nama: 'Perawat MYITARU', roleId: 'perawat', passwordEnv: 'LOCAL_AUTH_PERAWAT_PASSWORD' },
+  { username: 'rmik', email: 'rmik@myitaru.local', nama: 'Perekam Medis MYITARU', roleId: 'rekam_medis', passwordEnv: 'LOCAL_AUTH_RMIK_PASSWORD' },
+  { username: 'apoteker', email: 'apoteker@myitaru.local', nama: 'Apoteker MYITARU', roleId: 'apoteker', passwordEnv: 'LOCAL_AUTH_APOTEKER_PASSWORD' },
+  { username: 'kasir', email: 'kasir@myitaru.local', nama: 'Kasir MYITARU', roleId: 'kasir', passwordEnv: 'LOCAL_AUTH_KASIR_PASSWORD' }
+] as const;
+
+function derivePassword(password: string, salt: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS, (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    });
+  });
+}
+
+function accountId(username: string): string {
+  return createHmac('sha256', 'myitaru-local-user-id')
+    .update(username.trim().toLowerCase())
+    .digest('hex');
+}
+
+function asPublicUser(user: LocalStaffUserRecord): LocalAuthPublicUser {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    nama: user.nama,
+    roleId: user.roleId,
+    aktif: true,
+    dibuatPada: user.dibuatPada
+  };
+}
+
+function isValidPasswordHash(value: string): boolean {
+  return /^[a-f0-9]{128}$/i.test(value);
+}
+
+function getBootstrapUsers(): LocalAuthBootstrapUser[] {
+  return ROLE_SEEDS.flatMap(({ passwordEnv, ...account }) => {
+    const password = process.env[passwordEnv];
+    if (!password) return [];
+    if (password.length < 12 || password.length > 128) {
+      throw new Error(`${passwordEnv} must contain between 12 and 128 characters.`);
+    }
+    return [{ ...account, password }];
+  });
+}
+
+export class LocalAuthService implements LocalAuthProvider {
+  private readonly sessionSecret: string;
+  private readonly sessionTtlMs: number;
+  private readonly bootstrapUsers: LocalAuthBootstrapUser[];
+  private dummySalt = '';
+  private dummyHash: Uint8Array = new Uint8Array(SCRYPT_KEY_LENGTH);
+
+  constructor(
+    private readonly persistence: PersistenceRepository,
+    options: LocalAuthOptions = {}
+  ) {
+    const configuredSecret = options.sessionSecret || process.env.SESSION_SECRET;
+    if (!configuredSecret && process.env.NODE_ENV === 'production') {
+      throw new Error('SESSION_SECRET is required for local authentication in production.');
+    }
+    this.sessionSecret = configuredSecret || randomBytes(32).toString('hex');
+    this.sessionTtlMs = options.sessionTtlMs || SESSION_TTL_MS;
+    this.bootstrapUsers = options.bootstrapUsers || getBootstrapUsers();
+  }
+
+  async initialize(): Promise<void> {
+    this.dummySalt = randomBytes(16).toString('hex');
+    this.dummyHash = await derivePassword(randomBytes(32).toString('hex'), this.dummySalt);
+
+    const existing = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
+    const existingById = new Map(existing.map(({ id, data }) => [id, data]));
+    const seenUsernames = new Set<string>();
+    const seenEmails = new Set<string>();
+    const changes: PersistenceChange[] = [];
+
+    for (const account of this.bootstrapUsers) {
+      const username = account.username.trim();
+      const email = account.email.trim().toLowerCase();
+      const normalizedUsername = username.toLowerCase();
+      if (!/^[a-zA-Z0-9._-]{3,64}$/.test(username)) {
+        throw new Error(`Invalid local staff username for role ${account.roleId}.`);
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error(`Invalid local staff email for role ${account.roleId}.`);
+      }
+      if (account.password.length < 12 || account.password.length > 128) {
+        throw new Error(`Local staff passwords must contain between 12 and 128 characters.`);
+      }
+      if (seenUsernames.has(normalizedUsername) || seenEmails.has(email)) {
+        throw new Error('Local staff bootstrap usernames and emails must be unique.');
+      }
+      if (!['admin', 'dokter', 'perawat', 'rekam_medis', 'apoteker', 'kasir'].includes(account.roleId)) {
+        throw new Error(`Unsupported local staff role: ${account.roleId}.`);
+      }
+      seenUsernames.add(normalizedUsername);
+      seenEmails.add(email);
+
+      const id = accountId(username);
+      const stored = existingById.get(id);
+      if (stored) {
+        if (stored.roleId !== account.roleId || stored.username.toLowerCase() !== normalizedUsername) {
+          throw new Error(`Existing local staff account ${username} conflicts with its configured role.`);
+        }
+        continue;
+      }
+
+      const salt = randomBytes(16).toString('hex');
+      const passwordHash = (await derivePassword(account.password, salt)).toString('hex');
+      changes.push({
+        entity: 'local_auth_users',
+        id,
+        data: {
+          id,
+          username,
+          email,
+          nama: account.nama,
+          roleId: account.roleId,
+          passwordSalt: salt,
+          passwordHash,
+          aktif: true,
+          dibuatPada: new Date().toISOString()
+        } satisfies LocalStaffUserRecord
+      });
+    }
+
+    if (changes.length) await this.persistence.commit(changes);
+    const persistedUsers = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
+    const provisionedRoles = new Set(persistedUsers.filter(({ data }) => data.aktif).map(({ data }) => data.roleId));
+    const missingRoles = ROLE_SEEDS
+      .filter(({ roleId }) => !provisionedRoles.has(roleId))
+      .map(({ roleId, passwordEnv }) => ({ roleId, passwordEnv }));
+
+    if (process.env.NODE_ENV === 'production' && missingRoles.length) {
+      throw new Error(`Local authentication requires provisioned accounts for all staff roles. Configure: ${missingRoles.map(({ passwordEnv }) => passwordEnv).join(', ')}.`);
+    }
+    if (persistedUsers.length === 0) {
+      console.warn('[Auth:local] No local staff accounts are provisioned; set role-specific LOCAL_AUTH_*_PASSWORD values before logging in.');
+    }
+
+    const now = Date.now();
+    const expiredSessions = (await this.persistence.list<LocalAuthSessionRecord>('local_auth_sessions'))
+      .filter(({ data }) => !Number.isFinite(data.expiresAt) || data.expiresAt <= now)
+      .map(({ id }) => ({ entity: 'local_auth_sessions' as const, id, data: null }));
+    if (expiredSessions.length) await this.persistence.commit(expiredSessions);
+  }
+
+  async login(identifier: string, password: string): Promise<LocalAuthLoginResult | null> {
+    if (typeof identifier !== 'string' || typeof password !== 'string' ||
+        identifier.length > 254 || password.length > 128 || !identifier.trim() || !password) {
+      return null;
+    }
+
+    const normalizedIdentifier = identifier.trim().toLowerCase();
+    const users = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
+    const user = users
+      .map(({ data }) => data)
+      .find((record) =>
+        record.username.toLowerCase() === normalizedIdentifier ||
+        record.email.toLowerCase() === normalizedIdentifier
+      );
+    const salt = user?.passwordSalt || this.dummySalt;
+    const expectedHash = user && isValidPasswordHash(user.passwordHash)
+      ? Buffer.from(user.passwordHash, 'hex')
+      : this.dummyHash;
+    const actualHash = await derivePassword(password, salt);
+    const passwordMatches = expectedHash.length === actualHash.length && timingSafeEqual(expectedHash, actualHash);
+
+    if (!user || !user.aktif || !passwordMatches) return null;
+
+    const token = randomBytes(32).toString('base64url');
+    const sessionId = this.sessionId(token);
+    const now = Date.now();
+    const expiresAt = now + this.sessionTtlMs;
+    await this.persistence.commit([{
+      entity: 'local_auth_sessions',
+      id: sessionId,
+      data: { userId: user.id, expiresAt, createdAt: new Date(now).toISOString() } satisfies LocalAuthSessionRecord
+    }]);
+
+    return {
+      token,
+      user: asPublicUser(user),
+      principal: {
+        uid: user.id,
+        email: user.email,
+        roleId: user.roleId,
+        mfaVerified: false,
+        authMode: 'local'
+      }
+    };
+  }
+
+  async resolveSession(token: string): Promise<LocalAuthSession | null> {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+    const sessionId = this.sessionId(token);
+    const session = await this.persistence.get<LocalAuthSessionRecord>('local_auth_sessions', sessionId);
+    if (!session) return null;
+    if (!Number.isFinite(session.expiresAt) || session.expiresAt <= Date.now()) {
+      await this.logout(token);
+      return null;
+    }
+
+    const user = await this.persistence.get<LocalStaffUserRecord>('local_auth_users', session.userId);
+    if (!user?.aktif) return null;
+    return {
+      user: asPublicUser(user),
+      principal: {
+        uid: user.id,
+        email: user.email,
+        roleId: user.roleId,
+        mfaVerified: false,
+        authMode: 'local'
+      }
+    };
+  }
+
+  async logout(token: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return;
+    await this.persistence.commit([{
+      entity: 'local_auth_sessions',
+      id: this.sessionId(token),
+      data: null
+    }]);
+  }
+
+  private sessionId(token: string): string {
+    return createHmac('sha256', this.sessionSecret).update(token).digest('hex');
+  }
+}

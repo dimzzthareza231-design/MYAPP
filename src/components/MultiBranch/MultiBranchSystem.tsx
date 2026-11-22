@@ -126,7 +126,7 @@ function DashboardTab() {
           <div className="p-4 space-y-4">
             <div>
               <div className="flex justify-between text-sm mb-1">
-                <span className="font-semibold text-gray-800">Klinik MyItaru Pusat Jakarta</span>
+                <span className="font-semibold text-gray-800">MYITARU Pusat Jakarta</span>
                 <span className="font-medium text-gray-600">8,000 pts/month</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -135,7 +135,7 @@ function DashboardTab() {
             </div>
             <div>
               <div className="flex justify-between text-sm mb-1">
-                <span className="font-semibold text-gray-800">Klinik MyItaru Cabang Bandung</span>
+                <span className="font-semibold text-gray-800">MYITARU Cabang Bandung</span>
                 <span className="font-medium text-gray-600">3,500 pts/month</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">

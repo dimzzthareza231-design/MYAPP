@@ -17,7 +17,7 @@ export function LembarHasilPrint({ item, onClose }: LembarHasilPrintProps) {
         {/* --- OFFICIAL HOSPITAL LETTERHEAD (KOP SURAT) --- */}
         <div className="flex items-center justify-between border-b-2 border-slate-900 pb-4">
           <div className="flex items-center gap-4">
-            <BrandLogo alt="Logo Klinik" className="w-16 h-16 rounded-xl object-cover shadow shrink-0" />
+            <BrandLogo alt="Logo MYITARU" className="w-16 h-16 rounded-xl object-cover shadow shrink-0" />
             <div>
               <h1 className="text-xl font-extrabold tracking-tight text-slate-950">
                 MYITARU SIMK
@@ -139,7 +139,7 @@ export function LembarHasilPrint({ item, onClose }: LembarHasilPrintProps) {
         </div>
 
         <div className="text-[10px] text-slate-400 text-center pt-4 border-t border-slate-200">
-          Lembar hasil ini merupakan rekaman medis elektronik sah Klinik MYITARU SEHAT dan dapat diverifikasi secara daring.
+          Lembar hasil ini merupakan rekaman medis elektronik sah MYITARU dan dapat diverifikasi secara daring.
         </div>
       </div>
   );

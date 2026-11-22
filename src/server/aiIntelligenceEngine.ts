@@ -2,7 +2,7 @@
 // MYITARU SIMRS — ENTERPRISE CLINICAL AI INTELLIGENCE & RESILIENCE ENGINE
 // ═══════════════════════════════════════════════════════════════════════════
 // Multi-Tier Architecture:
-// Tier 1: Google Gemini 4 Hydrogen (Primary Generative Model)
+// Tier 1: Google Gemini 2.5 Flash (Primary Generative Model)
 // Tier 2: Google Gemini 3.1 Flash Lite (High-Throughput Quota Failover)
 // Tier 3: Deterministic Clinical Decision Support Engine (PPK Kemenkes, WHO, Fornas)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -11,10 +11,17 @@ import { GoogleGenAI, Type } from '@google/genai';
 
 export interface AiExecutionResult<T = any> {
   data: T;
-  source: 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite' | 'clinical_intelligence_engine';
+  source: 'gemini-2.5-flash' | 'gemini-3.1-flash-lite' | 'clinical_intelligence_engine';
   isFallback: boolean;
   status: 'SUCCESS' | 'WARNING';
   latencyMs: number;
+}
+
+export const GEMINI_PRIMARY_MODEL = 'gemini-2.5-flash';
+export const GEMINI_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
+
+export function getGeminiModelFallbackChain(preferredModel?: string): string[] {
+  return [...new Set([preferredModel || GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL])];
 }
 
 /**
@@ -76,10 +83,7 @@ export async function executeResilientGemini(params: {
     }
   });
 
-  const modelsToTry = [
-    params.preferredModel || 'gemini-4-hydrogen',
-    'gemini-3.1-flash-lite'
-  ];
+  const modelsToTry = getGeminiModelFallbackChain(params.preferredModel);
 
   for (const model of modelsToTry) {
     try {

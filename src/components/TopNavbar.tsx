@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MODULE_REGISTRY } from '../data/moduleRegistry';
+import { isModuleAvailableInMode, type OperatingMode } from '../data/operatingModes';
 import { useAuth } from '../contexts/AuthContext';
 import { useHospital } from '../contexts/HospitalContext';
+import { useToast } from '../contexts/ToastContext';
 import UserMenu from './UserMenu';
 import { 
   Activity, 
@@ -51,8 +53,10 @@ interface TopNavbarProps {
 export default function TopNavbar({ currentTime }: TopNavbarProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { hasAccess } = useAuth();
-  const { hospitalSettings } = useHospital();
+  const { hasAccess, isAdmin } = useAuth();
+  const { hospitalSettings, updateHospitalSettings } = useHospital();
+  const toast = useToast();
+  const operatingMode: OperatingMode = hospitalSettings.operatingMode === 'SIMRS' ? 'SIMRS' : 'SIMK';
 
   // State Management
   const [showMegaMenu, setShowMegaMenu] = useState(false);
@@ -74,13 +78,15 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
   // Filter modules based on user authorization
   const accessibleCategories = useMemo(() => {
     return MODULE_REGISTRY.map(cat => {
-      const allowedModules = cat.modules.filter(mod => hasAccess(mod.id));
+      const allowedModules = cat.modules.filter(mod =>
+        hasAccess(mod.id) && isModuleAvailableInMode(mod.id, operatingMode)
+      );
       return {
         ...cat,
         modules: allowedModules
       };
     }).filter(cat => cat.modules.length > 0);
-  }, [hasAccess]);
+  }, [hasAccess, operatingMode]);
 
   // Set default selected category tab if current is empty
   useEffect(() => {
@@ -118,10 +124,23 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
   const quickDirectLinks = [
     { label: 'Dashboard', path: '/dashboard', icon: LayoutGrid },
     { label: 'Rawat Jalan', path: '/modul/rawat-jalan', icon: Stethoscope },
+    { label: 'Alur Pasien', path: '/modul/patient-flow', icon: Activity },
     { label: 'IGD', path: '/modul/igd', icon: Flame },
     { label: 'Rawat Inap', path: '/modul/rawat-inap', icon: HeartPulse },
     { label: 'RME Pasien', path: '/modul/rekam-medis', icon: Activity }
   ];
+
+  const handleOperatingModeChange = async (mode: OperatingMode) => {
+    if (!isAdmin || mode === operatingMode) return;
+    try {
+      await updateHospitalSettings({ operatingMode: mode });
+      toast.success(`Mode ${mode} diaktifkan.`);
+      if (location.pathname.startsWith('/modul/')) navigate('/dashboard');
+    } catch (error) {
+      console.error('Could not update hospital operating mode:', error);
+      toast.error('Mode operasional gagal disimpan.');
+    }
+  };
 
   // Comprehensive Catalog of all AI & Intelligent Capabilities across MYITARU
   const ALL_AI_TOOLS = useMemo(() => [
@@ -439,6 +458,20 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                       <h3 className="text-xs font-bold text-white uppercase tracking-wider">Direktori Layanan & Modul RS</h3>
                       <p className="text-[11px] text-slate-400">Pilih departemen klinis, penunjang, atau modul manajemen</p>
                     </div>
+
+                    <label className="hidden sm:flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[10px] font-bold text-slate-300">
+                      <span>MODE</span>
+                      <select
+                        aria-label="Mode operasional fasilitas"
+                        value={operatingMode}
+                        disabled={!isAdmin}
+                        onChange={(event) => void handleOperatingModeChange(event.target.value as OperatingMode)}
+                        className="bg-transparent text-white outline-none disabled:cursor-default"
+                      >
+                        <option className="bg-slate-900" value="SIMK">SIMK · Klinik</option>
+                        <option className="bg-slate-900" value="SIMRS">SIMRS · Rumah Sakit</option>
+                      </select>
+                    </label>
                   </div>
 
                   {/* Filter inside Mega Menu */}
@@ -630,7 +663,10 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
         <div className="hidden lg:flex items-center gap-2 flex-1 justify-center max-w-2xl mx-auto">
           {/* Quick Direct Links (Paling Sering Digunakan) */}
           <nav className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-2xl border border-white/[0.07] backdrop-blur-md shrink-0">
-            {quickDirectLinks.map(link => {
+            {quickDirectLinks.filter(link =>
+              link.path === '/dashboard' ||
+              isModuleAvailableInMode(link.path.replace('/modul/', ''), operatingMode)
+            ).map(link => {
               const Icon = link.icon;
               const isActive = location.pathname === link.path;
               return (

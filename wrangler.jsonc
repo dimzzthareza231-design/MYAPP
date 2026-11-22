@@ -1,0 +1,55 @@
+// Dua Worker dari satu kode: `--env public` (web publik pasien) dan `--env core` (aplikasi inti SIMK/RME).
+// Keduanya berbagi satu database D1. Secret diisi dengan `wrangler secret put <NAMA> --env <public|core>`.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "myitaru",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "upload_source_maps": true,
+  "observability": { "enabled": true },
+  "alias": {
+    "firebase-admin/app": "./worker/stubs/firebase-admin.ts",
+    "firebase-admin/auth": "./worker/stubs/firebase-admin.ts",
+    "firebase-admin/firestore": "./worker/stubs/firebase-admin.ts",
+    "vite": "./worker/stubs/vite.ts"
+  },
+  "env": {
+    "public": {
+      "name": "myitaru-public",
+      "vars": {
+        "APP_TARGET": "public",
+        "CLOUDFLARE_WORKER": "1",
+        "NODE_ENV": "production",
+        "AUTH_MODE": "local",
+        "STORAGE_MODE": "d1"
+      },
+      "assets": {
+        "directory": "./dist/public",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"]
+      },
+      "d1_databases": [
+        // Ganti database_id dengan hasil `npx wrangler d1 create myitaru-db`.
+        { "binding": "DB", "database_name": "myitaru-db", "database_id": "80e76ffa-de80-4bfd-8863-30c640ab007f", "migrations_dir": "migrations" }
+      ]
+    },
+    "core": {
+      "name": "myitaru-core",
+      "vars": {
+        "APP_TARGET": "core",
+        "CLOUDFLARE_WORKER": "1",
+        "NODE_ENV": "production",
+        "AUTH_MODE": "local",
+        "STORAGE_MODE": "d1"
+      },
+      "assets": {
+        "directory": "./dist/core",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"]
+      },
+      "d1_databases": [
+        { "binding": "DB", "database_name": "myitaru-db", "database_id": "80e76ffa-de80-4bfd-8863-30c640ab007f", "migrations_dir": "migrations" }
+      ]
+    }
+  }
+}

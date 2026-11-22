@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
+import { signOut } from 'firebase/auth';
 import {
   Home,
   CalendarPlus,
@@ -82,23 +83,11 @@ const fadeSlideTransition = {
   ease: [0.22, 1, 0.36, 1] as const
 };
 
-interface DemoSample {
-  label: string;
-  no_rm: string;
-  tanggal_lahir: string;
-}
-
-const DEFAULT_DEMO_SAMPLES: DemoSample[] = [
-  { label: 'Ny. Siti Rahmawati (Poli Dalam)', no_rm: 'RM-260101-0001', tanggal_lahir: '1985-04-23' },
-  { label: 'Tn. Budi Santoso (Kardiologi)', no_rm: 'RM-260102-0002', tanggal_lahir: '1978-08-15' }
-];
-
 const PATIENT_TOKEN_KEY = 'myitaru_patient_token';
-const PATIENT_CACHE_KEY = 'myitaru_patient_cached_dossier';
 
 export const PatientMobileApp: React.FC = () => {
   const navigate = useNavigate();
-  const { signInWithGoogle, logout: authLogout, loading: authLoading } = useAuth();
+  const { signInWithGoogle, loading: authLoading } = useAuth();
 
   const poliklinikList = useMemo(() => getPublicPoliklinik(), []);
   const fallbackDoctors = useMemo(() => getPublicDoctors(), []);
@@ -111,14 +100,7 @@ export const PatientMobileApp: React.FC = () => {
     }
   });
 
-  const [dossier, setDossier] = useState<PatientDossierPayload | null>(() => {
-    try {
-      const cached = localStorage.getItem(PATIENT_CACHE_KEY);
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [dossier, setDossier] = useState<PatientDossierPayload | null>(null);
 
   const [authMode, setAuthMode] = useState<'rm_dob' | 'google'>('rm_dob');
   const [noRmInput, setNoRmInput] = useState('');
@@ -132,7 +114,6 @@ export const PatientMobileApp: React.FC = () => {
     displayName: string;
   } | null>(null);
 
-  const [demoSamples, setDemoSamples] = useState<DemoSample[]>(DEFAULT_DEMO_SAMPLES);
   const [doctors, setDoctors] = useState(fallbackDoctors);
 
   const [activeTab, setActiveTab] = useState<MobileTab>(() => {
@@ -211,13 +192,17 @@ export const PatientMobileApp: React.FC = () => {
     [notifications]
   );
 
-  // Fetch public catalog (doctors + quick demo patients)
+  // Fetch the public service catalog; patient credentials are never published.
   useEffect(() => {
+    try {
+      localStorage.removeItem('myitaru_patient_cached_dossier');
+    } catch (error) {
+      console.warn('Could not clear the legacy patient data cache:', error);
+    }
     fetch('/api/public/hospital-catalog')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.doctors && Array.isArray(data.doctors)) setDoctors(data.doctors);
-        if (data?.demoPatients && Array.isArray(data.demoPatients)) setDemoSamples(data.demoPatients);
       })
       .catch(() => {});
   }, []);
@@ -228,7 +213,6 @@ export const PatientMobileApp: React.FC = () => {
     setPendingGoogleUser(null);
     try {
       sessionStorage.setItem(PATIENT_TOKEN_KEY, newToken);
-      localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify(newDossier));
     } catch {
       // Ignore storage quota exceptions
     }
@@ -244,9 +228,6 @@ export const PatientMobileApp: React.FC = () => {
         const data = await res.json();
         if (data?.dossier) {
           setDossier(data.dossier);
-          try {
-            localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify(data.dossier));
-          } catch {}
         }
       }
     } catch {
@@ -265,7 +246,6 @@ export const PatientMobileApp: React.FC = () => {
         const data = await res.json();
         if (data?.dossier) {
           setDossier(data.dossier);
-          localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify(data.dossier));
           toast.success('Data antrean & medis diperbarui.');
         }
       } else if (res.status === 401 && navigator.onLine) {
@@ -419,7 +399,7 @@ export const PatientMobileApp: React.FC = () => {
 
     // Open live SSE push stream
     if (typeof EventSource !== 'undefined') {
-      eventSource = new EventSource(`/api/patient/notifications/stream?token=${encodeURIComponent(token)}`);
+      eventSource = new EventSource('/api/patient/notifications/stream');
       eventSource.onopen = () => {
         if (!cancelled) setSseConnected(true);
       };
@@ -650,9 +630,9 @@ export const PatientMobileApp: React.FC = () => {
     }
   };
 
-  const handleBindGoogleToRm = async (useDemo = false) => {
+  const handleBindGoogleToRm = async () => {
     if (!pendingGoogleUser) return;
-    if (!useDemo && (!noRmInput.trim() || !dobInput.trim())) {
+    if (!noRmInput.trim() || !dobInput.trim()) {
       toast.error('Masukkan No. RM dan Tanggal Lahir untuk menautkan akun Google.');
       return;
     }
@@ -665,9 +645,8 @@ export const PatientMobileApp: React.FC = () => {
         body: JSON.stringify({
           email: pendingGoogleUser.email,
           displayName: pendingGoogleUser.displayName,
-          useDemoSample: useDemo,
-          linkNoRm: useDemo ? undefined : noRmInput.trim(),
-          linkTanggalLahir: useDemo ? undefined : dobInput.trim()
+          linkNoRm: noRmInput.trim(),
+          linkTanggalLahir: dobInput.trim()
         })
       });
       const data = await res.json();
@@ -685,7 +664,20 @@ export const PatientMobileApp: React.FC = () => {
   };
 
   const handlePatientLogout = async () => {
-    await unregisterFcmForPatient(token, dossier?.patient?.no_rm);
+    try {
+      const response = await fetch('/api/patient/session', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!response.ok) throw new Error('Sesi pasien tidak dapat diakhiri di server.');
+      await unregisterFcmForPatient(token, dossier?.patient?.no_rm);
+      if (auth?.currentUser) await signOut(auth);
+    } catch {
+      toast.error('Sesi pasien tidak dapat diakhiri. Periksa koneksi dan coba kembali.');
+      return;
+    }
+
     setToken(null);
     setDossier(null);
     setPendingGoogleUser(null);
@@ -695,9 +687,10 @@ export const PatientMobileApp: React.FC = () => {
     seenNotifIdsRef.current.clear();
     try {
       sessionStorage.removeItem(PATIENT_TOKEN_KEY);
-      localStorage.removeItem(PATIENT_CACHE_KEY);
-      await authLogout();
-    } catch {}
+    } catch {
+      toast.error('Penyimpanan sesi lokal tidak dapat dibersihkan.');
+      return;
+    }
     toast.success('Anda telah keluar dari sesi pasien.');
   };
 
@@ -842,18 +835,10 @@ export const PatientMobileApp: React.FC = () => {
                   <button
                     type="button"
                     disabled={isVerifying}
-                    onClick={() => handleBindGoogleToRm(false)}
+                    onClick={handleBindGoogleToRm}
                     className="w-full py-3.5 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm cursor-pointer min-h-[48px]"
                   >
                     {isVerifying ? 'Menghubungkan...' : 'Hubungkan No. RM Saya'}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isVerifying}
-                    onClick={() => handleBindGoogleToRm(true)}
-                    className="w-full py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs cursor-pointer"
-                  >
-                    Atau Tautkan ke Profil Sampel Uji Coba (RM-260101-0001)
                   </button>
                 </div>
               </div>
@@ -922,33 +907,6 @@ export const PatientMobileApp: React.FC = () => {
                       {isVerifying ? 'Memverifikasi Identitas...' : 'Verifikasi & Masuk'}
                     </button>
 
-                    {/* Quick Demo Fill */}
-                    <div className="pt-4 border-t border-slate-200 space-y-2">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                        Isi Cepat Pasien Uji Coba:
-                      </p>
-                      <div className="space-y-1.5">
-                        {demoSamples.map((sample) => (
-                          <button
-                            key={sample.no_rm}
-                            type="button"
-                            onClick={() => {
-                              setNoRmInput(sample.no_rm);
-                              setDobInput(sample.tanggal_lahir);
-                            }}
-                            className="w-full text-left px-3.5 py-2.5 rounded-xl border border-slate-200 hover:border-[#0B3D91] hover:bg-blue-50/60 transition flex items-center justify-between gap-2 cursor-pointer"
-                          >
-                            <div>
-                              <p className="text-xs font-bold text-slate-800">{sample.label}</p>
-                              <p className="text-[11px] font-mono text-slate-500">
-                                {sample.no_rm} · {sample.tanggal_lahir}
-                              </p>
-                            </div>
-                            <span className="text-xs font-semibold text-[#0B3D91]">Pilih</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
                   </form>
                 ) : (
                   <div className="space-y-4 py-2">
@@ -1859,7 +1817,7 @@ export const PatientMobileApp: React.FC = () => {
                 {dossier.patient.no_rm} · {primaryQueue?.nomor_antrian || 'Terdaftar'}
               </p>
               <p className="text-xs text-slate-500 mt-2">
-                Pindai QR ini pada Anjungan Mandiri (APM) saat tiba di rumah sakit.
+                Pindai QR ini pada Anjungan Mandiri (APM) saat tiba di MYITARU.
               </p>
             </div>
             <button

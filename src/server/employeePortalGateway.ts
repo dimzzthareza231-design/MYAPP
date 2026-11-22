@@ -139,7 +139,7 @@ function mapPortalRole(div: DivisionDefinition): EmployeeUserRecord['portalRole'
 }
 
 export function registerEmployeePortalGateway(app: express.Application, deps: GatewayDependencies = {}) {
-  // Klinik Campus Reference Coordinate (MYITARU Medical Center - Jakarta)
+  // MYITARU Campus Reference Coordinate (Jakarta)
   const HOSPITAL_GEOFENCE = {
     name: 'Kampus Utama MYITARU Jakarta',
     lat: -6.229728,
@@ -823,8 +823,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (auth && auth.startsWith('Bearer ')) {
       return auth.slice(7).trim();
     }
-    const queryToken = req.query.token;
-    return typeof queryToken === 'string' && queryToken ? queryToken : null;
+    return null;
   }
 
   function requireGatewaySession(req: express.Request, res: express.Response): GatewaySession | null {
@@ -882,6 +881,14 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   // 3. AUTHENTICATION & MANDATORY MFA OTP
   // =========================================================================
   app.post('/api/gateway/auth/login', (req, res) => {
+    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
+      return res.status(503).json({
+        success: false,
+        code: 'EMPLOYEE_IDENTITY_NOT_CONFIGURED',
+        message: 'Integrasi identitas pegawai belum dikonfigurasi; autentikasi demo dinonaktifkan.'
+      });
+    }
+
     const { identifier, divisionId, authType, googleEmail, googleName, deviceInfo } = req.body || {};
 
     let user: EmployeeUserRecord | undefined;
@@ -1011,6 +1018,14 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   });
 
   app.post('/api/gateway/auth/verify-mfa', (req, res) => {
+    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
+      return res.status(503).json({
+        success: false,
+        code: 'EMPLOYEE_IDENTITY_NOT_CONFIGURED',
+        message: 'MFA pegawai belum dikonfigurasi; autentikasi demo dinonaktifkan.'
+      });
+    }
+
     const { challengeId, otp, deviceName } = req.body || {};
     const challenge = mfaChallenges.get(String(challengeId || ''));
 

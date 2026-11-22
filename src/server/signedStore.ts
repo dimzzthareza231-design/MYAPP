@@ -3,8 +3,12 @@ import crypto from 'crypto';
 // Token bertanda tangan HMAC yang membawa datanya sendiri, jadi tetap valid di instance serverless lain.
 // Map lokal tetap dipakai sebagai cache agar perubahan dalam satu instance (mis. konteks ABAC) bertahan.
 // SESSION_SECRET wajib diisi di produksi; fallback acak hanya berlaku selama satu proses (dev lokal).
-const secret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-const sign = (body: string) => crypto.createHmac('sha256', secret).update(body).digest('base64url');
+// Dihitung saat pertama dipakai: Cloudflare Workers melarang membuat nilai acak di global scope.
+let secret: string | undefined;
+const sign = (body: string) => {
+  secret ??= process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+  return crypto.createHmac('sha256', secret).update(body).digest('base64url');
+};
 
 /**
  * @param prefix awalan token (mis. 'pat_')

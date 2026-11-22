@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import type express from 'express';
 import { createSignedStore } from './signedStore';
+import { createSecurePatientQrToken, isSecurePatientQrConfigured } from './securePatientQr';
+import { hashQrToken } from './databaseAdapter';
 import { MASTER_POLIKLINIK, SEMUA_DOKTER } from '../data/seedData';
 import {
   generateAllPatientsWithResumes,
@@ -37,9 +39,21 @@ export interface ServerAppointmentRecord {
   tanggal: string;
   jam_praktek: string;
   nomor_antrian: string;
-  status: 'Menunggu' | 'Panggil' | 'Diperiksa' | 'Selesai' | 'Dibatalkan';
+  status: 'Menunggu' | 'Panggil' | 'Diperiksa' | 'Farmasi' | 'Kasir' | 'Selesai' | 'Batal' | 'Dibatalkan';
   tipe: 'Rawat Jalan' | 'IGD' | 'Konsultasi';
   created_at: string;
+  checked_in_at?: string;
+}
+
+export interface ServerQrTokenRecord {
+  id: string;
+  tokenHash: string;
+  subject: string;
+  kind: 'patient' | 'reservation' | 'document';
+  issuedAt: string;
+  expiresAt?: string;
+  issuedBy: string;
+  consumedAt?: string;
 }
 
 export interface ServerBedRecord {
@@ -167,6 +181,12 @@ function normalizeDob(val: string): string {
   return String(val || '').trim().slice(0, 10);
 }
 
+function isValidIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 function maskNik(nik: string): string {
   if (!nik || nik.length < 8) return '3171••••••••0001';
   return `${nik.slice(0, 6)}••••••${nik.slice(-4)}`;
@@ -191,6 +211,8 @@ export function registerPatientPortalRoutes(
     patientsStore: ServerPatientRecord[];
     appointmentsStore: ServerAppointmentRecord[];
     bedsStore: ServerBedRecord[];
+    qrTokensStore?: ServerQrTokenRecord[];
+    useDemoData?: boolean;
     createAuditLog?: (entry: {
       user: string;
       role: string;
@@ -205,18 +227,17 @@ export function registerPatientPortalRoutes(
   const { patientsStore, appointmentsStore, bedsStore, createAuditLog } = deps;
 
   // Lazy-seeded rich clinical records + lab/rad dataset
-  const fullClinicalPatients: PatientFullRecord[] = generateAllPatientsWithResumes();
-  const labRadDataset = generate50LabAndRadRequests();
+  const useDemoData = deps.useDemoData !== false;
+  const fullClinicalPatients: PatientFullRecord[] = useDemoData ? generateAllPatientsWithResumes() : [];
+  const labRadDataset = useDemoData ? generate50LabAndRadRequests() : [];
 
-  // Map email -> no_rm for Google-authenticated patients
-  const googlePatientLinks = new Map<string, string>([
-    ['dimzzthareza231@gmail.com', 'RM-260101-0001']
-  ]);
+  const googlePatientLinks = new Map<string, string>();
 
   // Sesi pasien = token bertanda tangan (stateless), tetap valid di semua instance serverless.
   const patientSessions = createSignedStore<PatientSession>('pat_', 'token', 12 * 60 * 60 * 1000);
 
   const doctorServedBoost = new Map<string, number>();
+  const patientSessionCookieName = 'myitaru_patient_session';
 
   // Real-time FCM tokens, notification inbox, dynamic lab reports, and SSE streams per No. RM
   const fcmTokensByRm = new Map<string, ServerFcmTokenRecord[]>();
@@ -227,9 +248,20 @@ export function registerPatientPortalRoutes(
   function resolveSessionFromReq(req: express.Request): PatientSession | undefined {
     const authHeader = req.headers.authorization || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    const queryToken = String(req.query.token || '').trim();
-    const token = bearer || queryToken;
-    return patientSessions.get(token);
+    const cookieToken = (req.headers.cookie || '')
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${patientSessionCookieName}=`))
+      ?.slice(patientSessionCookieName.length + 1);
+    return patientSessions.get(bearer || cookieToken || '');
+  }
+
+  function setPatientSessionCookie(res: express.Response, token: string, maxAgeSeconds = 12 * 60 * 60): void {
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    res.setHeader(
+      'Set-Cookie',
+      `${patientSessionCookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`,
+    );
   }
 
   async function dispatchPatientNotification(params: {
@@ -633,7 +665,20 @@ export function registerPatientPortalRoutes(
       const served = (doc.pasien_terlayani || 0) + boost;
       const quota = doc.kuota || 30;
       return {
-        ...doc,
+        id: doc.id,
+        nama: doc.nama,
+        spesialis: doc.spesialis,
+        subspesialis: doc.subspesialis,
+        poli: doc.poli,
+        poli_id: doc.poli_id,
+        penempatan: doc.penempatan,
+        jadwal: doc.jadwal,
+        hari: doc.hari,
+        jam: doc.jam,
+        shift: doc.shift,
+        ruangan: doc.ruangan,
+        status_jaga: doc.status_jaga,
+        status: doc.status,
         pasien_terlayani: served,
         kuota_tersisa: Math.max(0, quota - served)
       };
@@ -655,35 +700,12 @@ export function registerPatientPortalRoutes(
       };
     });
 
-    const demoPatients = [
-      {
-        label: 'Ny. Siti Rahmawati (Poli Penyakit Dalam)',
-        no_rm: 'RM-260101-0001',
-        tanggal_lahir: '1985-04-23'
-      },
-      {
-        label: 'Tn. Budi Santoso (Kardiologi & DM)',
-        no_rm: 'RM-260102-0002',
-        tanggal_lahir: '1978-08-15'
-      }
-    ];
-
-    const firstRich = fullClinicalPatients[0];
-    if (firstRich) {
-      demoPatients.push({
-        label: `${firstRich.nama} (Rekam Medis Lengkap)`,
-        no_rm: firstRich.no_rm,
-        tanggal_lahir: firstRich.tanggal_lahir
-      });
-    }
-
     res.json({
       hospitalName: 'MYITARU SIMK',
       emergencyHotline: '1-500-911',
       poliklinik: MASTER_POLIKLINIK,
       doctors,
       poliQueues,
-      demoPatients,
       updatedAt: new Date().toISOString()
     });
   });
@@ -788,6 +810,14 @@ export function registerPatientPortalRoutes(
 
   // 2. Patient Verification via No. RM + Tanggal Lahir
   app.post('/api/patient/verify', (req, res) => {
+    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
+      return res.status(503).json({
+        success: false,
+        code: 'PATIENT_IDENTITY_NOT_CONFIGURED',
+        message: 'Verifikasi pasien dinonaktifkan sampai faktor kepemilikan akun pasien dikonfigurasi.'
+      });
+    }
+
     try {
       const { no_rm, tanggal_lahir } = req.body || {};
       if (!no_rm || !tanggal_lahir) {
@@ -826,6 +856,7 @@ export function registerPatientPortalRoutes(
       }
 
       const session = issueSession(targetRm, 'rm_dob');
+      setPatientSessionCookie(res, session.token);
       const dossier = buildDossier(targetRm, 'rm_dob');
 
       createAuditLog?.({
@@ -854,8 +885,16 @@ export function registerPatientPortalRoutes(
 
   // 3. Google Sign-In Session & Account Linking for Mobile Patient App
   app.post('/api/patient/google-session', (req, res) => {
+    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
+      return res.status(503).json({
+        success: false,
+        code: 'PATIENT_IDENTITY_NOT_CONFIGURED',
+        message: 'Integrasi Firebase Identity pasien belum dikonfigurasi.'
+      });
+    }
+
     try {
-      const { email, displayName, linkNoRm, linkTanggalLahir, useDemoSample } = req.body || {};
+      const { email, displayName, linkNoRm, linkTanggalLahir } = req.body || {};
 
       if (!email || typeof email !== 'string') {
         return res.status(400).json({
@@ -884,8 +923,6 @@ export function registerPatientPortalRoutes(
           });
         }
         googlePatientLinks.set(normalizedEmail, targetRm);
-      } else if (useDemoSample && !googlePatientLinks.has(normalizedEmail)) {
-        googlePatientLinks.set(normalizedEmail, 'RM-260101-0001');
       }
 
       const linkedRm = googlePatientLinks.get(normalizedEmail);
@@ -901,6 +938,7 @@ export function registerPatientPortalRoutes(
       }
 
       const session = issueSession(linkedRm, 'google', normalizedEmail);
+      setPatientSessionCookie(res, session.token);
       const dossier = buildDossier(linkedRm, 'google', normalizedEmail);
 
       return res.json({
@@ -919,13 +957,22 @@ export function registerPatientPortalRoutes(
   });
 
   // 4. Refresh Verified Patient Dossier
-  app.get('/api/patient/dossier', (req, res) => {
+  app.delete('/api/patient/session', (req, res) => {
     const authHeader = req.headers.authorization || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    const queryToken = String(req.query.token || '').trim();
-    const token = bearer || queryToken;
+    const cookieToken = (req.headers.cookie || '')
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${patientSessionCookieName}=`))
+      ?.slice(patientSessionCookieName.length + 1);
+    const token = bearer || cookieToken || '';
+    if (token) patientSessions.delete(token);
+    setPatientSessionCookie(res, '', 0);
+    return res.status(204).end();
+  });
 
-    const session = patientSessions.get(token);
+  app.get('/api/patient/dossier', (req, res) => {
+    const session = resolveSessionFromReq(req);
     if (!session) {
       return res.status(401).json({
         success: false,
@@ -950,6 +997,9 @@ export function registerPatientPortalRoutes(
   // 5. Public & Mobile Patient Online Appointment Booking
   app.post('/api/patient/appointments', (req, res) => {
     try {
+      if (!isSecurePatientQrConfigured()) {
+        return res.status(503).json({ success: false, code: 'QR_SECRET_NOT_CONFIGURED' });
+      }
       const {
         nama,
         no_rm,
@@ -963,52 +1013,63 @@ export function registerPatientPortalRoutes(
         tanggal,
         jam_praktek,
         penjamin,
-        keluhan,
-        google_email
+        keluhan
       } = req.body || {};
 
-      if (!poli_nama || !dokter_nama) {
+      if (typeof poli_id !== 'string' || typeof dokter_id !== 'string' || !isValidIsoDate(tanggal)) {
         return res.status(400).json({
           success: false,
-          message: 'Poliklinik dan dokter tujuan wajib dipilih.'
+          message: 'Poliklinik, dokter, dan tanggal kunjungan yang valid wajib dipilih.'
         });
       }
 
-      let resolvedRm = no_rm ? normalizeRm(no_rm) : '';
-      let resolvedDob = normalizeDob(tanggal_lahir || '1992-05-14');
-      let resolvedName = String(nama || '').trim();
+      const poliObj = MASTER_POLIKLINIK.find((item) => item.id === poli_id);
+      const doctor = SEMUA_DOKTER.find((item) => item.id === dokter_id && item.poli_id === poli_id);
+      if (!poliObj || !doctor || (poli_nama && poli_nama !== poliObj.nama) || (dokter_nama && dokter_nama !== doctor.nama)) {
+        return res.status(400).json({ success: false, message: 'Dokter dan poliklinik tidak cocok dengan katalog layanan.' });
+      }
 
-      if (resolvedRm) {
-        const { core, rich } = findRichPatientByRm(resolvedRm);
-        if (core || rich) {
-          resolvedName = resolvedName || core?.nama || rich?.nama || 'Pasien Terdaftar';
-          resolvedDob = core?.tanggal_lahir || rich?.tanggal_lahir || resolvedDob;
-        } else {
-          // New patient entry using provided or generated RM
-          const newPatient: ServerPatientRecord = {
-            id: `p-${Date.now()}`,
-            no_rm: resolvedRm,
-            nik: String(nik || `3171${Math.floor(100000000000 + Math.random() * 899999999999)}`),
-            nama: resolvedName || 'Pasien Baru Online',
-            tanggal_lahir: resolvedDob,
-            jenis_kelamin: 'L',
-            alamat: 'Pendaftaran Online Portal MYITARU',
-            no_hp: String(no_hp || '081200000000'),
-            golongan_darah: 'O',
-            penjamin: String(penjamin || 'Umum / Mandiri'),
-            status: 'Rawat Jalan',
-            alergi: [],
-            riwayat_penyakit: keluhan ? [String(keluhan)] : [],
-            created_at: new Date().toISOString()
-          };
-          patientsStore.unshift(newPatient);
+      const targetDate = tanggal;
+      if (targetDate < new Date().toISOString().slice(0, 10)) {
+        return res.status(400).json({ success: false, message: 'Tanggal kunjungan tidak boleh berada di masa lalu.' });
+      }
+      const targetDateEnd = Date.parse(`${targetDate}T23:59:59.999Z`);
+      const bookingWindowMs = 365 * 24 * 60 * 60 * 1000;
+      if (!Number.isFinite(targetDateEnd) || targetDateEnd > Date.now() + bookingWindowMs) {
+        return res.status(400).json({ success: false, message: 'Pendaftaran hanya dapat dibuat hingga 1 tahun ke depan.' });
+      }
+      const served = (doctor.pasien_terlayani || 0) + (doctorServedBoost.get(doctor.id) || 0);
+      if (served >= (doctor.kuota || 30)) {
+        return res.status(409).json({ success: false, message: 'Kuota dokter untuk jadwal tersebut telah penuh.' });
+      }
+
+      const resolvedName = typeof nama === 'string' ? nama.trim() : '';
+      const normalizedRm = typeof no_rm === 'string' ? normalizeRm(no_rm) : '';
+      const normalizedDob = normalizeDob(tanggal_lahir || '');
+      const phone = typeof no_hp === 'string' ? no_hp.trim() : '';
+      const suppliedNik = typeof nik === 'string' ? nik.trim() : '';
+      if (resolvedName.length > 120 || phone.length > 24 ||
+          !/^[+0-9][0-9+\s().-]{7,23}$/.test(phone) ||
+          (suppliedNik && !/^\d{16}$/.test(suppliedNik)) ||
+          (typeof keluhan === 'string' && keluhan.length > 500)) {
+        return res.status(400).json({ success: false, message: 'Data pasien tidak valid atau melebihi batas panjang.' });
+      }
+
+      let resolvedRm = normalizedRm;
+      let patientName = resolvedName;
+      if (normalizedRm) {
+        const { core, rich } = findRichPatientByRm(normalizedRm);
+        const expectedDob = core?.tanggal_lahir || rich?.tanggal_lahir;
+        if (!expectedDob) {
+          return res.status(404).json({ success: false, message: 'No. RM tidak ditemukan; pasien baru tidak boleh memilih No. RM sendiri.' });
         }
+        if (!isValidIsoDate(normalizedDob) || !matchDob(expectedDob, normalizedDob)) {
+          return res.status(401).json({ success: false, message: 'No. RM dan tanggal lahir tidak cocok.' });
+        }
+        patientName = core?.nama || rich?.nama || 'Pasien Terdaftar';
       } else {
-        if (!resolvedName || !tanggal_lahir) {
-          return res.status(400).json({
-            success: false,
-            message: 'Untuk pasien baru, Nama Lengkap dan Tanggal Lahir wajib diisi.'
-          });
+        if (resolvedName.length < 2 || !isValidIsoDate(normalizedDob) || !phone) {
+          return res.status(400).json({ success: false, message: 'Nama, tanggal lahir valid, dan nomor telepon wajib untuk pasien baru.' });
         }
         const now = new Date();
         const yy = String(now.getFullYear()).slice(-2);
@@ -1016,62 +1077,60 @@ export function registerPatientPortalRoutes(
         const dd = String(now.getDate()).padStart(2, '0');
         const seq = String(patientsStore.length + 101).padStart(4, '0');
         resolvedRm = `RM-${yy}${mm}${dd}-${seq}`;
-
-        const newPatient: ServerPatientRecord = {
+        patientsStore.unshift({
           id: `p-${Date.now()}`,
           no_rm: resolvedRm,
-          nik: String(nik || `3171${Math.floor(100000000000 + Math.random() * 899999999999)}`),
+          nik: suppliedNik,
           nama: resolvedName,
-          tanggal_lahir: resolvedDob,
+          tanggal_lahir: normalizedDob,
           jenis_kelamin: 'L',
           alamat: 'Pendaftaran Online Portal MYITARU',
-          no_hp: String(no_hp || '081200000000'),
-          golongan_darah: 'O',
-          penjamin: String(penjamin || 'Umum / Mandiri'),
+          no_hp: phone,
+          golongan_darah: '',
+          penjamin: typeof penjamin === 'string' ? penjamin.slice(0, 80) : 'Umum / Mandiri',
           status: 'Rawat Jalan',
           alergi: [],
-          riwayat_penyakit: keluhan ? [String(keluhan)] : [],
+          riwayat_penyakit: [],
           created_at: new Date().toISOString()
-        };
-        patientsStore.unshift(newPatient);
+        });
       }
 
-      if (google_email && typeof google_email === 'string') {
-        googlePatientLinks.set(google_email.trim().toLowerCase(), resolvedRm);
-      }
-
-      const poliObj = MASTER_POLIKLINIK.find((p) => p.id === poli_id || p.nama === poli_nama);
-      const poliKode = poliObj?.kode || 'RJ';
+      const poliKode = poliObj.kode;
       const existingForPoli = appointmentsStore.filter((a) =>
         a.nomor_antrian.startsWith(`${poliKode}-`)
       ).length;
       const nomorAntrian = `${poliKode}-${String(existingForPoli + 2).padStart(3, '0')}`;
 
-      const targetDate = tanggal ? normalizeDob(tanggal) : new Date().toISOString().split('T')[0];
-
       const newApt: ServerAppointmentRecord = {
-        id: `apt-${Date.now()}`,
+        id: `apt-${crypto.randomUUID()}`,
         pasien_id: resolvedRm,
-        pasien_nama: resolvedName,
+        pasien_nama: patientName,
         no_rm: resolvedRm,
-        poli: String(poli_nama),
-        dokter: String(dokter_nama),
+        poli: poliObj.nama,
+        dokter: doctor.nama,
         tanggal: targetDate,
-        jam_praktek: String(jam_praktek || '08:00 - 13:00 WIB'),
+        jam_praktek: String(doctor.jam || jam_praktek || '08:00 - 13:00 WIB'),
         nomor_antrian: nomorAntrian,
         status: 'Menunggu',
         tipe: 'Rawat Jalan',
         created_at: new Date().toISOString()
       };
+      const qrValue = createSecurePatientQrToken(newApt.id, {
+        kind: 'reservation',
+        ttlMs: Math.max(60_000, targetDateEnd + 24 * 60 * 60 * 1000 - Date.now())
+      });
+      deps.qrTokensStore?.unshift({
+        id: hashQrToken(qrValue),
+        tokenHash: hashQrToken(qrValue),
+        subject: newApt.id,
+        kind: 'reservation',
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(targetDateEnd + 24 * 60 * 60 * 1000).toISOString(),
+        issuedBy: 'patient-portal'
+      });
       appointmentsStore.unshift(newApt);
 
-      if (dokter_id) {
-        doctorServedBoost.set(dokter_id, (doctorServedBoost.get(dokter_id) || 0) + 1);
-      }
-
-      const authMethod: 'rm_dob' | 'google' = google_email ? 'google' : 'rm_dob';
-      const session = issueSession(resolvedRm, authMethod, google_email);
-      const dossier = buildDossier(resolvedRm, authMethod, google_email);
+      doctorServedBoost.set(dokter_id, (doctorServedBoost.get(dokter_id) || 0) + 1);
 
       createAuditLog?.({
         user: resolvedName,
@@ -1080,7 +1139,7 @@ export function registerPatientPortalRoutes(
         module: 'Portal & App Pasien',
         ip: req.ip || '127.0.0.1',
         status: 'SUCCESS',
-        details: `Booking online ${nomorAntrian} (${poli_nama} · ${dokter_nama}) untuk No. RM ${resolvedRm}.`
+        details: `Booking online ${nomorAntrian} (${poliObj.nama} · ${doctor.nama}) untuk No. RM ${resolvedRm}.`
       });
 
       return res.status(201).json({
@@ -1088,17 +1147,15 @@ export function registerPatientPortalRoutes(
         message: 'Janji temu berhasil dibuat dan nomor antrean telah diterbitkan.',
         booking: {
           no_rm: resolvedRm,
-          tanggal_lahir: resolvedDob,
-          nama: resolvedName,
+          nama: patientName,
           nomor_antrian: nomorAntrian,
-          poli: poli_nama,
-          dokter: dokter_nama,
+          poli: poliObj.nama,
+          dokter: doctor.nama,
           tanggal: targetDate,
           jam_praktek: newApt.jam_praktek,
-          penjamin: penjamin || 'Umum / Mandiri'
-        },
-        token: session.token,
-        dossier
+          penjamin: typeof penjamin === 'string' ? penjamin.slice(0, 80) : 'Umum / Mandiri',
+          qr_value: qrValue
+        }
       });
     } catch (err: any) {
       return res.status(500).json({
