@@ -3,12 +3,14 @@ import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import appletConfig from '../../firebase-applet-config.json';
 
-const apiKey = import.meta.env.VITE_FIREBASE_API_KEY || appletConfig?.apiKey;
-const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || appletConfig?.authDomain;
-const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || appletConfig?.projectId;
-const storageBucket = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig?.storageBucket;
-const messagingSenderId = import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig?.messagingSenderId;
-const appId = import.meta.env.VITE_FIREBASE_APP_ID || appletConfig?.appId;
+const configuredApiKey = import.meta.env.VITE_FIREBASE_API_KEY?.trim();
+export const isLocalAuthMode = import.meta.env.VITE_AUTH_MODE === 'local' || !configuredApiKey;
+const apiKey = isLocalAuthMode ? undefined : configuredApiKey || appletConfig?.apiKey;
+const authDomain = isLocalAuthMode ? undefined : import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || appletConfig?.authDomain;
+const projectId = isLocalAuthMode ? undefined : import.meta.env.VITE_FIREBASE_PROJECT_ID || appletConfig?.projectId;
+const storageBucket = isLocalAuthMode ? undefined : import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig?.storageBucket;
+const messagingSenderId = isLocalAuthMode ? undefined : import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig?.messagingSenderId;
+const appId = isLocalAuthMode ? undefined : import.meta.env.VITE_FIREBASE_APP_ID || appletConfig?.appId;
 const firestoreDatabaseId = appletConfig?.firestoreDatabaseId;
 
 const firebaseConfig = {
@@ -21,7 +23,7 @@ const firebaseConfig = {
 };
 
 // Only initialize if config exists to prevent app crash
-export const isFirebaseConfigured = !!(firebaseConfig.apiKey && firebaseConfig.projectId);
+export const isFirebaseConfigured = !isLocalAuthMode && !!(firebaseConfig.apiKey && firebaseConfig.projectId);
 
 const app = isFirebaseConfigured ? (getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0]) : (null as any);
 export const auth = isFirebaseConfigured ? getAuth(app) : (null as any);

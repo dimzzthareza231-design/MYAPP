@@ -213,7 +213,7 @@ function DicomViewerTab() {
         </div>
 
         <div className="absolute top-4 right-4 text-[11px] font-mono text-emerald-400 text-right space-y-0.5">
-          <div>Klinik MYITARU RADIOLOGY</div>
+          <div>MYITARU RADIOLOGY</div>
           <div>ORTHANC PACS SERVER</div>
           <div>FOV: 350mm</div>
           <div>WL: 40 / WW: 400</div>

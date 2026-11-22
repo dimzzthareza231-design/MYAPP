@@ -1,11 +1,12 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { useHospital } from '../../contexts/HospitalContext';
 import { 
-  Save, Image as ImageIcon, Building, Phone, Mail, Globe, MapPin, 
-  Award, Trash2, ShieldCheck, UserCheck, Eye, RefreshCw, FileText, CheckCircle2
+  Save, Image as ImageIcon, Building, Phone, Mail, Globe, MapPin,
+  Award, ShieldCheck, UserCheck, Eye, RefreshCw, FileText, CheckCircle2
 } from 'lucide-react';
 import { useToast } from '../../contexts/ToastContext';
 import { DEFAULT_HOSPITAL_INFO } from '../../types/document';
+import { OFFICIAL_LOGO_URL } from '../Common/BrandLogo';
 
 export function PengaturanRS() {
   const { hospitalSettings, updateHospitalSettings } = useHospital();
@@ -33,37 +34,9 @@ export function PengaturanRS() {
     faxNumber: hospitalSettings.faxNumber || DEFAULT_HOSPITAL_INFO.faxNumber || '(021) 56958724',
   });
 
-  const [logoPreview, setLogoPreview] = useState<string | null>(hospitalSettings.logoUrl || null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        toast.error('Ukuran file logo maksimal 2MB');
-        return;
-      }
-      
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogoPreview(reader.result as string);
-        toast.success('Logo berhasil dimuat!');
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleRemoveLogo = () => {
-    setLogoPreview(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-    toast.info('Logo dihapus');
   };
 
   const handleResetToDefault = () => {
@@ -92,7 +65,7 @@ export function PengaturanRS() {
   const handleSave = () => {
     updateHospitalSettings({
       ...formData,
-      logoUrl: logoPreview || ''
+      logoUrl: OFFICIAL_LOGO_URL
     });
     toast.success('Pengaturan profil & legalitas Klinik berhasil disimpan ke sistem');
   };
@@ -166,47 +139,14 @@ export function PengaturanRS() {
               <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center">
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-4 w-full flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
                   <ImageIcon className="w-4 h-4 text-blue-500" />
-                  Logo Resmi Klinik
+                  Logo Resmi MYITARU
                 </h3>
                 
-                <div className="w-44 h-44 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center bg-slate-50 dark:bg-slate-900/50 mb-4 overflow-hidden relative group">
-                  {logoPreview ? (
-                    <>
-                      <img src={logoPreview} alt="Logo Klinik" className="w-full h-full object-contain p-2" />
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                        <button 
-                          onClick={handleRemoveLogo}
-                          className="p-2.5 bg-rose-600 text-white rounded-full hover:bg-rose-700 transition"
-                          title="Hapus Logo"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center p-3 text-center">
-                      <img src="/logo-myitaru.png" alt="Logo Default MYITARU" className="w-24 h-24 rounded-2xl object-cover shadow-sm mb-2" />
-                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Logo Standar MYITARU</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, SVG (Max 2MB) untuk ubah</p>
-                    </div>
-                  )}
+                <div className="w-44 h-44 rounded-2xl border border-slate-300 dark:border-slate-600 flex items-center justify-center bg-white mb-4 overflow-hidden">
+                  <img src={OFFICIAL_LOGO_URL} alt="Logo MYITARU" className="w-full h-full object-contain p-2" />
                 </div>
-                
-                <input 
-                  type="file" 
-                  ref={fileInputRef}
-                  accept="image/png, image/jpeg, image/svg+xml"
-                  onChange={handleLogoUpload}
-                  className="hidden" 
-                />
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                >
-                  {logoPreview ? 'Ganti Logo Klinik' : 'Upload File Logo'}
-                </button>
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 text-center">
-                  Logo akan otomatis disematkan pada seluruh cetakan dokumen, kwitansi, dan SEP.
+                  Logo MYITARU ini digunakan konsisten pada seluruh aplikasi dan dokumen.
                 </p>
               </div>
             </div>
@@ -517,13 +457,7 @@ export function PengaturanRS() {
                   {/* Official Header */}
                   <div className="flex items-center gap-5 pb-4 border-b-2 border-slate-900">
                     <div className="w-20 h-20 shrink-0 flex items-center justify-center">
-                      {logoPreview ? (
-                        <img src={logoPreview} alt="Logo Klinik" className="max-w-full max-h-full object-contain" />
-                      ) : (
-                        <div className="w-16 h-16 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-2xl">
-                          {formData.name.charAt(0) || 'H'}
-                        </div>
-                      )}
+                      <img src={OFFICIAL_LOGO_URL} alt="Logo MYITARU" className="max-w-full max-h-full object-contain" />
                     </div>
 
                     <div className="flex-1 text-center pr-10">

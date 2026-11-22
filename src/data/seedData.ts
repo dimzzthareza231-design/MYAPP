@@ -6,6 +6,7 @@ import {
   generate50SurgeryPatients,
   generate50LabAndRadRequests
 } from './patientPelayananData';
+import { DATA_DOKTER_JAGA_LENGKAP } from './dataDokterJagaLengkap';
 
 export interface PoliklinikItem {
   id: string;
@@ -320,289 +321,31 @@ const STREETS = ['Jl. Sudirman', 'Jl. Thamrin', 'Jl. Gatot Subroto', 'Jl. Melawa
 // 1. DATA PASIEN LENGKAP DENGAN RESUME MEDIS & PROFIL KLINIS 100+ PASIEN
 export const PASIEN = generateAllPatientsWithResumes();
 
-// 2. DATA DOKTER LENGKAP DENGAN SELURUH PELAYANAN Klinik & JADWAL REALISTIS
-export const SEMUA_DOKTER: Doctor[] = MASTER_POLIKLINIK.flatMap((poli, idx) => {
-  // Create 2 specialized doctors per poliklinik with realistic hospital shift patterns
-  return [1, 2].map(docNum => {
-    const docIdx = idx * 2 + docNum;
-    const fName = FIRST_NAMES[docIdx % FIRST_NAMES.length];
-    const lName = LAST_NAMES[(docIdx * 3) % LAST_NAMES.length];
-    
-    let specCode = '';
-    let subsp = '';
-    let penempatan = 'Poli';
-    let peran = 'Dokter Spesialis DPJP';
-    let roomNumber = `R. ${100 + idx * 2 + docNum}`;
-    let quota = 30;
-    let days = '';
-    let hours = '';
-    let shiftName = '';
-    let statusJaga = 'Sedang Berpraktik';
-
-    if (poli.kode === 'UMM') {
-      specCode = 'Dokter Umum Layanan Primer';
-      days = docNum === 1 ? 'Senin - Jumat' : 'Senin - Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 45;
-      roomNumber = 'R. 101 Poli Umum';
-    } else if (poli.kode === 'IGD') {
-      specCode = docNum === 1 ? 'Sp.EM (Spesialis Emergensi Medik)' : 'Dokter Umum ACLS/ATLS Senior';
-      penempatan = 'IGD, Triase, Resusitasi';
-      peran = docNum === 1 ? 'Kepala Jaga & Konsulen IGD' : 'Dokter Jaga Resusitasi IGD';
-      days = 'Setiap Hari (24 Jam 3 Shift Rotasi)';
-      hours = docNum === 1 ? '07:00 - 14:00 WIB' : '14:00 - 21:00 WIB';
-      shiftName = docNum === 1 ? 'Shift Pagi (07:00 - 14:00)' : 'Shift Siang (14:00 - 21:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 50;
-      roomNumber = 'Ruang Resusitasi IGD';
-    } else if (poli.kode === 'OBG') {
-      specCode = 'Sp.OG (Obstetri & Ginekologi)';
-      subsp = docNum === 1 ? 'Fetomaternal & USG 4D' : 'Onkologi Ginekologi & Fertilitas';
-      penempatan = 'Poli, Rawat Inap, Operasi (VK PONEK)';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 30;
-      roomNumber = 'R. 201 Poli Kandungan';
-    } else if (poli.kode === 'ANK') {
-      specCode = 'Sp.A (Pediatri & Tumbuh Kembang)';
-      subsp = docNum === 1 ? 'Pediatri Sosial & Imunisasi' : 'Infeksi Tropik Anak';
-      penempatan = 'Poli, Rawat Inap (Bangsal Sakura), Perina';
-      days = docNum === 1 ? 'Senin - Jumat' : 'Senin - Kamis';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 35;
-      roomNumber = 'R. 203 Poli Anak Ramah';
-    } else if (poli.kode === 'BDH') {
-      specCode = 'Sp.B (Bedah Umum & Digestif)';
-      penempatan = 'Poli, Operasi (OK Sentral), Rawat Inap';
-      peran = 'Operator Bedah & DPJP';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB (Poli) & Cito OK' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Tindakan OK';
-      quota = 25;
-      roomNumber = 'R. 108 Poli Bedah';
-    } else if (poli.kode === 'JNT') {
-      specCode = 'Sp.JP, FIHA (Kardiologi & Vaskular)';
-      subsp = 'Intervensi Kardiovaskular & Echocardiography';
-      penempatan = 'Poli, ICU/ICCU, Rawat Inap';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 25;
-      roomNumber = 'R. 205 Poli Jantung (Echo)';
-    } else if (poli.kode === 'SRF') {
-      specCode = 'Sp.N (Saraf / Neurologi)';
-      subsp = 'Neurovaskular (Stroke) & EEG';
-      penempatan = 'Poli, Unit Stroke, Rawat Inap';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 25;
-      roomNumber = 'R. 207 Poli Saraf';
-    } else if (poli.kode === 'MAT') {
-      specCode = 'Sp.M (Mata / Oftalmologi)';
-      subsp = 'Katarak, Bedah Refraktif & Glaukoma';
-      penempatan = 'Poli, Kamar Operasi Mata';
-      days = docNum === 1 ? 'Senin - Kamis' : 'Rabu - Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 30;
-      roomNumber = 'R. 105 Poli Mata';
-    } else if (poli.kode === 'THT') {
-      specCode = 'Sp.THT-BKL (Telinga Hidung Tenggorok)';
-      penempatan = 'Poli, Kamar Operasi';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 30;
-      roomNumber = 'R. 106 Poli THT-KL';
-    } else if (poli.kode === 'KLT') {
-      specCode = 'Sp.DVE (Dermatologi & Venereologi)';
-      penempatan = 'Poli';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 30;
-      roomNumber = 'R. 209 Poli Kulit & Kelamin';
-    } else if (poli.kode === 'PRU') {
-      specCode = 'Sp.P, FAPSR (Pulmonologi & Paru)';
-      penempatan = 'Poli, TB DOTS, Rawat Inap';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 30;
-      roomNumber = 'R. 111 Poli Paru';
-    } else if (poli.kode === 'JWA') {
-      specCode = 'Sp.KJ (Psikiatri / Kesehatan Jiwa)';
-      penempatan = 'Poli, Konseling';
-      days = docNum === 1 ? 'Senin - Kamis' : 'Selasa - Jumat';
-      hours = docNum === 1 ? '09:00 - 13:30 WIB' : '14:00 - 18:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 20;
-      roomNumber = 'R. 301 Ruang Konseling Jiwa';
-    } else if (poli.kode === 'URL') {
-      specCode = 'Sp.U (Urologi & Ginjal Saluran Kemih)';
-      penempatan = 'Poli, ESWL, Operasi';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 25;
-      roomNumber = 'R. 114 Poli Urologi';
-    } else if (poli.kode === 'ORT') {
-      specCode = 'Sp.OT (Orthopedi & Traumatologi)';
-      subsp = 'Sendi, Tulang & Rekonstruksi';
-      penempatan = 'Poli, Kamar Operasi (OK 2), Rawat Inap';
-      days = docNum === 1 ? 'Senin - Kamis' : 'Rabu - Sabtu';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Tindakan OK';
-      quota = 25;
-      roomNumber = 'R. 112 Poli Orthopedi';
-    } else if (poli.kode === 'GIG') {
-      specCode = docNum === 1 ? 'Sp.BM (Bedah Mulut & Maksilofasial)' : 'Sp.KG (Konservasi Gigi & Estetika)';
-      penempatan = 'Poli Gigi Spesialis';
-      days = docNum === 1 ? 'Senin - Jumat' : 'Selasa - Sabtu';
-      hours = docNum === 1 ? '08:00 - 13:00 WIB' : '13:00 - 18:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Sesi Berikutnya';
-      quota = 20;
-      roomNumber = 'Dental Center Unit 1-2';
-    } else if (poli.kode === 'PDL') {
-      specCode = 'Sp.PD, FINASIM (Penyakit Dalam)';
-      subsp = docNum === 1 ? 'Gastroenterohepatologi & Endoskopi' : 'Ginjal Hipertensi & Diabetes';
-      penempatan = 'Poli, Rawat Inap (DPJP), Endoskopi';
-      days = docNum === 1 ? 'Senin - Kamis' : 'Senin - Jumat';
-      hours = docNum === 1 ? '08:00 - 12:30 WIB (Poli) & Visite Pagi' : '13:00 - 17:00 WIB';
-      shiftName = docNum === 1 ? 'Sesi 1 Pagi (08:00 - 12:30)' : 'Sesi 2 Siang (13:00 - 17:00)';
-      statusJaga = docNum === 1 ? 'Sedang Berpraktik' : 'Visite Bangsal';
-      quota = 40;
-      roomNumber = 'R. 102 Poli Penyakit Dalam';
-    } else if (poli.kode === 'ONK') {
-      specCode = 'Sp.PD-KHOM (Hematologi & Onkologi Medik)';
-      penempatan = 'Poli Kanker, Kemoterapi Center';
-      days = docNum === 1 ? 'Senin, Rabu, Jumat' : 'Selasa, Kamis, Sabtu';
-      hours = '08:30 - 13:00 WIB';
-      shiftName = 'Sesi 1 Pagi (08:00 - 12:30)';
-      statusJaga = 'Sedang Berpraktik';
-      quota = 20;
-      roomNumber = 'R. 305 Pusat Onkologi';
-    } else if (poli.kode === 'GRT') {
-      specCode = 'Sp.PD-KGer (Geriatri & Multimorbiditas)';
-      penempatan = 'Poli Geriatri';
-      days = 'Selasa, Kamis, Sabtu';
-      hours = '08:00 - 12:30 WIB';
-      shiftName = 'Sesi 1 Pagi (08:00 - 12:30)';
-      statusJaga = 'Sedang Berpraktik';
-      quota = 20;
-      roomNumber = 'R. 115 Klinik Geriatri';
-    } else if (poli.kode === 'EDK') {
-      specCode = 'Sp.PD-KEMD (Endokrin, Metabolik & Diabetes)';
-      penempatan = 'Poli Endokrin';
-      days = 'Senin, Rabu, Jumat';
-      hours = '08:00 - 12:30 WIB';
-      shiftName = 'Sesi 1 Pagi (08:00 - 12:30)';
-      statusJaga = 'Sedang Berpraktik';
-      quota = 25;
-      roomNumber = 'R. 210 Poli Endokrin';
-    } else if (poli.kode === 'FTM') {
-      specCode = 'Sp.OG-Subsp.KFM (Fetomaternal Risiko Tinggi)';
-      penempatan = 'Poli Fetomaternal, USG Doppler';
-      days = 'Senin, Rabu, Kamis';
-      hours = '08:30 - 13:00 WIB';
-      shiftName = 'Sesi 1 Pagi (08:00 - 12:30)';
-      statusJaga = 'Sedang Berpraktik';
-      quota = 15;
-      roomNumber = 'Fetomaternal Center Lt. 2';
-    } else if (poli.kode === 'RHB') {
-      specCode = 'Sp.KFR (Kedokteran Fisik & Rehabilitasi)';
-      penempatan = 'Poli Rehab Medik, Fisioterapi';
-      days = 'Senin - Jumat';
-      hours = '08:00 - 14:00 WIB';
-      shiftName = 'Sesi 1 Pagi (08:00 - 12:30)';
-      statusJaga = 'Sedang Berpraktik';
-      quota = 35;
-      roomNumber = 'Gedung Rehab Medik Lt. 1';
-    } else if (poli.kode === 'GZI') {
-      specCode = 'Sp.GK (Gizi Klinik & Nutrisi Pasien)';
-      penempatan = 'Poli Gizi, Konsultasi Diet';
-      days = 'Senin - Kamis';
-      hours = '08:30 - 13:30 WIB';
-      shiftName = 'Sesi 1 Pagi (08:00 - 12:30)';
-      statusJaga = 'Sedang Berpraktik';
-      quota = 25;
-      roomNumber = 'R. 117 Poli Gizi';
-    } else if (poli.kode === 'NYR') {
-      specCode = 'Sp.An-TI, FIPM (Manajemen Nyeri Intervensi)';
-      penempatan = 'Pain Clinic, Anestesi, ICU';
-      days = 'Selasa, Kamis, Sabtu';
-      hours = '08:00 - 13:00 WIB';
-      shiftName = 'Sesi 1 Pagi (08:00 - 12:30)';
-      statusJaga = 'Sedang Berpraktik';
-      quota = 20;
-      roomNumber = 'Pain Center Lt. 2 (R. 215)';
-    } else if (poli.kode === 'MCU') {
-      specCode = 'Sp.Ok (Kedokteran Okupasi & Medical Check Up)';
-      penempatan = 'Pusat MCU Terpadu';
-      days = 'Senin - Sabtu';
-      hours = '07:30 - 14:30 WIB';
-      shiftName = 'Sesi 1 Pagi (08:00 - 12:30)';
-      statusJaga = 'Sedang Berpraktik';
-      quota = 50;
-      roomNumber = 'Gedung MCU Utama Lt. 1';
-    } else {
-      specCode = 'Dokter Spesialis';
-      days = 'Senin - Jumat';
-      hours = '08:00 - 14:00 WIB';
-      shiftName = 'Pagi';
-      statusJaga = 'Sedang Berpraktik';
-    }
-
-    const doctorName = poli.kode === 'GIG' 
-      ? `drg. ${fName} ${lName}, ${specCode}`
-      : `dr. ${fName} ${lName}, ${specCode}`;
-
-    const served = statusJaga === 'Sedang Berpraktik' ? Math.floor(quota * 0.45) : (statusJaga === 'Tindakan OK' ? 3 : 0);
-
-    return {
-      id: `DOC-${poli.kode}-${docNum}`,
-      nip: `198${(docIdx % 9) + 1}0${((docIdx * 3) % 12) + 1}1520100${docIdx}`,
-      sip: `SIP/${String(100 + docIdx)}/${poli.kode}/2024`,
-      str: `STR-310118${docIdx}00${docIdx}`,
-      nama: doctorName,
-      jabatan: peran,
-      spesialis: specCode,
-      subspesialis: subsp,
-      poli: poli.nama,
-      poli_id: poli.id,
-      penempatan: penempatan,
-      jadwal: `${days} (${hours})`,
-      hari: days,
-      jam: hours,
-      shift: shiftName,
-      ruangan: roomNumber,
-      kuota: quota,
-      pasien_terlayani: served,
-      status_jaga: statusJaga,
-      kontak: `0812-3456-7${String(100 + docIdx).padStart(3, '0')}`,
-      email: `${fName.toLowerCase()}.${lName.toLowerCase()}@myitaru.klinik`,
-      status: 'Aktif'
-    };
-  });
-});
+// 2. MASTER DOKTER DARI PAKET ASET MYITARU
+export const SEMUA_DOKTER: Doctor[] = DATA_DOKTER_JAGA_LENGKAP.map((record) => ({
+  id: record.id,
+  nip: record.nip,
+  sip: record.sip,
+  str: record.str,
+  nama: record.nama,
+  spesialis: record.spesialis || record.spesialisasi,
+  subspesialis: record.subspesialis,
+  poli: record.poli_nama || record.unit_tugas,
+  poli_id: record.poli_id || 'POL-01',
+  penempatan: record.penempatan || record.unit_tugas,
+  jabatan: record.peran,
+  jadwal: `${record.hari_praktik} - ${record.jam_praktik}`,
+  hari: record.hari_praktik,
+  jam: record.jam_praktik,
+  shift: record.shift,
+  ruangan: record.ruangan,
+  kuota: record.kuota_pasien,
+  pasien_terlayani: record.pasien_terlayani,
+  status_jaga: record.status_kehadiran,
+  kontak: record.kontak_darurat,
+  email: record.email,
+  status: 'Aktif'
+}));
 
 // 3. DATA PERAWAT LENGKAP & SINKRON
 export const SEMUA_PERAWAT: Nurse[] = MASTER_POLIKLINIK.flatMap((poli, idx) => {

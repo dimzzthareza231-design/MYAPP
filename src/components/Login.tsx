@@ -1,33 +1,114 @@
-import React, { useState } from 'react';
-import { Eye, EyeOff, LogIn, User as UserIcon, Lock, Sparkles, ShieldCheck, Stethoscope } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import {
+  AlertCircle,
+  ArrowRight,
+  Building2,
+  Eye,
+  EyeOff,
+  FileSpreadsheet,
+  KeyRound,
+  LogIn,
+  Lock,
+  Pill,
+  Receipt,
+  Server,
+  ShieldCheck,
+  Stethoscope,
+  User as UserIcon,
+  UserCheck
+} from 'lucide-react';
 import toast from 'react-hot-toast';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { useHospital } from '../contexts/HospitalContext';
-import { CloudflareTurnstile } from './Common/CloudflareTurnstile';
+import { isFirebaseConfigured, isLocalAuthMode } from '../lib/firebase';
 import { BrandLogo } from './Common/BrandLogo';
 
+const ROLE_CARDS: {
+  roleId: string;
+  loginIdentifier: string;
+  title: string;
+  subtitle: string;
+  badgeColor: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  {
+    roleId: 'admin',
+    loginIdentifier: 'admin',
+    title: 'Admin / IT SIMK-SIMRS',
+    subtitle: 'Pengelolaan konfigurasi, pengguna, dan operasional',
+    badgeColor: 'bg-slate-800 text-white',
+    icon: ShieldCheck
+  },
+  {
+    roleId: 'dokter',
+    loginIdentifier: 'dokter',
+    title: 'Dokter / DPJP',
+    subtitle: 'CPPT SOAP, e-Resep, dan order pemeriksaan',
+    badgeColor: 'bg-blue-600 text-white',
+    icon: Stethoscope
+  },
+  {
+    roleId: 'perawat',
+    loginIdentifier: 'perawat',
+    title: 'Perawat / Triase',
+    subtitle: 'Asesmen awal, tanda vital, triase IGD dan poli',
+    badgeColor: 'bg-teal-600 text-white',
+    icon: UserCheck
+  },
+  {
+    roleId: 'rekam_medis',
+    loginIdentifier: 'rmik',
+    title: 'Perekam Medis (RMIK)',
+    subtitle: 'Registrasi, rekam medis, dan audit dokumentasi',
+    badgeColor: 'bg-indigo-600 text-white',
+    icon: FileSpreadsheet
+  },
+  {
+    roleId: 'apoteker',
+    loginIdentifier: 'apoteker',
+    title: 'Apoteker / Farmasi',
+    subtitle: 'Verifikasi resep, stok, dan penyerahan obat',
+    badgeColor: 'bg-emerald-600 text-white',
+    icon: Pill
+  },
+  {
+    roleId: 'kasir',
+    loginIdentifier: 'kasir',
+    title: 'Kasir & Klaim JKN',
+    subtitle: 'Billing pasien, kuitansi, dan verifikasi penjamin',
+    badgeColor: 'bg-amber-600 text-white',
+    icon: Receipt
+  }
+];
+
 export function Login({ embedded = false }: { embedded?: boolean }) {
-  const { login, loading } = useAuth();
+  const {
+    login,
+    requestPasswordReset,
+    signInWithGoogle,
+    loading,
+    mfaFlow,
+    completeMfa,
+    completeMfaEnrollment,
+    cancelMfa
+  } = useAuth();
   const { hospitalSettings } = useHospital();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Cloudflare Turnstile State
-  const [turnstileEnabled] = useState(false); // Forced to false to hide testing watermark
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const usernameInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage('');
 
     if (!username.trim() || !password.trim()) {
-      toast.error('Username dan password wajib diisi');
-      return;
-    }
-
-    if (turnstileEnabled && !turnstileToken) {
-      toast.error('Harap selesaikan verifikasi Cloudflare Turnstile terlebih dahulu');
+      toast.error('Email pegawai dan kata sandi wajib diisi');
       return;
     }
 
@@ -39,11 +120,87 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
         toast.success(result.message);
         setUsername('');
         setPassword('');
+      } else if (result.mfaFlow) {
+        setPassword('');
+        toast(result.message);
       } else {
+        setErrorMessage(result.message);
         toast.error(result.message);
       }
     } catch (err: any) {
-      toast.error(err?.message || 'Gagal masuk');
+      const message = err?.message || 'Gagal masuk';
+      setErrorMessage(message);
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setErrorMessage('');
+    setIsLoading(true);
+    try {
+      const result = await signInWithGoogle();
+      if (result.success) {
+        toast.success(result.message);
+      } else if (!result.isCancelled) {
+        setErrorMessage(result.message);
+        toast.error(result.message);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaFlow) return;
+
+    setIsLoading(true);
+    try {
+      const result = mfaFlow.type === 'enrollment'
+        ? await completeMfaEnrollment(mfaCode)
+        : await completeMfa(mfaCode);
+      if (result.success) {
+        toast.success(result.message);
+        setMfaCode('');
+        setUsername('');
+        setPassword('');
+      } else if ('reauthenticationRequired' in result && result.reauthenticationRequired) {
+        toast(result.message);
+        setMfaCode('');
+      } else {
+        toast.error(result.message);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!username.trim()) {
+      toast.error('Masukkan email pegawai terlebih dahulu.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await requestPasswordReset(username);
+      if (result.success) toast.success(result.message);
+      else toast.error(result.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancelMfa = async () => {
+    setIsLoading(true);
+    try {
+      await cancelMfa();
+      setMfaCode('');
+      toast('Login dibatalkan. Silakan mulai kembali.');
+    } catch (error: any) {
+      toast.error(error?.message || 'Sesi tidak dapat dibersihkan.');
     } finally {
       setIsLoading(false);
     }
@@ -69,21 +226,92 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
         </p>
       </div>
 
-        {/* Login Google hanya tersedia di aplikasi pasien (web publik); staf masuk dengan akun pegawai. */}
-        {/* Form Login */}
+      {errorMessage && !mfaFlow && (
+        <div
+          role="alert"
+          className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
+        {mfaFlow ? (
+          <div className="space-y-4">
+            {mfaFlow.type === 'enrollment' ? (
+              <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 p-4 text-center space-y-3">
+                <p className="text-sm font-bold text-slate-800 dark:text-white">Aktifkan verifikasi dua langkah</p>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Pindai QR dengan aplikasi autentikator TOTP. Simpan kunci manual dengan aman jika pemindaian tidak tersedia.
+                </p>
+                <div className="inline-flex rounded-lg bg-white p-3">
+                  <QRCodeSVG value={mfaFlow.qrCodeUrl} size={160} />
+                </div>
+                <div className="text-left">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Kunci manual</label>
+                  <code className="block select-all break-all rounded-lg bg-white dark:bg-slate-900 p-2 text-xs text-slate-800 dark:text-slate-200">
+                    {mfaFlow.secretKey}
+                  </code>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 p-4 text-center">
+                <KeyRound className="w-6 h-6 mx-auto mb-2 text-blue-700 dark:text-blue-300" />
+                <p className="text-sm font-bold text-slate-800 dark:text-white">Verifikasi aplikasi autentikator</p>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">Masukkan kode TOTP 6 digit untuk menyelesaikan login.</p>
+              </div>
+            )}
+
+            <form onSubmit={handleMfaSubmit} className="space-y-3">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                Kode autentikator
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="mt-1 w-full p-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-center text-lg tracking-[0.4em] focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="000000"
+                  required
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={isLoading || loading || mfaCode.length !== 6}
+                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                {isLoading ? 'Memverifikasi...' : mfaFlow.type === 'enrollment' ? 'Aktifkan MFA dan Masuk' : 'Verifikasi dan Masuk'}
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={handleCancelMfa}
+              disabled={isLoading}
+              className="w-full py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 disabled:opacity-50"
+            >
+              Batalkan dan keluar
+            </button>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
-              Username Pegawai
+              {isLocalAuthMode ? 'Username / Email Pegawai' : 'Email Pegawai'}
             </label>
             <div className="relative">
               <UserIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
-                type="text"
+              ref={usernameInputRef}
+              type={isLocalAuthMode ? 'text' : 'email'}
+              autoComplete="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full p-3 pl-10 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                placeholder="Masukkan username"
+              placeholder={isLocalAuthMode ? 'username atau email staf' : 'nama@klinik.id'}
                 required
               />
             </div>
@@ -91,12 +319,13 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
 
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
-              Kata Sandi
+              {isLocalAuthMode ? 'Kata Sandi Lokal' : 'Kata Sandi Akun Staf'}
             </label>
             <div className="relative">
               <Lock className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full p-3 pl-10 pr-10 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
@@ -113,87 +342,73 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
             </div>
           </div>
 
-          {/* Cloudflare Turnstile Bot Protection Widget */}
-          {turnstileEnabled && (
-            <div className="py-1">
-              <CloudflareTurnstile
-                onSuccess={(token) => setTurnstileToken(token)}
-                onExpire={() => setTurnstileToken(null)}
-                onError={() => setTurnstileToken(null)}
-                action="login"
-              />
-            </div>
-          )}
-
           <button
             type="submit"
-            disabled={isLoading || loading || (turnstileEnabled && !turnstileToken)}
+            disabled={isLoading || loading}
             className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-bold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 disabled:opacity-50 text-sm cursor-pointer"
           >
             <LogIn className="w-4 h-4" />
-            {isLoading ? 'Memvalidasi Akun...' : 'Masuk'}
+          {isLoading ? 'Memvalidasi Akun...' : 'Masuk ke Sistem Inti'}
           </button>
         </form>
+        )}
 
-        {/* Quick Demo Test Accounts */}
-        <div className="mt-5 pt-4 border-t border-slate-200 dark:border-slate-700/80">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              Akun Uji Coba Cepat:
-            </span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs">
-            <button
-              type="button"
-              onClick={() => { setUsername('mhs001'); setPassword('mahasiswa001'); }}
-              className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-indigo-50 dark:bg-slate-700/60 dark:hover:bg-indigo-950/60 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-indigo-400 dark:hover:border-indigo-500 text-left transition-all"
-            >
-              <div className="font-bold text-[11px] truncate">👑 Super Admin</div>
-              <div className="text-[9px] text-slate-400 dark:text-slate-400 font-mono">mhs001</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setUsername('dokter'); setPassword('dokter123'); }}
-              className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-cyan-50 dark:bg-slate-700/60 dark:hover:bg-cyan-950/60 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-cyan-400 dark:hover:border-cyan-500 text-left transition-all"
-            >
-              <div className="font-bold text-[11px] truncate">🩺 Dokter Sp.PD</div>
-              <div className="text-[9px] text-slate-400 dark:text-slate-400 font-mono">dokter</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setUsername('perawat'); setPassword('perawat123'); }}
-              className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-emerald-50 dark:bg-slate-700/60 dark:hover:bg-emerald-950/60 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-emerald-400 dark:hover:border-emerald-500 text-left transition-all"
-            >
-              <div className="font-bold text-[11px] truncate">💉 Perawat</div>
-              <div className="text-[9px] text-slate-400 dark:text-slate-400 font-mono">perawat</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setUsername('rekammedis'); setPassword('rm123'); }}
-              className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-blue-50 dark:bg-slate-700/60 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-blue-400 dark:hover:border-blue-500 text-left transition-all"
-            >
-              <div className="font-bold text-[11px] truncate">📁 Rekam Medis</div>
-              <div className="text-[9px] text-slate-400 dark:text-slate-400 font-mono">rekammedis</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setUsername('apoteker'); setPassword('apotek123'); }}
-              className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-teal-50 dark:bg-slate-700/60 dark:hover:bg-teal-950/60 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-teal-400 dark:hover:border-teal-500 text-left transition-all"
-            >
-              <div className="font-bold text-[11px] truncate">💊 Apoteker</div>
-              <div className="text-[9px] text-slate-400 dark:text-slate-400 font-mono">apoteker</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setUsername('kasir'); setPassword('kasir123'); }}
-              className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-purple-50 dark:bg-slate-700/60 dark:hover:bg-purple-950/60 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-purple-400 dark:hover:border-purple-500 text-left transition-all"
-            >
-              <div className="font-bold text-[11px] truncate">💳 Kasir</div>
-              <div className="text-[9px] text-slate-400 dark:text-slate-400 font-mono">kasir</div>
-            </button>
-          </div>
-        </div>
+        {!mfaFlow && (
+          <>
+          <button
+            type="button"
+            onClick={handlePasswordReset}
+            disabled={isLoading || loading}
+            className="mt-3 w-full text-sm font-semibold text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200 disabled:opacity-50"
+          >
+            {isLocalAuthMode ? 'Lupa sandi? Hubungi administrator' : 'Lupa kata sandi? Kirim tautan reset'}
+          </button>
+
+          {isFirebaseConfigured && !isLocalAuthMode && <div className="relative my-5">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-white px-2.5 font-medium text-slate-400 dark:bg-slate-900">
+                atau gunakan akun Google institusi
+              </span>
+            </div>
+          </div>}
+
+          {isFirebaseConfigured && !isLocalAuthMode && <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={isLoading || loading}
+            className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="#4285F4"
+                d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+              />
+              <path
+                fill="#EA4335"
+                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+              />
+            </svg>
+            Masuk dengan Akun Google
+          </button>}
+          </>
+        )}
+
+        <p className="mt-5 text-center text-xs text-slate-500 dark:text-slate-400">
+          {isLocalAuthMode
+            ? 'Akun dan sesi diverifikasi oleh server lokal. Kata sandi dikelola administrator fasilitas kesehatan.'
+            : 'Akses memerlukan akun Firebase aktif dan verifikasi dua langkah melalui aplikasi autentikator.'}
+        </p>
 
         <p className="text-center text-[10px] text-slate-400 mt-5 font-semibold tracking-widest uppercase opacity-70">
           MYITARU · MYITARU SIMK
@@ -206,74 +421,85 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col">
-      <div className="bg-[#07265C] text-white border-b border-amber-400/30 py-2.5 px-4 sm:px-6">
-        <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
-          <span className="inline-flex items-center gap-2 font-semibold">
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 font-mono font-bold tracking-wider">
-              <Stethoscope className="w-3.5 h-3.5" /> SIMK-INTI
-            </span>
-            <span>Aplikasi Inti Operasional Klinis &amp; RME · MYITARU</span>
-          </span>
-          <span className="font-mono text-sky-200 text-[11px]">/staff/login</span>
-        </div>
-      </div>
-
-      <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6">
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-5">{loginCard}</div>
-
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-sm space-y-5">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-[#0B3D91] dark:text-sky-400">
-              APLIKASI INTI KLINIK UTAMA 24 JAM · OPERASIONAL MEDIS
-            </p>
-            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white mt-1">
-              Sistem Informasi Manajemen Klinik &amp; Rekam Medis Elektronik
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-              Gerbang autentikasi khusus tenaga medis, perawat, apoteker, analis laboratorium, kasir, dan administrator operasional MYITARU SIMK.
-            </p>
+    <div className="min-h-screen bg-slate-50 px-4 py-8 dark:bg-slate-950 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-5xl">
+        <header className="mb-8 text-center">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3.5 py-1.5 text-xs font-semibold text-blue-800 dark:border-blue-900 dark:bg-blue-950/50 dark:text-blue-200">
+            <Server className="h-3.5 w-3.5" />
+            Akses staf terverifikasi · RBAC MYITARU
           </div>
+          <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Portal Sistem Inti <span className="text-blue-700 dark:text-blue-400">MYITARU</span>
+          </h1>
+          <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+            Sistem Informasi Manajemen Klinik &amp; Rumah Sakit Pendidikan Terintegrasi
+          </p>
+        </header>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
-            {[
-              {
-                title: 'Pendaftaran, Antrean & IGD 24 Jam',
-                desc: 'Registrasi pasien baru/lama RM-YYMMDD, Triase Merah/Kuning/Hijau otomatis, dan konversi rawat inap.'
-              },
-              {
-                title: 'Rawat Jalan & RME Patient360',
-                desc: '18+ Poliklinik spesialis, AI Scribe Talk-to-SOAP, pencarian ICD-10, dan berkas legal-medik KARS.'
-              },
-              {
-                title: 'Rawat Inap, ICU & Kamar Operasi',
-                desc: 'Peta tempat tidur real-time, pemantauan ventilator ICU, serta checklist keselamatan bedah WHO.'
-              },
-              {
-                title: 'Lab LIS, Radiologi PACS & Farmasi',
-                desc: 'Order otomatis dari SOAP/RME ke Worklist LIS/RIS, verifikasi interaksi obat, dan potong stok depo.'
-              },
-              {
-                title: 'Kasir Billing, BPJS VClaim & SatuSehat',
-                desc: 'Akumulasi tarif tindakan-lab-rad-resep real-time, SEP VClaim, INA-CBGs, dan sinkronisasi FHIR.'
-              },
-              {
-                title: 'Keamanan Peran & Jejak Audit',
-                desc: 'Kontrol akses berbasis peran klinis dan log aktivitas terenkripsi sesuai PMK 24/2022.'
-              }
-            ].map((mod) => (
-              <div
-                key={mod.title}
-                className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 space-y-1"
-              >
-                <p className="font-bold text-slate-900 dark:text-white">{mod.title}</p>
-                <p className="text-slate-500 dark:text-slate-400 leading-relaxed">{mod.desc}</p>
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-7">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Akses Berbasis Peran (RBAC)
+                </h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Pilih peran kerja untuk melihat cakupan tugas, lalu masuk dengan akun staf Anda.
+                </p>
               </div>
-            ))}
-          </div>
+              <Building2 className="h-6 w-6 shrink-0 text-blue-600" />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {ROLE_CARDS.map((item) => {
+                const Icon = item.icon;
+                const isSelected = selectedRoleId === item.roleId;
+
+                return (
+                  <button
+                    key={item.roleId}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => {
+                      setSelectedRoleId(item.roleId);
+                      if (isLocalAuthMode) setUsername(item.loginIdentifier);
+                      usernameInputRef.current?.focus();
+                    }}
+                    className={`group flex items-start gap-3 rounded-xl border p-3.5 text-left transition-all ${
+                      isSelected
+                        ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20 dark:border-blue-400 dark:bg-blue-950/40'
+                        : 'border-slate-200 hover:border-blue-500 hover:bg-blue-50/40 dark:border-slate-700 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className={`shrink-0 rounded-lg p-2.5 ${item.badgeColor}`}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-bold text-slate-900 group-hover:text-blue-700 dark:text-white dark:group-hover:text-blue-300">
+                          {item.title}
+                        </span>
+                        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-blue-600" />
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+                        {item.subtitle}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/70 p-3.5 text-xs leading-relaxed text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+              <ShieldCheck className="mr-1.5 inline h-4 w-4 align-text-bottom" />
+              {selectedRoleId
+                ? `Peran dipilih: ${ROLE_CARDS.find((role) => role.roleId === selectedRoleId)?.title}. Hak akses akhir tetap mengikuti profil akun yang diverifikasi server.`
+                : `Kartu peran hanya membantu memilih konteks kerja. Kartu ini tidak melewati login atau memberikan akses tanpa akun staf aktif${isLocalAuthMode ? '.' : ' dan verifikasi MFA.'}`}
+            </div>
+          </section>
+
+          <div className="lg:col-span-5">{loginCard}</div>
         </div>
-      </div>
       </div>
     </div>
   );

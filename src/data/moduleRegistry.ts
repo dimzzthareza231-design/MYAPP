@@ -53,6 +53,8 @@ export const MODULE_REGISTRY = [
         { label: 'Dokter Rawat Jalan', cols: 'pegawai', source: 'db_dokter' },
         { label: 'Patient Flow', cols: 'antrian' }
       ] },
+    { id: 'patient-flow', label: 'Alur Pasien', icon: '🔄', color: 'from-cyan-500 to-blue-600', SPECIAL: true,
+      submenus: [] },
     { id: 'rawat-inap', label: 'Rawat Inap', icon: '🛏️', color: 'from-indigo-500 to-indigo-600', SPECIAL: true,
       submenus: [{ label: 'Admisi', cols: 'pasien' }, { label: 'Ketersediaan Bed', cols: 'bed' }, { label: 'Visite', cols: 'pasien' }, { label: 'Asuhan Keperawatan', cols: 'dokumen' }, { label: 'Discharge Planning', cols: 'dokumen' }, { label: 'Dokter Ranap', cols: 'pegawai' }] },
     { id: 'operasi', label: 'Operasi', icon: '⚡', color: 'from-rose-500 to-rose-600', SPECIAL: true,

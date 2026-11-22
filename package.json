@@ -1,12 +1,8 @@
 {
-  "name": "myitaru",
+  "name": "myappv1",
   "private": true,
   "version": "1.0.0",
-  "description": "MYITARU: sistem informasi manajemen klinik dan rekam medis elektronik berbasis AI, terdiri atas web publik pasien dan aplikasi inti SIMK/RME.",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/dimzzthareza231-design/MYAPP.git"
-  },
+  "description": "MYITARU: sistem informasi manajemen dan rekam medis elektronik berbasis AI, terdiri atas web publik pasien dan aplikasi inti.",
   "engines": {
     "node": ">=20"
   },
@@ -23,7 +19,13 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "cf:build": "vite build --mode cloudflare && vite build -c vite.public.config.ts --mode cloudflare && node -e \"require('fs').copyFileSync('dist/public/public.html','dist/public/index.html')\"",
+    "cf:migrate:local": "wrangler d1 migrations apply myitaru-db --local --env core",
+    "cf:migrate": "wrangler d1 migrations apply myitaru-db --remote --env core",
+    "cf:dev:public": "wrangler dev --env public --port 8787",
+    "cf:dev:core": "wrangler dev --env core --port 8788",
+    "cf:deploy": "npm run cf:build && wrangler deploy --env public && wrangler deploy --env core"
   },
   "dependencies": {
     "@google/genai": "^3.3.0",
@@ -31,28 +33,30 @@
     "@vitejs/plugin-react": "^5.0.4",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
-    "express": "^4.21.2",
+    "express": "^4.22.3",
     "firebase": "^12.18.0",
-    "glob": "^13.0.6",
+    "firebase-admin": "^14.5.1",
     "html2canvas-pro": "^2.3.7",
     "jspdf": "^4.2.1",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.26.0",
     "motion": "^12.42.2",
+    "mysql2": "^3.15.3",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-hot-toast": "^2.6.0",
     "react-is": "^19.2.8",
     "react-leaflet": "^5.0.0",
-    "react-quill": "^2.0.0",
+    "react-quill-new": "3.7.0",
     "react-router-dom": "^7.18.2",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261121.1",
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@types/express": "^4.17.21",
     "@types/leaflet": "^1.9.22",
@@ -66,11 +70,16 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "vite-plugin-pwa": "^2.0.0"
+    "vite-plugin-pwa": "^2.0.0",
+    "wrangler": "^4.166.0"
   },
   "overrides": {
+    "@grpc/grpc-js": "^1.14.7",
+    "glob": "^14.0.6",
+    "quill": "2.0.2",
     "react": "$react",
     "react-dom": "$react-dom",
-    "react-is": "$react-is"
+    "react-is": "$react-is",
+    "iconv-lite": "^0.7.3"
   }
 }

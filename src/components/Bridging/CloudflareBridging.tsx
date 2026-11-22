@@ -5,7 +5,7 @@ import {
   Eye, EyeOff, Radio, Play, HardDrive, Filter, Activity, Info, ArrowUpRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { CloudflareTurnstile, CLOUDFLARE_DEFAULT_SITEKEY } from '../Common/CloudflareTurnstile';
+import { CloudflareTurnstile } from '../Common/CloudflareTurnstile';
 
 interface DnsRecord {
   type: string;
@@ -33,21 +33,23 @@ export function CloudflareBridging() {
   const [turnstileConfig, setTurnstileConfig] = useState(() => {
     try {
       const saved = localStorage.getItem('simrs_cloudflare_turnstile_config');
-      return saved ? JSON.parse(saved) : {
-        enabled: true,
-        siteKey: CLOUDFLARE_DEFAULT_SITEKEY,
-        secretKey: '1x0000000000000000000000000000000AA',
-        mode: 'managed', // managed, non-interactive, invisible
-        protectLogin: true,
-        protectRegistration: true,
-        protectAntreanOnline: true,
-        protectApi: false
+      const parsed = saved ? JSON.parse(saved) : {};
+      const config = {
+        enabled: parsed.enabled === true,
+        siteKey: typeof parsed.siteKey === 'string' ? parsed.siteKey : import.meta.env.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY || '',
+        mode: typeof parsed.mode === 'string' ? parsed.mode : 'managed',
+        protectLogin: parsed.protectLogin !== false,
+        protectRegistration: parsed.protectRegistration !== false,
+        protectAntreanOnline: parsed.protectAntreanOnline !== false,
+        protectApi: parsed.protectApi === true
       };
+      localStorage.setItem('simrs_cloudflare_turnstile_config', JSON.stringify(config));
+      localStorage.removeItem('simrs_cloudflare_turnstile_sitekey');
+      return config;
     } catch {
       return {
-        enabled: true,
-        siteKey: CLOUDFLARE_DEFAULT_SITEKEY,
-        secretKey: '1x0000000000000000000000000000000AA',
+        enabled: false,
+        siteKey: import.meta.env.VITE_CLOUDFLARE_TURNSTILE_SITE_KEY || '',
         mode: 'managed',
         protectLogin: true,
         protectRegistration: true,
@@ -177,9 +179,8 @@ export function CloudflareBridging() {
   // Save changes to LocalStorage
   const saveTurnstile = () => {
     localStorage.setItem('simrs_cloudflare_turnstile_config', JSON.stringify(turnstileConfig));
-    localStorage.setItem('simrs_cloudflare_turnstile_sitekey', turnstileConfig.siteKey);
-    localStorage.setItem('simrs_cloudflare_turnstile_enabled', turnstileConfig.enabled ? 'true' : 'false');
-    toast.success('Pengaturan Cloudflare Turnstile berhasil disimpan!');
+    localStorage.removeItem('simrs_cloudflare_turnstile_sitekey');
+    toast.success('Preferensi widget tersimpan di browser. Secret server hanya dikonfigurasi melalui environment.');
   };
 
   const saveDomain = () => {
@@ -216,8 +217,7 @@ export function CloudflareBridging() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          token: testTurnstileToken,
-          secretKey: turnstileConfig.secretKey
+          token: testTurnstileToken
         })
       });
 
@@ -228,17 +228,9 @@ export function CloudflareBridging() {
       } else {
         toast.error(`Verifikasi Gagal: ${data.message || 'Invalid Token'}`);
       }
-    } catch (err: any) {
-      // Offline fallback simulation
-      setVerifyResult({
-        success: true,
-        simulated: true,
-        timestamp: new Date().toISOString(),
-        hostname: window.location.hostname,
-        action: 'login_test',
-        message: 'Token tervalidasi via sandbox engine.'
-      });
-      toast.success('Verifikasi Server Berhasil (Sandbox Mode)');
+    } catch (err) {
+      setVerifyResult({ success: false, message: 'Server verifikasi tidak dapat dihubungi.' });
+      toast.error('Verifikasi Turnstile gagal karena server tidak dapat dihubungi.');
     } finally {
       setIsVerifyingToken(false);
     }
@@ -476,33 +468,15 @@ export function CloudflareBridging() {
                       placeholder="0x4AAAAAA..."
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white font-mono focus:border-orange-500 focus:outline-none"
                     />
-                    <button
-                      onClick={() => setTurnstileConfig({ ...turnstileConfig, siteKey: CLOUDFLARE_DEFAULT_SITEKEY })}
-                      className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-xs font-bold text-slate-200 rounded-xl whitespace-nowrap"
-                      title="Gunakan Demo SiteKey"
-                    >
-                      Demo Key
-                    </button>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Demo SiteKey Cloudflare: <code className="text-orange-400 font-mono">1x00000000000000000000AA</code> (selalu lolos).
+                    Site key bersifat publik. Untuk build terdistribusi, gunakan <code className="text-orange-400 font-mono">VITE_CLOUDFLARE_TURNSTILE_SITE_KEY</code>.
                   </p>
                 </div>
 
-                {/* Secret Key */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">
-                    Secret Key (Server-side API Verification)
-                  </label>
-                  <input
-                    type="password"
-                    value={turnstileConfig.secretKey}
-                    onChange={(e) => setTurnstileConfig({ ...turnstileConfig, secretKey: e.target.value })}
-                    placeholder="1x0000000000000000000000000000000AA"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white font-mono focus:border-orange-500 focus:outline-none"
-                  />
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Digunakan server Express untuk memvalidasi token via <code className="text-slate-300 font-mono">https://challenges.cloudflare.com/turnstile/v0/siteverify</code>
+                    Secret key hanya boleh disimpan di server sebagai <code className="text-slate-300 font-mono">CLOUDFLARE_TURNSTILE_SECRET_KEY</code>, tidak pernah di browser.
                   </p>
                 </div>
 
@@ -564,7 +538,7 @@ export function CloudflareBridging() {
                   onError={(err) => {
                     toast.error('Gagal memverifikasi Turnstile.');
                   }}
-                  action="klinik_test"
+                  action="login"
                 />
 
                 {testTurnstileToken && (

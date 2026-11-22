@@ -16,6 +16,7 @@ export const MODULE_ALIASES: Record<string, string[]> = {
   'rekam-medis': ['master-data', 'rme', 'rekammedis'],
   'pendaftaran': ['registrasi', 'admisi', 'pasien-baru'],
   'rawat-jalan': ['poli', 'poliklinik', 'rawatjalan'],
+  'patient-flow': ['rawat-jalan', 'poli'],
   'rawat-inap': ['bangsal', 'ranap', 'rawatinap', 'bed'],
   'laboratorium': ['lab', 'lis'],
   'radiologi': ['rad', 'pacs'],

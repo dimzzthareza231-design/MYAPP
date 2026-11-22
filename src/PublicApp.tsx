@@ -8,7 +8,7 @@ import { PublicHospitalPortal } from './components/Portal/PublicHospitalPortal';
 import { PatientMobileApp } from './components/Mobile/PatientMobileApp';
 import { OfflineIndicator } from './components/PWA/OfflineIndicator';
 
-// Web publik pasien: portal rumah sakit + aplikasi mobile pasien.
+// Web publik pasien: portal MYITARU + aplikasi mobile pasien.
 // Tidak memuat modul SIMK/RME; aplikasi inti berjalan terpisah (lihat App.tsx).
 export default function PublicApp() {
   return (

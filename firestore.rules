@@ -27,16 +27,19 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
 
-    function isSuperAdminEmail() {
-      return isVerifiedUser() && request.auth.token.email == 'dimzzthareza231@gmail.com';
-    }
-
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isSuperAdmin() {
+      return isVerifiedUser() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.aktif == true &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleId == 'super_admin';
+    }
+
     function isAdmin() {
-      return isSuperAdminEmail() || (
+      return isSuperAdmin() || (
         isVerifiedUser() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.aktif == true &&
@@ -229,20 +232,22 @@ service cloud.firestore {
     // --- 1. USERS COLLECTION (Strict PII Isolation & Anti-Privilege-Escalation) ---
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isSuperAdminEmail() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
 
       allow create: if isValidId(userId) && isVerifiedUser() && isValidUser(incoming()) && (
-        isAdmin() ||
+        isSuperAdmin() ||
+        (isAdmin() && incoming().roleId == 'viewer') ||
         (
           isOwner(userId) &&
           incoming().uid == request.auth.uid &&
           incoming().email == request.auth.token.email &&
-          (isSuperAdminEmail() ? incoming().roleId == 'super_admin' : incoming().roleId == 'viewer')
+          incoming().roleId == 'viewer'
         )
       );
 
       allow update: if isValidId(userId) && isVerifiedUser() && isValidUser(incoming()) && (
-        isAdmin() ||
+        isSuperAdmin() ||
+        (isAdmin() && incoming().roleId == existing().roleId) ||
         (
           isOwner(userId) &&
           incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'photoURL', 'username', 'updatedAt']) &&
@@ -251,21 +256,19 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if isValidId(userId) && isAdmin();
+      allow delete: if isValidId(userId) && isSuperAdmin();
     }
 
     // --- 2. PASIEN COLLECTION ---
     match /pasien/{pasienId} {
-      allow get: if isValidId(pasienId) && (isClinicalOrAdmin() || (isVerifiedUser() && existing().no_rm is string));
-      allow list: if isVerifiedUser() && resource.data.no_rm is string;
+      allow get, list: if isClinicalOrAdmin();
       allow create, update: if isValidId(pasienId) && isClinicalOrAdmin() && isValidPasien(incoming());
       allow delete: if isValidId(pasienId) && isAdmin();
     }
 
     // --- 3. KUNJUNGAN COLLECTION ---
     match /kunjungan/{kunjunganId} {
-      allow get: if isValidId(kunjunganId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.pasien_id is string;
+      allow get, list: if isClinicalOrAdmin();
       allow create, update: if isValidId(kunjunganId) && isClinicalOrAdmin() && isValidKunjungan(incoming());
       allow delete: if isValidId(kunjunganId) && isAdmin();
     }
@@ -295,8 +298,7 @@ service cloud.firestore {
 
     // --- 6. SYSTEM DATA (PERSISTENCE KEYS) ---
     match /system_data/{dataId} {
-      allow get: if isValidId(dataId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.key is string;
+      allow get, list: if isClinicalOrAdmin();
       allow create, update: if isValidId(dataId) && isClinicalOrAdmin() && isValidSystemData(incoming());
       allow delete: if isValidId(dataId) && isAdmin();
     }
@@ -304,9 +306,9 @@ service cloud.firestore {
     // --- 7. ACTIVITY LOGS (APPEND-ONLY AUDIT TRAIL) ---
     match /activity_logs/{logId} {
       allow get: if isValidId(logId) && (isAdmin() || (isVerifiedUser() && existing().user.uid == request.auth.uid));
-      allow list: if isSuperAdminEmail() || (isVerifiedUser() && resource.data.user.uid == request.auth.uid);
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.user.uid == request.auth.uid);
       allow create: if isValidId(logId) && isVerifiedUser() && isValidActivityLog(incoming()) &&
-        (isSuperAdminEmail() || incoming().user.uid == request.auth.uid);
+        (isAdmin() || incoming().user.uid == request.auth.uid);
       allow update, delete: if false;
     }
 

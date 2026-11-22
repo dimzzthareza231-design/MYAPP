@@ -1,17 +1,24 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { 
   User as FirebaseUser,
   onAuthStateChanged, 
   signInWithPopup, 
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut as firebaseSignOut,
   setPersistence,
-  browserLocalPersistence
+  browserLocalPersistence,
+  getMultiFactorResolver,
+  multiFactor,
+  TotpMultiFactorGenerator,
+  type MultiFactorError,
+  type MultiFactorResolver,
+  type TotpSecret
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, deleteDoc } from 'firebase/firestore';
-import { auth, db, googleProvider, isFirebaseConfigured } from '../lib/firebase';
+import { auth, db, googleProvider, isFirebaseConfigured, isLocalAuthMode } from '../lib/firebase';
 import { logAuthAttempt } from '../lib/activityLogger';
-import { ROLES, hasModuleAccess, getRoleById } from '../data/roles';
-import { saveAuthSession, getAuthSession, clearAuthSession } from '../utils/sessionStore';
+import { hasModuleAccess, getRoleById } from '../data/roles';
 
 export interface User {
   id: string;
@@ -32,7 +39,12 @@ interface AuthContextType {
   users: User[];
   loading: boolean;
   isReadOnly: boolean;
-  login: (usernameOrEmail: string, password: string) => Promise<{ success: boolean; message: string }>;
+  login: (usernameOrEmail: string, password: string) => Promise<{ success: boolean; message: string; mfaFlow?: 'enrollment' | 'challenge' }>;
+  requestPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
+  mfaFlow: MfaFlow | null;
+  completeMfa: (code: string) => Promise<{ success: boolean; message: string }>;
+  completeMfaEnrollment: (code: string) => Promise<{ success: boolean; message: string; reauthenticationRequired?: boolean }>;
+  cancelMfa: () => Promise<void>;
   signInWithGoogle: () => Promise<{ success: boolean; message: string; isCancelled?: boolean }>;
   logout: () => Promise<void>;
   hasAccess: (moduleId: string) => boolean;
@@ -45,32 +57,102 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Default Seed Users (Hospital Staff Directory)
-const DEFAULT_USERS: User[] = [
-  { id: '1', username: 'mhs001', password: 'mahasiswa001', nama: 'Administrator Utama', roleId: 'super_admin', email: 'admin@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '2', username: 'admin', password: 'admin123', nama: 'Staff Adm Sistem', roleId: 'admin', email: 'staffadmin@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '3', username: 'direksi', password: 'direksi123', nama: 'dr. H. Hendra, MARS (Direktur)', roleId: 'direksi', email: 'direksi@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '4', username: 'dokter', password: 'dokter123', nama: 'dr. Budi Santoso, Sp.PD', roleId: 'dokter', email: 'budi@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '5', username: 'perawat', password: 'perawat123', nama: 'Ns. Siti Fatimah, S.Kep', roleId: 'perawat', email: 'siti@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '6', username: 'bidan', password: 'bidan123', nama: 'Bd. Nurul Aini, S.Tr.Keb', roleId: 'bidan', email: 'bidan@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '7', username: 'apoteker', password: 'apotek123', nama: 'apt. Dewi Lestari, S.Farm', roleId: 'apoteker', email: 'dewi@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '8', username: 'kasir', password: 'kasir123', nama: 'Rina Melati, S.E.', roleId: 'kasir', email: 'rina@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '9', username: 'pendaftaran', password: 'daftar123', nama: 'Joko Anwar, A.Md', roleId: 'pendaftaran', email: 'joko@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '10', username: 'rekammedis', password: 'rm123', nama: 'Sari Indah, A.Md.RMIK', roleId: 'rekam_medis', email: 'sari@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '11', username: 'laboran', password: 'lab123', nama: 'Ahmad Fauzi, A.Md.AK', roleId: 'laboran', email: 'laboran@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '12', username: 'radiografer', password: 'rad123', nama: 'Bayu Pratama, A.Md.Rad', roleId: 'radiografer', email: 'radiografer@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '13', username: 'mutu', password: 'mutu123', nama: 'drg. Maya Sari (Komite Mutu)', roleId: 'manajemen_mutu', email: 'mutu@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '14', username: 'gizi', password: 'gizi123', nama: 'Citra Kirana, S.Gz', roleId: 'gizi', email: 'gizi@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '15', username: 'rehab', password: 'rehab123', nama: 'Rian Hidayat, A.Md.FT (Rehab)', roleId: 'rehab_medik', email: 'rehab@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '16', username: 'itsupport', password: 'it123', nama: 'Bagas Setiawan, S.T. (IT Infra)', roleId: 'it_support', email: 'it@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-  { id: '17', username: 'viewer', password: 'viewer123', nama: 'Guest Viewer (Read-Only)', roleId: 'viewer', email: 'viewer@myitaru.klinik', aktif: true, dibuatPada: '2026-01-01' },
-];
+type MfaFlow =
+  | { type: 'enrollment'; qrCodeUrl: string; secretKey: string }
+  | { type: 'challenge' };
+
+function parseLocalUser(value: unknown): User | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== 'string' || typeof record.username !== 'string' ||
+      typeof record.nama !== 'string' || typeof record.email !== 'string' ||
+      typeof record.roleId !== 'string' || record.aktif !== true) {
+    return null;
+  }
+  if (!getRoleById(record.roleId)) return null;
+  return {
+    id: record.id,
+    username: record.username,
+    nama: record.nama,
+    email: record.email,
+    roleId: record.roleId,
+    aktif: true,
+    dibuatPada: typeof record.dibuatPada === 'string' ? record.dibuatPada : ''
+  };
+}
+
+async function loadAuthorizedProfile(firebaseUser: FirebaseUser, issueServerSession = true): Promise<User> {
+  if (!firebaseUser.email || !firebaseUser.emailVerified) {
+    throw new Error('Gunakan email terverifikasi yang telah didaftarkan administrator.');
+  }
+
+  const profileSnapshot = await getDoc(doc(db, 'users', firebaseUser.uid));
+  if (!profileSnapshot.exists()) {
+    throw new Error('Akun belum terdaftar di sistem. Hubungi administrator.');
+  }
+
+  const profile = profileSnapshot.data();
+  const roleId = typeof profile.roleId === 'string' ? profile.roleId : '';
+  if (profile.aktif !== true || !getRoleById(roleId) ||
+      typeof profile.email !== 'string' || profile.email.toLowerCase() !== firebaseUser.email.toLowerCase()) {
+    throw new Error('Akun tidak aktif atau profil akses tidak valid. Hubungi administrator.');
+  }
+
+  if (issueServerSession) {
+    const tokenResult = await firebaseUser.getIdTokenResult();
+    const firebaseClaims = tokenResult.claims.firebase as { sign_in_second_factor?: string } | undefined;
+    if (!firebaseClaims?.sign_in_second_factor) {
+      throw new Error('Verifikasi MFA belum selesai. Pastikan MFA TOTP diwajibkan di Firebase lalu login kembali.');
+    }
+    const response = await fetch('/api/auth/session', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: tokenResult.token })
+    });
+    if (!response.ok) {
+      throw new Error('Server menolak sesi autentikasi. Periksa konfigurasi identitas server.');
+    }
+  }
+
+  return {
+    id: firebaseUser.uid,
+    username: typeof profile.username === 'string' ? profile.username : firebaseUser.email.split('@')[0],
+    nama: typeof profile.nama === 'string' ? profile.nama : firebaseUser.displayName || 'Staf Klinik',
+    email: firebaseUser.email,
+    photoURL: firebaseUser.photoURL || undefined,
+    roleId,
+    aktif: true,
+    dibuatPada: typeof profile.dibuatPada === 'string' ? profile.dibuatPada : ''
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [users, setUsers] = useState<User[]>(DEFAULT_USERS);
+  const [users, setUsers] = useState<User[]>([]);
+  const [mfaFlow, setMfaFlow] = useState<MfaFlow | null>(null);
+  const pendingMfaResolver = useRef<MultiFactorResolver | null>(null);
+  const pendingTotpSecret = useRef<TotpSecret | null>(null);
+  const suppressAuthRestore = useRef(false);
+
+  const beginMfaEnrollment = async (user: FirebaseUser) => {
+    const session = await multiFactor(user).getSession();
+    const secret = await TotpMultiFactorGenerator.generateSecret(session);
+    pendingTotpSecret.current = secret;
+    setMfaFlow({
+      type: 'enrollment',
+      qrCodeUrl: secret.generateQrCodeUrl(user.email || user.uid, 'MYITARU SIMK'),
+      secretKey: secret.secretKey
+    });
+  };
+
+  const clearMfaFlow = () => {
+    pendingMfaResolver.current = null;
+    pendingTotpSecret.current = null;
+    setMfaFlow(null);
+  };
 
   // Initialize Firebase Auth persistence in IndexedDB
   useEffect(() => {
@@ -81,10 +163,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    if (!isLocalAuthMode) return;
+
+    let isMounted = true;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 1000);
+
+    const restoreLocalSession = async () => {
+      try {
+        const response = await fetch('/api/auth/me', {
+          credentials: 'same-origin',
+          signal: controller.signal
+        });
+        if (response.status === 401) {
+          if (isMounted) setCurrentUser(null);
+          return;
+        }
+        if (!response.ok) {
+          console.error(`Local session check failed with HTTP ${response.status}.`);
+          return;
+        }
+
+        const payload: unknown = await response.json();
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw new Error('Local session response is malformed.');
+        }
+        const user = parseLocalUser((payload as Record<string, unknown>).user);
+        if (!user) throw new Error('Local session returned an invalid staff profile.');
+        if (isMounted) setCurrentUser(user);
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          console.error('Could not restore the local staff session:', error);
+        }
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    void restoreLocalSession();
+    return () => {
+      isMounted = false;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, []);
+
   // Sync users list from Cloud Firestore only when authenticated as Super Admin / Admin
   useEffect(() => {
     const isAdminSession =
-      firebaseUser?.email?.toLowerCase().trim() === 'dimzzthareza231@gmail.com' ||
       currentUser?.roleId === 'super_admin' ||
       currentUser?.roleId === 'admin';
 
@@ -93,34 +221,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-      if (!snapshot.empty) {
-        const loadedUsers: User[] = [];
-        snapshot.forEach((docSnap) => {
-          const d = docSnap.data();
-          loadedUsers.push({
-            id: docSnap.id,
-            username: d.username || docSnap.id,
-            nama: d.nama || 'Staff Klinik',
-            roleId: d.roleId || 'dokter',
-            email: d.email || '',
-            photoURL: d.photoURL,
-            aktif: d.aktif ?? true,
-            dibuatPada: d.dibuatPada || '2026-01-01',
-            isGoogleAuth: d.isGoogleAuth ?? false
-          });
+      const loadedUsers: User[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        loadedUsers.push({
+          id: docSnap.id,
+          username: d.username || docSnap.id,
+          nama: d.nama || 'Staff Klinik',
+          roleId: d.roleId || 'viewer',
+          email: d.email || '',
+          photoURL: d.photoURL,
+          aktif: d.aktif === true,
+          dibuatPada: d.dibuatPada || '',
+          isGoogleAuth: d.isGoogleAuth ?? false
         });
-
-        // Ensure default local staff directory accounts remain available alongside cloud accounts
-        const mergedUsers = [...loadedUsers];
-        DEFAULT_USERS.forEach((defUser) => {
-          if (!mergedUsers.some(u => u.username === defUser.username)) {
-            mergedUsers.push(defUser);
-          }
-        });
-        setUsers(mergedUsers);
-      } else {
-        setUsers(DEFAULT_USERS);
-      }
+      });
+      setUsers(loadedUsers);
     }, (error) => {
       console.warn('Firestore users collection snapshot notice:', error.message);
     });
@@ -128,137 +244,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, [firebaseUser, currentUser?.roleId]);
 
-  // Listen to Firebase Auth & IndexedDB session vault
+  // Restore access only from Firebase and a server-issued session cookie.
   useEffect(() => {
+    if (isLocalAuthMode) return;
+    if (!isFirebaseConfigured) {
+      setLoading(false);
+      return;
+    }
+
     let isMounted = true;
 
-    // Safety timeout: ensure loading screen is never stuck
-    const safetyTimer = setTimeout(() => {
-      if (isMounted) {
-        setLoading(false);
-      }
-    }, 1500);
-
-    // Restore cached session instantly from IndexedDB
-    getAuthSession().then((cachedUser) => {
-      if (isMounted && cachedUser) {
-        setCurrentUser(cachedUser);
-        setLoading(false);
-      }
-    }).catch(() => {
-      if (isMounted) setLoading(false);
-    });
-
-    const unsubscribe = isFirebaseConfigured ? onAuthStateChanged(auth, async (fUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (fUser) => {
       setFirebaseUser(fUser);
+      if (suppressAuthRestore.current) {
+        if (isMounted) setLoading(false);
+        return;
+      }
       if (fUser) {
         try {
-          // Fetch user profile from Firestore
-          const userDocRef = doc(db, 'users', fUser.uid);
-          const userDocSnap = await getDoc(userDocRef);
-
-          let resolvedProfile: User;
-          if (userDocSnap.exists()) {
-            const data = userDocSnap.data();
-            const isGoogle = fUser.providerData?.some(p => p.providerId === 'google.com') || data.isGoogleAuth;
-            const isSuperAdminEmail = fUser.email?.toLowerCase().trim() === 'dimzzthareza231@gmail.com';
-            const finalRoleId = isSuperAdminEmail ? 'super_admin' : (data.roleId || (isGoogle ? 'viewer' : 'admin'));
-
-            resolvedProfile = {
-              id: fUser.uid,
-              username: data.username || fUser.email?.split('@')[0] || 'staff',
-              nama: data.nama || fUser.displayName || 'Staff Klinik',
-              email: data.email || fUser.email || '',
-              photoURL: data.photoURL || fUser.photoURL || undefined,
-              roleId: finalRoleId,
-              aktif: data.aktif ?? true,
-              dibuatPada: data.dibuatPada || new Date().toISOString().split('T')[0],
-              isGoogleAuth: isGoogle
-            };
+          await loadAuthorizedProfile(fUser, false);
+          if (multiFactor(fUser).enrolledFactors.length === 0) {
+            await beginMfaEnrollment(fUser);
+            if (isMounted) setCurrentUser(null);
           } else {
-            // New user authenticated via Firebase Auth
-            const isGoogle = fUser.providerData?.some(p => p.providerId === 'google.com');
-            const isSuperAdminEmail = fUser.email?.toLowerCase().trim() === 'dimzzthareza231@gmail.com';
-            const matchedSeed = DEFAULT_USERS.find(
-              u => u.email && u.email.toLowerCase() === fUser.email?.toLowerCase()
-            );
-
-            const defaultRole = isSuperAdminEmail ? 'super_admin' : (matchedSeed?.roleId || (isGoogle ? 'viewer' : 'admin'));
-
-            resolvedProfile = {
-              id: fUser.uid,
-              username: matchedSeed?.username || fUser.email?.split('@')[0] || 'google_user',
-              nama: matchedSeed?.nama || fUser.displayName || (isGoogle ? 'Pengguna Google' : 'Staff Klinik'),
-              email: fUser.email || matchedSeed?.email || '',
-              photoURL: fUser.photoURL || undefined,
-              roleId: defaultRole,
-              aktif: true,
-              dibuatPada: new Date().toISOString().split('T')[0],
-              isGoogleAuth: isGoogle
-            };
-
-            await setDoc(userDocRef, {
-              uid: fUser.uid,
-              username: resolvedProfile.username,
-              nama: resolvedProfile.nama,
-              email: resolvedProfile.email,
-              photoURL: resolvedProfile.photoURL || '',
-              roleId: resolvedProfile.roleId,
-              aktif: true,
-              dibuatPada: resolvedProfile.dibuatPada,
-              isGoogleAuth: isGoogle,
-              updatedAt: new Date().toISOString()
-            });
+            const resolvedProfile = await loadAuthorizedProfile(fUser);
+            if (isMounted) setCurrentUser(resolvedProfile);
           }
-
+        } catch (error) {
+          console.error('Firebase session validation failed:', error);
           if (isMounted) {
-            setCurrentUser(resolvedProfile);
-            await saveAuthSession(resolvedProfile);
+            setCurrentUser(null);
           }
-        } catch (err) {
-          const isGoogle = fUser.providerData?.some(p => p.providerId === 'google.com');
-          const fallbackUser: User = {
-            id: fUser.uid,
-            username: fUser.email?.split('@')[0] || 'user',
-            nama: fUser.displayName || 'Staff Klinik',
-            email: fUser.email || '',
-            photoURL: fUser.photoURL || undefined,
-            roleId: (isGoogle && fUser.email === 'dimzzthareza231@gmail.com') ? 'super_admin' : (isGoogle ? 'viewer' : 'super_admin'),
-            aktif: true,
-            dibuatPada: new Date().toISOString().split('T')[0],
-            isGoogleAuth: isGoogle
-          };
-          if (isMounted) {
-            setCurrentUser(fallbackUser);
-            await saveAuthSession(fallbackUser);
+          await fetch('/api/auth/session', { method: 'DELETE', credentials: 'same-origin' }).catch((cleanupError) => {
+            console.error('Failed to clear rejected server session:', cleanupError);
+          });
+          try {
+            await firebaseSignOut(auth);
+          } catch (signOutError) {
+            console.error('Failed to clear rejected Firebase identity:', signOutError);
           }
         }
       } else {
-        // When Firebase Auth is null, check if a staff user is logged in via IndexedDB
-        const storedStaff = await getAuthSession();
         if (isMounted) {
-          if (storedStaff) {
-            setCurrentUser(storedStaff);
-          } else {
-            setCurrentUser(null);
-          }
+          setCurrentUser(null);
         }
       }
 
       if (isMounted) {
         setLoading(false);
       }
-    }) : () => {};
+    });
 
     return () => {
       isMounted = false;
-      clearTimeout(safetyTimer);
       unsubscribe();
     };
   }, []);
 
   // Google Sign-In with Firebase Auth persistence
   const signInWithGoogle = async (): Promise<{ success: boolean; message: string; isCancelled?: boolean }> => {
+    if (isLocalAuthMode) {
+      return { success: false, message: 'Login Google tidak tersedia dalam mode autentikasi lokal.' };
+    }
     if (!isFirebaseConfigured) {
       return { success: false, message: 'Firebase belum dikonfigurasi. Silakan tambahkan konfigurasi Firebase Anda.' };
     }
@@ -267,59 +314,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await signInWithPopup(auth, googleProvider);
       const fUser = result.user;
       
-      const userDocRef = doc(db, 'users', fUser.uid);
-      const userDocSnap = await getDoc(userDocRef);
-
-      const isSuperAdminEmail = fUser.email?.toLowerCase().trim() === 'dimzzthareza231@gmail.com';
-      let roleId = isSuperAdminEmail ? 'super_admin' : 'viewer';
-      let aktif = true;
-
-      if (userDocSnap.exists()) {
-        const data = userDocSnap.data();
-        roleId = isSuperAdminEmail ? 'super_admin' : (data.roleId || 'viewer');
-        aktif = data.aktif ?? true;
-      } else {
-        await setDoc(userDocRef, {
-          uid: fUser.uid,
-          nama: fUser.displayName || 'Pengguna Google',
-          email: fUser.email || '',
-          photoURL: fUser.photoURL || '',
-          roleId: isSuperAdminEmail ? 'super_admin' : 'viewer',
-          username: fUser.email?.split('@')[0] || 'google_user',
-          aktif: true,
-          dibuatPada: new Date().toISOString().split('T')[0],
-          isGoogleAuth: true,
-          updatedAt: new Date().toISOString()
-        });
-      }
-
-      if (!aktif) {
-        await firebaseSignOut(auth);
-        await clearAuthSession();
-        logAuthAttempt({
-          action: 'GOOGLE_SIGN_IN',
-          status: 'DENIED',
-          email: fUser.email || undefined,
-          nama: fUser.displayName || undefined,
-          authProvider: 'google.com',
-          message: 'Akun dinonaktifkan oleh administrator.'
-        });
-        return { success: false, message: 'Akun Google Anda dinonaktifkan oleh administrator.' };
-      }
-
-      const loggedUser: User = {
-        id: fUser.uid,
-        username: fUser.email?.split('@')[0] || 'google_user',
-        nama: fUser.displayName || 'Pengguna Google',
-        email: fUser.email || '',
-        photoURL: fUser.photoURL || undefined,
-        roleId,
-        aktif: true,
-        dibuatPada: new Date().toISOString().split('T')[0],
-        isGoogleAuth: true
-      };
-
-      await saveAuthSession(loggedUser);
+      const loggedUser = await loadAuthorizedProfile(fUser);
       setCurrentUser(loggedUser);
       setFirebaseUser(fUser);
 
@@ -361,68 +356,227 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Staff Login with IndexedDB session persistence (0 bytes localStorage quota)
-  const login = async (usernameOrEmail: string, password: string): Promise<{ success: boolean; message: string }> => {
-    const cleanInput = usernameOrEmail.trim().toLowerCase();
-    const user = users.find(u => 
-      (u.username && u.username.toLowerCase() === cleanInput) || 
-      (u.email && u.email.toLowerCase() === cleanInput)
-    );
+  // The selected server mode is authoritative; local credentials are never validated in the browser.
+  const login = async (usernameOrEmail: string, password: string): Promise<{ success: boolean; message: string; mfaFlow?: 'enrollment' | 'challenge' }> => {
+    if (isLocalAuthMode) {
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: usernameOrEmail, password })
+        });
+        const payload: unknown = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message = payload && typeof payload === 'object' && !Array.isArray(payload) &&
+            typeof (payload as Record<string, unknown>).message === 'string'
+            ? (payload as Record<string, unknown>).message as string
+            : 'Username/email atau kata sandi tidak valid.';
+          return { success: false, message };
+        }
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+            (payload as Record<string, unknown>).authMode !== 'local') {
+          return { success: false, message: 'Respons autentikasi lokal tidak valid.' };
+        }
+        const user = parseLocalUser((payload as Record<string, unknown>).user);
+        if (!user) return { success: false, message: 'Profil staf lokal dari server tidak valid.' };
 
-    if (!user) {
+        setCurrentUser(user);
+        return {
+          success: true,
+          message: `Selamat datang, ${user.nama} (${getRoleById(user.roleId)?.nama || 'Staf'}).`
+        };
+      } catch (error) {
+        console.error('Local staff login request failed:', error);
+        return { success: false, message: 'Server autentikasi lokal tidak dapat dijangkau. Periksa koneksi intranet.' };
+      }
+    }
+
+    if (!isFirebaseConfigured) {
+      return { success: false, message: 'Firebase Authentication belum dikonfigurasi.' };
+    }
+    const email = usernameOrEmail.trim().toLowerCase();
+    if (!email.includes('@')) {
+      return { success: false, message: 'Gunakan alamat email pegawai, bukan username demo.' };
+    }
+    suppressAuthRestore.current = true;
+    try {
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      await loadAuthorizedProfile(credential.user, false);
+      if (multiFactor(credential.user).enrolledFactors.length === 0) {
+        setFirebaseUser(credential.user);
+        await beginMfaEnrollment(credential.user);
+        return {
+          success: false,
+          mfaFlow: 'enrollment',
+          message: 'Daftarkan aplikasi autentikator sebelum menggunakan aplikasi inti.'
+        };
+      }
+      const loggedUser = await loadAuthorizedProfile(credential.user);
+      setFirebaseUser(credential.user);
+      setCurrentUser(loggedUser);
+      suppressAuthRestore.current = false;
+      clearMfaFlow();
+      logAuthAttempt({
+        action: 'STAFF_LOGIN',
+        status: 'SUCCESS',
+        email: loggedUser.email,
+        nama: loggedUser.nama,
+        roleId: loggedUser.roleId,
+        authProvider: 'password',
+        message: 'Firebase identity and server session validated.'
+      });
+      return { success: true, message: `Selamat datang, ${loggedUser.nama} (${getRoleById(loggedUser.roleId)?.nama || 'Staf'})` };
+    } catch (error: any) {
+      if (error?.code === 'auth/multi-factor-auth-required') {
+        try {
+          const resolver = getMultiFactorResolver(auth, error as MultiFactorError);
+          if (!resolver.hints.some((hint) => hint.factorId === TotpMultiFactorGenerator.FACTOR_ID)) {
+            suppressAuthRestore.current = false;
+            return { success: false, message: 'Akun ini menggunakan faktor MFA yang belum didukung oleh layar login. Hubungi administrator.' };
+          }
+          pendingMfaResolver.current = resolver;
+          setMfaFlow({ type: 'challenge' });
+          logAuthAttempt({
+            action: 'STAFF_LOGIN',
+            status: 'WARNING',
+            email,
+            authProvider: 'password',
+            errorCode: error.code,
+            message: 'Firebase meminta verifikasi faktor kedua TOTP.'
+          });
+          return {
+            success: false,
+            mfaFlow: 'challenge',
+            message: 'Masukkan kode dari aplikasi autentikator untuk menyelesaikan login.'
+          };
+        } catch (resolverError) {
+          suppressAuthRestore.current = false;
+          return { success: false, message: 'Tantangan MFA tidak dapat diproses. Silakan coba login kembali.' };
+        }
+      }
+      suppressAuthRestore.current = false;
       logAuthAttempt({
         action: 'STAFF_LOGIN',
         status: 'FAILED',
-        email: cleanInput,
-        message: 'Pengguna atau email tidak ditemukan.'
+        email,
+        authProvider: 'password',
+        errorCode: error?.code,
+        message: error?.message || 'Autentikasi gagal.'
       });
-      return { success: false, message: 'Username atau email tidak ditemukan' };
+      await firebaseSignOut(auth);
+      return { success: false, message: error?.message || 'Autentikasi gagal.' };
     }
-    if (!user.aktif) {
-      logAuthAttempt({
-        action: 'STAFF_LOGIN',
-        status: 'DENIED',
-        email: user.email,
-        nama: user.nama,
-        roleId: user.roleId,
-        message: 'Percobaan masuk akun dinonaktifkan.'
-      });
-      return { success: false, message: 'Akun Anda dinonaktifkan. Hubungi administrator.' };
+  };
+
+  const requestPasswordReset = async (input: string): Promise<{ success: boolean; message: string }> => {
+    if (isLocalAuthMode) {
+      return { success: false, message: 'Reset sandi lokal dilakukan oleh administrator sistem.' };
     }
-    if (user.password && user.password !== password) {
-      logAuthAttempt({
-        action: 'STAFF_LOGIN',
-        status: 'FAILED',
-        email: user.email,
-        nama: user.nama,
-        roleId: user.roleId,
-        message: 'Kata sandi salah.'
-      });
-      return { success: false, message: 'Password salah' };
+    if (!isFirebaseConfigured) {
+      return { success: false, message: 'Firebase Authentication belum dikonfigurasi.' };
+    }
+    const email = input.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { success: false, message: 'Masukkan alamat email pegawai yang valid.' };
     }
 
-    // Persist authenticated staff user to IndexedDB
-    await saveAuthSession(user);
-    setCurrentUser(user);
+    try {
+      await sendPasswordResetEmail(auth, email);
+    } catch (error: any) {
+      if (error?.code === 'auth/user-not-found' || error?.code === 'auth/invalid-email') {
+        return {
+          success: true,
+          message: 'Jika akun tersedia, instruksi pengaturan ulang akan dikirim ke email tersebut.'
+        };
+      }
+      if (error?.code === 'auth/network-request-failed') {
+        return { success: false, message: 'Koneksi jaringan terputus. Silakan coba kembali.' };
+      }
+      if (error?.code === 'auth/too-many-requests') {
+        return { success: false, message: 'Terlalu banyak permintaan. Silakan coba lagi nanti.' };
+      }
+      if (error?.code === 'auth/unauthorized-domain') {
+        return { success: false, message: 'Domain ini belum diizinkan di Firebase Authentication.' };
+      }
+      console.error('Firebase password reset failed:', error?.code || error);
+      return { success: false, message: 'Permintaan reset sandi gagal. Periksa konfigurasi Firebase dan coba lagi.' };
+    }
 
-    logAuthAttempt({
-      action: 'STAFF_LOGIN',
-      status: 'SUCCESS',
-      email: user.email,
-      nama: user.nama,
-      roleId: user.roleId,
-      authProvider: 'local',
-      message: 'Staff session authenticated successfully.'
-    });
-
-    const role = getRoleById(user.roleId);
-    return { 
-      success: true, 
-      message: `Selamat datang, ${user.nama} (${role?.nama || 'User'})` 
+    return {
+      success: true,
+      message: 'Jika akun tersedia, instruksi pengaturan ulang akan dikirim ke email tersebut.'
     };
   };
 
-  // Logout via Firebase Auth and clear IndexedDB session
+  const completeMfa = async (code: string): Promise<{ success: boolean; message: string }> => {
+    const resolver = pendingMfaResolver.current;
+    const factor = resolver?.hints.find((hint) => hint.factorId === TotpMultiFactorGenerator.FACTOR_ID);
+    if (!resolver || !factor) {
+      return { success: false, message: 'Tantangan MFA sudah tidak berlaku. Silakan login kembali.' };
+    }
+    if (!/^\d{6}$/.test(code)) {
+      return { success: false, message: 'Masukkan kode autentikator 6 digit.' };
+    }
+    try {
+      const credential = await resolver.resolveSignIn(
+        TotpMultiFactorGenerator.assertionForSignIn(factor.uid, code)
+      );
+      const loggedUser = await loadAuthorizedProfile(credential.user);
+      setFirebaseUser(credential.user);
+      setCurrentUser(loggedUser);
+      suppressAuthRestore.current = false;
+      clearMfaFlow();
+      return { success: true, message: `Selamat datang, ${loggedUser.nama}!` };
+    } catch (error: any) {
+      return { success: false, message: error?.message || 'Verifikasi MFA gagal.' };
+    }
+  };
+
+  const completeMfaEnrollment = async (code: string): Promise<{ success: boolean; message: string; reauthenticationRequired?: boolean }> => {
+    const user = auth?.currentUser;
+    const secret = pendingTotpSecret.current;
+    if (!user || !secret) {
+      return { success: false, message: 'Pendaftaran MFA sudah tidak berlaku. Silakan login kembali.' };
+    }
+    if (!/^\d{6}$/.test(code)) {
+      return { success: false, message: 'Masukkan kode autentikator 6 digit.' };
+    }
+    try {
+      if (!multiFactor(user).enrolledFactors.some((factor) => factor.factorId === TotpMultiFactorGenerator.FACTOR_ID)) {
+        await multiFactor(user).enroll(
+          TotpMultiFactorGenerator.assertionForEnrollment(secret, code),
+          'MYITARU SIMK authenticator'
+        );
+      }
+      const response = await fetch('/api/auth/session', { method: 'DELETE', credentials: 'same-origin' });
+      if (!response.ok) throw new Error('Faktor MFA tersimpan, tetapi sesi lama gagal dibersihkan. Keluar lalu login kembali.');
+      await firebaseSignOut(auth);
+      suppressAuthRestore.current = false;
+      clearMfaFlow();
+      setCurrentUser(null);
+      setFirebaseUser(null);
+      return {
+        success: false,
+        reauthenticationRequired: true,
+        message: 'MFA berhasil didaftarkan. Login kembali dan masukkan kode TOTP untuk membuktikan faktor kedua.'
+      };
+    } catch (error: any) {
+      return { success: false, message: error?.message || 'Pendaftaran MFA gagal.' };
+    }
+  };
+
+  const cancelMfa = async () => {
+    const response = await fetch('/api/auth/session', { method: 'DELETE', credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Sesi server tidak dapat dibersihkan. Silakan coba kembali.');
+    await firebaseSignOut(auth);
+    suppressAuthRestore.current = false;
+    clearMfaFlow();
+    setCurrentUser(null);
+    setFirebaseUser(null);
+  };
+
+  // Revoke the server session before clearing the Firebase client session.
   const logout = async () => {
     if (currentUser) {
       logAuthAttempt({
@@ -435,11 +589,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    try {
-      if (isFirebaseConfigured) await firebaseSignOut(auth).catch(() => {});
-    } catch (_) {}
+    if (isLocalAuthMode) {
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) throw new Error('Sesi lokal tidak dapat diakhiri. Silakan coba kembali.');
+      setCurrentUser(null);
+      setFirebaseUser(null);
+      return;
+    }
 
-    await clearAuthSession();
+    const response = await fetch('/api/auth/session', { method: 'DELETE', credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Sesi server tidak dapat diakhiri. Silakan coba kembali.');
+    if (isFirebaseConfigured) await firebaseSignOut(auth);
     setCurrentUser(null);
     setFirebaseUser(null);
   };
@@ -477,7 +641,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (currentUser && (currentUser.id === id || currentUser.username === data.username)) {
       const updated = { ...currentUser, ...data };
       setCurrentUser(updated);
-      saveAuthSession(updated).catch(() => {});
     }
 
     try {
@@ -523,6 +686,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       isReadOnly,
       login,
+      requestPasswordReset,
+      mfaFlow,
+      completeMfa,
+      completeMfaEnrollment,
+      cancelMfa,
       signInWithGoogle,
       logout,
       hasAccess,

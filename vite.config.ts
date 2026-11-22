@@ -10,6 +10,9 @@ export type AppTarget = 'core' | 'public';
 export function makeConfig(target: AppTarget) {
   const isPublic = target === 'public';
   return defineConfig({
+    define: {
+      'import.meta.env.VITE_APP_TARGET': JSON.stringify(target),
+    },
     // Dua server Vite dev berjalan bersamaan; cache terpisah agar optimasi dependensi tidak saling membatalkan (504 Outdated Optimize Dep).
     cacheDir: isPublic ? 'node_modules/.vite-public' : 'node_modules/.vite',
     build: {

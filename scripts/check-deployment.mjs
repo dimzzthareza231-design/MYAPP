@@ -38,10 +38,10 @@ let hasWarnings = false;
 // 1. Check Node.js Version
 const nodeVersion = process.version;
 const majorVersion = parseInt(nodeVersion.replace('v', '').split('.')[0], 10);
-if (majorVersion >= 18) {
-  logSuccess(`Node.js version compatible: ${nodeVersion} (>= v18 required)`);
+if (majorVersion >= 20) {
+  logSuccess(`Node.js version compatible: ${nodeVersion} (>= v20 required)`);
 } else {
-  logError(`Node.js version ${nodeVersion} is outdated. Node.js v18 or v20+ is required.`);
+  logError(`Node.js version ${nodeVersion} is outdated. Node.js v20+ is required.`);
   hasErrors = true;
 }
 
@@ -156,6 +156,7 @@ if (hasErrors) {
   logWarn(`${COLORS.bold}Pre-deployment check passed with WARNINGS. Build can proceed.${COLORS.reset}\n`);
   process.exit(0);
 } else {
-  logSuccess(`${COLORS.bold}All pre-deployment checks PASSED. Ready for production build!${COLORS.reset}\n`);
+  logSuccess(`${COLORS.bold}Static pre-deployment checks passed.${COLORS.reset}`);
+  logWarn(`${COLORS.bold}These checks do not certify production readiness. Runtime production startup remains blocked until durable storage is implemented.${COLORS.reset}\n`);
   process.exit(0);
 }

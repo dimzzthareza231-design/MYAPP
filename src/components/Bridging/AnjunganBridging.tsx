@@ -257,7 +257,7 @@ function DisplayMonitorTab() {
           INFO
         </span>
         <div className="font-medium truncate">
-          Selamat datang di Klinik MYITARU. Harap selalu menjaga ketertiban, menjaga jarak, dan mengawasi barang bawaan Anda. Bagi pasien BPJS harap siapkan KTP dan Surat Rujukan / Surat Kontrol.
+          Selamat datang di MYITARU. Harap selalu menjaga ketertiban, menjaga jarak, dan mengawasi barang bawaan Anda. Bagi pasien BPJS harap siapkan KTP dan Surat Rujukan / Surat Kontrol.
         </div>
       </div>
     </div>

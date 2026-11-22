@@ -1243,8 +1243,8 @@ export function PasienOperasiTab({
               
               {/* Kop Surat Klinik */}
               <div className="text-center border-b-2 border-slate-900 pb-4 space-y-1">
-                <BrandLogo alt="Logo Klinik" className="w-12 h-12 rounded-xl object-cover mx-auto mb-1.5" />
-                <h2 className="text-xl font-bold uppercase tracking-wider text-slate-900">KLINIK UMUM MYITARU MEDIKA</h2>
+                <BrandLogo alt="Logo MYITARU" className="w-12 h-12 rounded-xl object-cover mx-auto mb-1.5" />
+                <h2 className="text-xl font-bold uppercase tracking-wider text-slate-900">MYITARU</h2>
                 <p className="text-xs text-slate-600">Jl. Kesehatan Raya No. 45, Jakarta Selatan | Telp: (021) 7890-1234 | Email: info@myitaru-klinik.id</p>
                 <p className="text-xs font-bold text-slate-800 uppercase tracking-widest pt-1">INSTALASI BEDAH SENTRAL & ANESTESIOLOGI</p>
               </div>

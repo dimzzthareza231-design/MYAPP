@@ -327,7 +327,7 @@ export function PoliklinikQueueDisplay({
         </div>
         <div className="w-full overflow-hidden relative flex items-center">
           <div className="animate-marquee font-medium text-sky-200 text-xs sm:text-sm">
-            📢 Selamat datang di Poliklinik Rawat Jalan MYITARU SIMK. Harap menjaga ketertiban, membawa kartu identitas (KTP) &amp; Kartu BPJS / Surat Rujukan saat dipanggil dokter. Mohon tertib di ruang tunggu dan perhatikan panggilan nomor antrean pada layar monitor. Terima kasih atas kerjasama Anda.
+            📢 Selamat datang di layanan rawat jalan MYITARU. Harap menjaga ketertiban, membawa kartu identitas (KTP) &amp; Kartu BPJS / Surat Rujukan saat dipanggil dokter. Mohon tertib di ruang tunggu dan perhatikan panggilan nomor antrean pada layar monitor. Terima kasih atas kerjasama Anda.
           </div>
         </div>
       </div>

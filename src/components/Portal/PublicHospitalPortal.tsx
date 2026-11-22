@@ -27,6 +27,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence, MotionConfig } from 'motion/react';
+import { QRCodeSVG } from 'qrcode.react';
 import toast from 'react-hot-toast';
 import {
   HOSPITAL_SERVICES,
@@ -46,13 +47,18 @@ import {
 import { type Doctor } from '../../data/seedData';
 import { PWAInstallButton } from '../PWA/PWAInstallButton';
 import { BrandLogo } from '../Common/BrandLogo';
+import { SystemCopyrightFooterBadge } from '../AboutCopyrightModal';
 
-import heroHospitalImg from '../../assets/images/hospital_hero_atrium_1794532010598.jpg';
-import excellenceSuiteImg from '../../assets/images/excellence_medical_suite_1794532010941.jpg';
-import doctorConsultImg from '../../assets/images/specialist_doctor_consult_1794532010547.jpg';
+import heroHospitalImg from '../../assets/images/myitaru_building_hero.jpg';
+import campusDropoffImg from '../../assets/images/myitaru_campus_dropoff.jpg';
+import lobbyMainImg from '../../assets/images/myitaru_lobby_main_branded.jpg';
+import lobbyApmImg from '../../assets/images/myitaru_lobby_apm_01.jpg';
+import excellenceSuiteImg from '../../assets/images/myitaru_center_of_excellence.jpg';
+import doctorConsultImg from '../../assets/images/myitaru_poli_consult.jpg';
+import medicalEducationImg from '../../assets/images/edukasi_medis_myitaru.jpg';
+import inpatientSuiteImg from '../../assets/images/myitaru_inpatient_room.jpg';
+import physiotherapyImg from '../../assets/images/myitaru_physiotherapy_rehab.jpg';
 import mobileLifestyleImg from '../../assets/images/patient_mobile_lifestyle_1794532011071.jpg';
-import inpatientSuiteImg from '../../assets/images/inpatient_suite_room_1795141971596.jpg';
-import physiotherapyImg from '../../assets/images/physiotherapy_rehab_center_1795141971685.jpg';
 
 interface LiveDoctor extends Doctor {
   kuota_tersisa?: number;
@@ -149,6 +155,62 @@ const HERO_SLIDES: HeroSlide[] = [
     primaryActionLabel: 'Lihat Kelas Kamar',
     primaryActionMode: 'daftar',
     primaryAnchor: 'rawat-inap'
+  },
+  {
+    id: 'slide-campus',
+    eyebrow: 'KAMPUS KESEHATAN MYITARU · AKSES FASILITAS',
+    titlePrefix: 'Akses Kampus dan Area Drop-off',
+    titleHighlight: 'Dirancang untuk Kunjungan yang Lebih Mudah.',
+    description:
+      'Temukan akses utama fasilitas MYITARU dan lanjutkan ke informasi layanan sebelum berkunjung.',
+    image: campusDropoffImg,
+    imageAlt: 'Area akses dan drop-off kampus MYITARU',
+    tabLabel: 'Akses Kampus',
+    primaryActionLabel: 'Jelajahi Layanan',
+    primaryActionMode: 'daftar',
+    primaryAnchor: 'portal-workspace'
+  },
+  {
+    id: 'slide-lobby',
+    eyebrow: 'FASILITAS MYITARU · LOBI UTAMA',
+    titlePrefix: 'Lingkungan yang Nyaman',
+    titleHighlight: 'Dengan Layanan Terpadu sejak Kedatangan.',
+    description:
+      'Informasi layanan, pendaftaran, dan bantuan kunjungan tersedia dalam satu portal.',
+    image: lobbyMainImg,
+    imageAlt: 'Lobi utama MYITARU',
+    tabLabel: 'Lobi Utama',
+    primaryActionLabel: 'Lihat Informasi',
+    primaryActionMode: 'daftar',
+    primaryAnchor: 'portal-workspace'
+  },
+  {
+    id: 'slide-apm',
+    eyebrow: 'PENDAFTARAN MANDIRI · FASILITAS MYITARU',
+    titlePrefix: 'Pendaftaran Pasien yang Lebih Praktis',
+    titleHighlight: 'Didukung Informasi dan Layanan Terpadu.',
+    description:
+      'Akses informasi kunjungan dan layanan pendaftaran MYITARU secara lebih mudah, baik sebelum maupun saat berada di fasilitas.',
+    image: lobbyApmImg,
+    imageAlt: 'Area pendaftaran mandiri APM di lobi MYITARU',
+    tabLabel: 'Pendaftaran Mandiri',
+    primaryActionLabel: 'Mulai Pendaftaran',
+    primaryActionMode: 'daftar',
+    primaryAnchor: 'formulir-pendaftaran'
+  },
+  {
+    id: 'slide-education',
+    eyebrow: 'EDUKASI MEDIS · MYITARU',
+    titlePrefix: 'Informasi Kesehatan yang Mudah Dipahami',
+    titleHighlight: 'Untuk Membantu Pasien Mengambil Langkah Tepat.',
+    description:
+      'Baca panduan kesehatan dan informasi layanan yang disusun untuk mendukung perjalanan perawatan pasien.',
+    image: medicalEducationImg,
+    imageAlt: 'Edukasi medis MYITARU',
+    tabLabel: 'Edukasi Medis',
+    primaryActionLabel: 'Baca Panduan',
+    primaryActionMode: 'daftar',
+    primaryAnchor: 'artikel'
   }
 ];
 
@@ -220,6 +282,7 @@ export const PublicHospitalPortal: React.FC = () => {
     tanggal: string;
     jam_praktek: string;
     penjamin: string;
+    qr_value: string;
   } | null>(null);
 
   // Recent tickets saved locally for quick queue re-check
@@ -402,17 +465,6 @@ export const PublicHospitalPortal: React.FC = () => {
       if (!res.ok || !data?.success) {
         toast.error(data?.message || 'Gagal memproses pendaftaran online.');
         return;
-      }
-
-      if (data.token) {
-        try {
-          sessionStorage.setItem('myitaru_patient_token', data.token);
-          if (data.dossier) {
-            localStorage.setItem('myitaru_patient_cached_dossier', JSON.stringify(data.dossier));
-          }
-        } catch {
-          // Safe fallback if storage unavailable
-        }
       }
 
       const ticket: RecentTicketSummary = {
@@ -688,7 +740,7 @@ export const PublicHospitalPortal: React.FC = () => {
                     onClick={() => scrollToWorkspace(undefined, 'cabang')}
                     className="w-full text-left px-3 py-3 rounded-xl font-semibold text-slate-700 hover:bg-slate-50"
                   >
-                    Lokasi Klinik &amp; Kontak
+                    Lokasi &amp; Kontak
                   </button>
                   <button
                     type="button"
@@ -1184,6 +1236,17 @@ export const PublicHospitalPortal: React.FC = () => {
                                 <span className="font-bold text-slate-900 text-right">{bookingSuccess.penjamin}</span>
                               </div>
                             </div>
+
+                            {bookingSuccess.qr_value && (
+                              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex flex-col items-center gap-2 text-center">
+                                <QRCodeSVG value={bookingSuccess.qr_value} size={144} level="M" />
+                                <p className="text-xs font-bold text-blue-900">QR Reservasi MYITARU</p>
+                                <p className="text-[11px] text-slate-600">
+                                  Tunjukkan QR ini kepada petugas saat tiba pada tanggal kunjungan untuk check-in.
+                                  QR terenkripsi dan hanya dapat diproses setelah petugas login.
+                                </p>
+                              </div>
+                            )}
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <button
@@ -2452,7 +2515,7 @@ export const PublicHospitalPortal: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-xs sm:text-sm text-blue-200 leading-relaxed max-w-md">
-                  Layanan Klinik Utama &amp; Rawat Inap 24 Jam berstandar keselamatan pasien KARS Paripurna, terintegrasi pendaftaran online, antrean real-time, BPJS Kesehatan, dan SatuSehat Kemenkes RI.
+                  Layanan kesehatan dan rawat inap 24 jam berstandar keselamatan pasien KARS Paripurna, terintegrasi pendaftaran online, antrean real-time, BPJS Kesehatan, dan SatuSehat Kemenkes RI.
                 </p>
                 <p className="text-xs text-sky-200 font-medium">
                   Jam Besuk Rawat Inap: Pagi {VISITING_HOURS_INFO.morningSession} · Sore{' '}
@@ -2537,6 +2600,7 @@ export const PublicHospitalPortal: React.FC = () => {
               <span>
                 © {new Date().getFullYear()} MYITARU SIMK · Portal Publik Layanan Pasien
               </span>
+              <SystemCopyrightFooterBadge />
             </div>
           </div>
         </footer>

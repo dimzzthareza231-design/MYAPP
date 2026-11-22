@@ -158,9 +158,82 @@ export function setCloudStatus(patch: Partial<CloudStatus>) {
 // 3. Generic System Data Cloud Persistence (system_data/{key})
 // Replaces physical localStorage completely for all module datasets!
 const writeDebounceTimers = new Map<string, any>();
+const storageMode = import.meta.env.VITE_STORAGE_MODE || 'firebase';
+if (!['mysql', 'firebase', 'hybrid', 'memory', 'd1'].includes(storageMode)) {
+  throw new Error(`Unsupported VITE_STORAGE_MODE: ${storageMode}.`);
+}
+const isCoreApp = import.meta.env.VITE_APP_TARGET !== 'public';
+export const usesServerPersistence = isCoreApp && storageMode !== 'firebase';
+const useServerPersistence = usesServerPersistence;
+
+async function callCoreApi<T>(path: string, method: 'GET' | 'POST' | 'PATCH', data?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Storage-Mode': storageMode
+    },
+    body: data === undefined ? undefined : JSON.stringify(data)
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success) {
+    throw new Error(payload?.error || payload?.code || `Core API request failed (${response.status}).`);
+  }
+  return payload as T;
+}
+
+function mapApiPatient(value: any): Pasien {
+  return {
+    id: value.id,
+    no_rm: value.no_rm || '',
+    nik: value.nik || '',
+    nama: value.nama || '',
+    tanggal_lahir: value.tanggal_lahir || '',
+    tgl_lahir: value.tanggal_lahir || '',
+    jenis_kelamin: value.jenis_kelamin || 'L',
+    alamat: value.alamat || '',
+    telepon: value.no_hp || '',
+    no_hp: value.no_hp || '',
+    golongan_darah: value.golongan_darah || '',
+    penjamin: value.penjamin || 'Umum',
+    status: value.status || 'Aktif',
+    alergi: value.alergi || [],
+    keluhan_utama: value.keluhan_utama || '',
+    diagnosa_primer: value.diagnosa_primer || ''
+  };
+}
+
+async function callSystemDataApi(key: string, method: 'GET' | 'PUT', data?: string): Promise<any> {
+  const response = await fetch(`/api/v1/system-data/${encodeURIComponent(key)}`, {
+    method,
+    credentials: 'same-origin',
+    headers: method === 'PUT'
+      ? { 'Content-Type': 'application/json', 'X-Storage-Mode': storageMode }
+      : { 'X-Storage-Mode': storageMode },
+    body: method === 'PUT' ? JSON.stringify({ data }) : undefined
+  });
+  if (response.status === 404 && method === 'GET') return null;
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(body?.code || `System data request failed with status ${response.status}.`);
+  }
+  return body;
+}
 
 export async function saveSystemDataCloud(key: string, data: any): Promise<void> {
-  if (!key || !isFirebaseConfigured || !db || !auth?.currentUser) return;
+  if (!key) return;
+  if (useServerPersistence) {
+    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to save system data.');
+    const serialized = typeof data === 'string' ? data : JSON.stringify(data);
+    if (typeof serialized !== 'string' || new TextEncoder().encode(serialized).length > 900000) {
+      throw new Error('System data payload exceeds the 900 KB limit.');
+    }
+    await callSystemDataApi(key, 'PUT', serialized);
+    setCloudStatus({ lastSync: new Date(), syncedKeysCount: currentCloudStatus.syncedKeysCount + 1 });
+    return;
+  }
+  if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
 
   setCloudStatus({ isSyncing: true, pendingWrites: currentCloudStatus.pendingWrites + 1 });
 
@@ -206,7 +279,17 @@ export async function saveSystemDataCloud(key: string, data: any): Promise<void>
 }
 
 export async function getSystemDataCloud(key: string): Promise<any | null> {
-  if (!key || !isFirebaseConfigured || !db || !auth?.currentUser) return null;
+  if (!key || !auth?.currentUser) return null;
+  if (useServerPersistence) {
+    const record = await callSystemDataApi(key, 'GET');
+    if (!record || typeof record.data !== 'string') return null;
+    try {
+      return JSON.parse(record.data);
+    } catch {
+      return record.data;
+    }
+  }
+  if (!isFirebaseConfigured || !db) return null;
   const path = `system_data/${key}`;
   try {
     const snap = await getDoc(doc(db, 'system_data', key));
@@ -226,7 +309,25 @@ export async function getSystemDataCloud(key: string): Promise<any | null> {
 }
 
 export function subscribeSystemData(key: string, onData: (data: any) => void): () => void {
-  if (!key || !isFirebaseConfigured || !db || !auth?.currentUser) return () => {};
+  if (!key || !auth?.currentUser) return () => {};
+  if (useServerPersistence) {
+    let active = true;
+    const poll = async () => {
+      try {
+        const value = await getSystemDataCloud(key);
+        if (active && value !== null) onData(value);
+      } catch (error) {
+        console.warn('[Persistence] System data refresh failed:', error);
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 15_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }
+  if (!isFirebaseConfigured || !db) return () => {};
   const path = `system_data/${key}`;
   try {
     return onSnapshot(doc(db, 'system_data', key), (snap) => {
@@ -251,8 +352,24 @@ export function subscribeSystemData(key: string, onData: (data: any) => void): (
 // 4. Clinical Collections (Pasien, Kunjungan, Dokter, Perawat, Settings)
 
 // PASIEN
-export async function savePasienCloud(p: Pasien): Promise<void> {
-  if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
+export async function savePasienCloud(p: Pasien): Promise<Pasien | null> {
+  if (useServerPersistence) {
+    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to register a patient.');
+    const result = await callCoreApi<{ data: any }>('/api/v1/patients', 'POST', {
+      nik: p.nik,
+      nama: p.nama,
+      tanggal_lahir: p.tanggal_lahir || p.tgl_lahir || '',
+      jenis_kelamin: p.jenis_kelamin,
+      alamat: p.alamat || '',
+      no_hp: p.no_hp || p.telepon || '',
+      golongan_darah: p.golongan_darah || '',
+      penjamin: p.penjamin || 'Umum',
+      alergi: Array.isArray(p.alergi) ? p.alergi : []
+    });
+    setCloudStatus({ lastSync: new Date() });
+    return mapApiPatient(result.data);
+  }
+  if (!isFirebaseConfigured || !db || !auth?.currentUser) return null;
   const path = `pasien/${p.id}`;
   try {
     await setDoc(doc(db, 'pasien', String(p.id)), {
@@ -260,13 +377,20 @@ export async function savePasienCloud(p: Pasien): Promise<void> {
       updatedAt: new Date().toISOString()
     }, { merge: true });
     setCloudStatus({ lastSync: new Date() });
+    return p;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
 }
 
-export async function updatePasienCloud(id: string, updates: Partial<Pasien>): Promise<void> {
-  if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
+export async function updatePasienCloud(id: string, updates: Partial<Pasien>): Promise<Pasien | null> {
+  if (useServerPersistence) {
+    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to update a patient.');
+    const result = await callCoreApi<{ data: any }>(`/api/v1/patients/${encodeURIComponent(id)}`, 'PATCH', updates);
+    setCloudStatus({ lastSync: new Date() });
+    return mapApiPatient(result.data);
+  }
+  if (!isFirebaseConfigured || !db || !auth?.currentUser) return null;
   const path = `pasien/${id}`;
   try {
     await updateDoc(doc(db, 'pasien', String(id)), {
@@ -274,12 +398,16 @@ export async function updatePasienCloud(id: string, updates: Partial<Pasien>): P
       updatedAt: new Date().toISOString()
     });
     setCloudStatus({ lastSync: new Date() });
+    return null;
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
   }
 }
 
 export async function batchSeedPasienCloud(patients: Pasien[]): Promise<void> {
+  if (useServerPersistence) {
+    throw new Error('Bulk patient seeding is disabled for server persistence; patients must be registered through the patient API.');
+  }
   if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
   try {
     const chunks: Pasien[][] = [];
@@ -301,8 +429,29 @@ export async function batchSeedPasienCloud(patients: Pasien[]): Promise<void> {
 }
 
 // KUNJUNGAN
-export async function saveKunjunganCloud(k: Kunjungan): Promise<void> {
-  if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
+export async function saveKunjunganCloud(k: Kunjungan): Promise<Kunjungan | null> {
+  if (useServerPersistence) {
+    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to register an appointment.');
+    const result = await callCoreApi<{ data: any }>('/api/v1/appointments', 'POST', {
+      pasien_id: k.pasien_id,
+      poli: k.poli_id,
+      dokter: k.dokter_id,
+      tanggal: k.tanggal,
+      tipe: k.tipe
+    });
+    setCloudStatus({ lastSync: new Date() });
+    return {
+      ...k,
+      id: result.data.id,
+      pasien_id: result.data.pasien_id,
+      tanggal: result.data.tanggal,
+      poli_id: result.data.poli,
+      dokter_id: result.data.dokter,
+      status: result.data.status === 'Dibatalkan' ? 'Batal' : result.data.status,
+      nomor_antrian: result.data.nomor_antrian
+    };
+  }
+  if (!isFirebaseConfigured || !db || !auth?.currentUser) return null;
   const path = `kunjungan/${k.id}`;
   try {
     await setDoc(doc(db, 'kunjungan', String(k.id)), {
@@ -310,12 +459,21 @@ export async function saveKunjunganCloud(k: Kunjungan): Promise<void> {
       updatedAt: new Date().toISOString()
     }, { merge: true });
     setCloudStatus({ lastSync: new Date() });
+    return k;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
 }
 
 export async function updateKunjunganCloud(id: string, updates: Partial<Kunjungan>): Promise<void> {
+  if (useServerPersistence) {
+    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to update an appointment.');
+    await callCoreApi<{ data: unknown }>(`/api/v1/appointments/${encodeURIComponent(id)}`, 'PATCH', {
+      status: updates.status
+    });
+    setCloudStatus({ lastSync: new Date() });
+    return;
+  }
   if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
   const path = `kunjungan/${id}`;
   try {
@@ -330,6 +488,9 @@ export async function updateKunjunganCloud(id: string, updates: Partial<Kunjunga
 }
 
 export async function batchSeedKunjunganCloud(visits: Kunjungan[]): Promise<void> {
+  if (useServerPersistence) {
+    throw new Error('Bulk appointment seeding is disabled for server persistence; appointments must be created through the appointment API.');
+  }
   if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
   try {
     const chunks: Kunjungan[][] = [];
@@ -352,6 +513,12 @@ export async function batchSeedKunjunganCloud(visits: Kunjungan[]): Promise<void
 
 // DOKTER
 export async function saveDokterCloud(d: MasterDokter): Promise<void> {
+  if (useServerPersistence) {
+    const current = await getSystemDataCloud('hospital_dokter');
+    const doctors = Array.isArray(current) ? current as MasterDokter[] : [];
+    await saveSystemDataCloud('hospital_dokter', [d, ...doctors.filter((item) => item.id !== d.id)]);
+    return;
+  }
   if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
   const path = `dokter/${d.id}`;
   try {
@@ -366,6 +533,10 @@ export async function saveDokterCloud(d: MasterDokter): Promise<void> {
 }
 
 export async function batchSeedDokterCloud(doctors: MasterDokter[]): Promise<void> {
+  if (useServerPersistence) {
+    await saveSystemDataCloud('hospital_dokter', doctors);
+    return;
+  }
   if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
   try {
     const batch = writeBatch(db);
@@ -381,6 +552,12 @@ export async function batchSeedDokterCloud(doctors: MasterDokter[]): Promise<voi
 
 // PERAWAT
 export async function savePerawatCloud(n: MasterPerawat): Promise<void> {
+  if (useServerPersistence) {
+    const current = await getSystemDataCloud('hospital_perawat');
+    const nurses = Array.isArray(current) ? current as MasterPerawat[] : [];
+    await saveSystemDataCloud('hospital_perawat', [n, ...nurses.filter((item) => item.id !== n.id)]);
+    return;
+  }
   if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
   const path = `perawat/${n.id}`;
   try {
@@ -395,6 +572,10 @@ export async function savePerawatCloud(n: MasterPerawat): Promise<void> {
 }
 
 export async function batchSeedPerawatCloud(nurses: MasterPerawat[]): Promise<void> {
+  if (useServerPersistence) {
+    await saveSystemDataCloud('hospital_perawat', nurses);
+    return;
+  }
   if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
   try {
     const batch = writeBatch(db);
@@ -410,6 +591,10 @@ export async function batchSeedPerawatCloud(nurses: MasterPerawat[]): Promise<vo
 
 // HOSPITAL SETTINGS
 export async function saveHospitalSettingsCloud(settings: any): Promise<void> {
+  if (useServerPersistence) {
+    await saveSystemDataCloud('hospital_settings', settings);
+    return;
+  }
   if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
   const path = 'hospital_settings/main';
   try {

@@ -2,7 +2,9 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation, useSearchParams, useParams } from 'react-router-dom';
 import TopNavbar from '../components/TopNavbar';
 import { findModule, MODULE_REGISTRY } from '../data/moduleRegistry';
+import { isModuleAvailableInMode, type OperatingMode } from '../data/operatingModes';
 import { useAuth } from '../contexts/AuthContext';
+import { useHospital } from '../contexts/HospitalContext';
 import toast from 'react-hot-toast';
 import { 
   ChevronLeft, ChevronRight, Users, UserCheck, UserPlus,
@@ -199,6 +201,8 @@ export default function ModuleLayout() {
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
 
   const { hasAccess, currentUser } = useAuth();
+  const { hospitalSettings } = useHospital();
+  const operatingMode: OperatingMode = hospitalSettings.operatingMode === 'SIMRS' ? 'SIMRS' : 'SIMK';
   const { moduleId: paramModuleId } = useParams();
 
   useEffect(() => {
@@ -208,19 +212,21 @@ export default function ModuleLayout() {
   // Extract module ID from URL (e.g. /modul/pendaftaran -> pendaftaran)
   const pathParts = location.pathname.split('/');
   const moduleId = paramModuleId || pathParts[pathParts.length - 1];
+  const found = findModule(moduleId);
+  const modeAllowsModule = !found || isModuleAvailableInMode(moduleId, operatingMode);
 
   // Role-based module access check
-  const hasModuleAccess = !moduleId || !currentUser || hasAccess(moduleId);
+  const hasModuleAccess = (!moduleId || !currentUser || hasAccess(moduleId)) && modeAllowsModule;
 
   // Proteksi: jika user tidak punya akses, redirect ke dashboard
   useEffect(() => {
     if (moduleId && currentUser) {
-      if (!hasAccess(moduleId)) {
-        toast.error('Anda tidak memiliki akses ke modul ini');
+      if (!hasAccess(moduleId) || !modeAllowsModule) {
+        toast.error(modeAllowsModule ? 'Anda tidak memiliki akses ke modul ini' : `Modul tidak tersedia pada mode ${operatingMode}.`);
         navigate('/dashboard');
       }
     }
-  }, [moduleId, currentUser, navigate, hasAccess]);
+  }, [moduleId, currentUser, navigate, hasAccess, modeAllowsModule, operatingMode]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -263,7 +269,6 @@ export default function ModuleLayout() {
     );
   }
 
-  const found = findModule(moduleId);
   const config = found ? found.module : { label: moduleId, icon: '⚙️', submenus: [] };
   const category = found ? found.category : null;
 
