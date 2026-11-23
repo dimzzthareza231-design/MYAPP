@@ -7,7 +7,7 @@
 // Tier 3: Deterministic Clinical Decision Support Engine (PPK Kemenkes, WHO, Fornas)
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 export interface AiExecutionResult<T = any> {
   data: T;
@@ -38,22 +38,19 @@ export function parseSafeJson<T = any>(rawText: string | undefined | null): T | 
   try {
     return JSON.parse(cleaned) as T;
   } catch {
-    const firstBrace = cleaned.indexOf('{');
-    const lastBrace = cleaned.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
+    // Coba objek dan array yang tertanam dalam teks; yang dimulai lebih awal didahulukan
+    // (sebelumnya array berisi objek, mis. "Hasil: [{...},{...}]", gagal karena hanya {...},{...} yang dicoba).
+    const candidates = [
+      [cleaned.indexOf('{'), cleaned.lastIndexOf('}')],
+      [cleaned.indexOf('['), cleaned.lastIndexOf(']')]
+    ]
+      .filter(([start, end]) => start !== -1 && end > start)
+      .sort((a, b) => a[0] - b[0]);
+    for (const [start, end] of candidates) {
       try {
-        return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1)) as T;
+        return JSON.parse(cleaned.slice(start, end + 1)) as T;
       } catch {
-        return null;
-      }
-    }
-    const firstBracket = cleaned.indexOf('[');
-    const lastBracket = cleaned.lastIndexOf(']');
-    if (firstBracket !== -1 && lastBracket > firstBracket) {
-      try {
-        return JSON.parse(cleaned.slice(firstBracket, lastBracket + 1)) as T;
-      } catch {
-        return null;
+        // coba kandidat berikutnya
       }
     }
     return null;
@@ -135,7 +132,8 @@ export function analyzeClinicalNoteDeterministic(noteText: string) {
   let warnings: string[] = ['Pastikan verifikasi fisik dan anamnesis ulang oleh DPJP.'];
 
   // Cardiovascular
-  if (lower.includes('dada') || lower.includes('jantung') || lower.includes('tensi') || lower.includes('hipertensi') || lower.includes('tekanan darah')) {
+  // Pencocokan kata utuh: 'tensi' tidak boleh cocok dengan 'hipotensi', dan 'dm' tidak boleh cocok dengan 'admisi'.
+  if (lower.includes('dada') || lower.includes('jantung') || /\btensi\b/.test(lower) || lower.includes('hipertensi') || lower.includes('tekanan darah')) {
     primaryCode = 'I10';
     primaryDesc = 'Essential (primary) hypertension';
     primaryNameId = 'Hipertensi Primer / Esensial';
@@ -148,7 +146,7 @@ export function analyzeClinicalNoteDeterministic(noteText: string) {
     warnings = ['Waspadai gejala krisis hipertensi: nyeri kepala hebat, pandangan kabur, atau nyeri dada menjalar.'];
   }
   // Endocrine / Diabetes
-  else if (lower.includes('gula') || lower.includes('diabetes') || lower.includes('dm') || lower.includes('lemas') && lower.includes('haus')) {
+  else if (lower.includes('gula') || lower.includes('diabetes') || /\bdm\b/.test(lower) || (lower.includes('lemas') && lower.includes('haus'))) {
     primaryCode = 'E11.9';
     primaryDesc = 'Type 2 diabetes mellitus without complications';
     primaryNameId = 'Diabetes Melitus Tipe 2 Tanpa Komplikasi';
@@ -275,6 +273,13 @@ export function generateClinicalDecisionSupportDeterministic(input: {
   } else if (rr >= 21) {
     flags.push({ parameter: 'Pernapasan (RR)', value: `${rr} x/m`, severity: 'warning', message: 'Takipnea Ringan' });
     newsScore += 2;
+  } else if (rr <= 8) {
+    // NEWS2: RR <= 8 = 3 poin (depresi napas); sebelumnya tidak dinilai sama sekali.
+    flags.push({ parameter: 'Pernapasan (RR)', value: `${rr} x/m`, severity: 'critical', message: 'Bradipnea Berat — Risiko depresi pernapasan' });
+    newsScore += 3;
+  } else if (rr <= 11) {
+    flags.push({ parameter: 'Pernapasan (RR)', value: `${rr} x/m`, severity: 'warning', message: 'Bradipnea Ringan' });
+    newsScore += 1;
   }
 
   // SpO2
@@ -293,6 +298,10 @@ export function generateClinicalDecisionSupportDeterministic(input: {
   } else if (temp >= 38.0) {
     flags.push({ parameter: 'Suhu Tubuh', value: `${temp}°C`, severity: 'warning', message: 'Febris Akut' });
     newsScore += 1;
+  } else if (temp <= 35.0) {
+    // NEWS2: suhu <= 35.0°C = 3 poin; hipotermia sebelumnya tidak dinilai.
+    flags.push({ parameter: 'Suhu Tubuh', value: `${temp}°C`, severity: 'critical', message: 'Hipotermia' });
+    newsScore += 3;
   }
 
   // Triage logic
@@ -578,7 +587,7 @@ export function generateClinicalDecisionSupportDeterministic(input: {
     };
   }
   // 6. Cardiovascular / Hypertension (ONLY if BP >= 140/90 or cardiac keywords)
-  else if (systolic >= 140 || diastolic >= 90 || complaint.includes('hipertensi') || complaint.includes('tensi') || complaint.includes('nyeri dada') || complaint.includes('jantung')) {
+  else if (systolic >= 140 || diastolic >= 90 || complaint.includes('hipertensi') || /\btensi\b/.test(complaint) || complaint.includes('nyeri dada') || complaint.includes('jantung')) {
     primaryDiag = {
       code: complaint.includes('nyeri dada') ? 'I20.9' : 'I10',
       nameId: complaint.includes('nyeri dada') ? 'Angina Pektoris / Evaluasi Nyeri Dada Kardiak' : 'Hipertensi Primer (Esensial)',
@@ -724,8 +733,11 @@ export function auditBpjsClaimDeterministic(input: {
 // ═══════════════════════════════════════════════════════════════════════════
 // 4. AI PHARMACOVIGILANCE & DRUG INTERACTION ENGINE
 // ═══════════════════════════════════════════════════════════════════════════
-export function checkDrugInteractionsDeterministic(medications: any[], patientContext?: any) {
-  const medNames = medications.map(m => (typeof m === 'string' ? m : m.nama || m.name || '').toLowerCase());
+export function checkDrugInteractionsDeterministic(medications: any[], _patientContext?: any) {
+  // Input berasal dari body request: abaikan nilai non-array dan item null agar tidak melempar TypeError.
+  const medNames = (Array.isArray(medications) ? medications : []).map(m =>
+    String((typeof m === 'string' ? m : m?.nama || m?.name) || '').toLowerCase()
+  );
   const interactions: Array<{ drugA: string; drugB: string; severity: 'Kontraindikasi' | 'Mayor' | 'Moderat' | 'Minor' | 'Aman'; mechanism: string; action: string }> = [];
 
   // Check known drug interaction pairs
@@ -775,7 +787,6 @@ export function analyzeRadiologyDeterministic(input: {
   patientAge?: any;
   gender?: string;
 }) {
-  const exam = String(input.examinationName || 'Foto Thorax PA').toLowerCase();
   const modality = String(input.modality || 'X-Ray').toUpperCase();
   const dx = String(input.clinicalDiagnosis || '').toLowerCase();
 
@@ -931,12 +942,12 @@ export function generateDischargeSummaryDeterministic(input: {
 // ═══════════════════════════════════════════════════════════════════════════
 // 8. AI MEDICAL SEARCH & CLINICAL EVIDENCE
 // ═══════════════════════════════════════════════════════════════════════════
-export function generateMedicalSearchEvidenceDeterministic(query: string, context?: string) {
+export function generateMedicalSearchEvidenceDeterministic(query: string, _context?: string) {
   const q = String(query || '').trim();
   const qLower = q.toLowerCase();
 
   let answer = '';
-  let sources = [
+  const sources = [
     { title: 'Kementerian Kesehatan RI — Panduan Praktik Klinis Dokter di Faskes', url: 'https://kemkes.go.id' },
     { title: 'Badan Pengawas Obat dan Makanan (BPOM) — PIONAS Formularium', url: 'https://pionas.pom.go.id' },
     { title: 'Ikatan Dokter Indonesia (IDI) — Panduan Praktik Klinis', url: 'https://idionline.org' }
@@ -1041,7 +1052,7 @@ export function generateGeospatialHealthLocatorDeterministic(query: string, cate
 // ═══════════════════════════════════════════════════════════════════════════
 // 10. AI CLINICAL COPILOT (CONVERSATIONAL ASSISTANT)
 // ═══════════════════════════════════════════════════════════════════════════
-export function generateClinicalCopilotReplyDeterministic(message: string, context?: any) {
+export function generateClinicalCopilotReplyDeterministic(message: string, _context?: any) {
   const msg = String(message || '').toLowerCase();
 
   let reply = 'Halo Dokter, saya AI Clinical Assistant MYITARU. Sistem siap membantu telaah klinis, rekomendasi kodefikasi ICD-10/ICD-9, kalkulasi dosis obat, serta panduan audit klaim BPJS. Apa yang dapat saya bantu?';

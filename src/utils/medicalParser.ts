@@ -62,24 +62,46 @@ export function parseMedicalTranscript(transcript: string) {
   });
   
   // 4. Deteksi Alergi
+  // "tidak ada alergi" / "tanpa alergi" bukan temuan alergi.
+  const negatedAllergy = /\b(tidak ada|tidak punya|tidak memiliki|tanpa|menyangkal)\s+(riwayat\s+)?alergi\b/.test(text);
   MEDICAL_KEYWORDS.alergi.forEach(keyword => {
     if (text.includes(keyword)) {
       const index = text.indexOf(keyword);
-      const afterKeyword = text.substring(index + keyword.length, index + keyword.length + 30);
-      const allergen = afterKeyword.split(/[,.\s]/)[0];
-      result.alergi_detected.push({ allergen: allergen || keyword });
+      // trimStart: sebelumnya spasi setelah kata kunci membuat nama alergen kosong ("alergi udang" -> "alergi").
+      const afterKeyword = text.substring(index + keyword.length, index + keyword.length + 30).trimStart();
+      let allergen = afterKeyword.split(/[,.\s]/)[0];
+      if (keyword === 'alergi') {
+        if (negatedAllergy) return;
+        if (allergen === 'terhadap' || allergen === 'obat' || allergen === 'makanan') {
+          allergen = afterKeyword.split(/[,.\s]+/)[1] || allergen;
+        }
+        if (!allergen) return;
+      } else {
+        allergen = keyword;
+      }
+      if (!result.alergi_detected.some((a: { allergen: string }) => a.allergen === allergen)) {
+        result.alergi_detected.push({ allergen });
+      }
     }
   });
   
   // 5. Deteksi Tanda Vital
-  const tdMatch = text.match(/(\d{2,3})\s*[\/\\]\s*(\d{2,3})/);
-  if (tdMatch) result.tanda_vital.tekanan_darah = `${tdMatch[1]}/${tdMatch[2]} mmHg`;
+  // Ambil pasangan angka pertama yang masuk akal sebagai tekanan darah (bukan tanggal seperti 12/05).
+  for (const match of text.matchAll(/(\d{2,3})\s*[\/\\]\s*(\d{2,3})/g)) {
+    const systolic = Number(match[1]);
+    const diastolic = Number(match[2]);
+    if (systolic >= 60 && systolic <= 260 && diastolic >= 30 && diastolic <= 160 && systolic > diastolic) {
+      result.tanda_vital.tekanan_darah = `${systolic}/${diastolic} mmHg`;
+      break;
+    }
+  }
   
   const nadiMatch = text.match(/nadi\s*(\d{2,3})/i);
   if (nadiMatch) result.tanda_vital.nadi = `${nadiMatch[1]} bpm`;
   
-  const suhuMatch = text.match(/suhu\s*(\d{2}\.?\d?)/i);
-  if (suhuMatch) result.tanda_vital.suhu = `${suhuMatch[1]} °C`;
+  // Terima koma desimal ("suhu 38,5") yang lazim dalam bahasa Indonesia.
+  const suhuMatch = text.match(/suhu\s*(\d{2}(?:[.,]\d)?)/i);
+  if (suhuMatch) result.tanda_vital.suhu = `${suhuMatch[1].replace(',', '.')} °C`;
   
   const spo2Match = text.match(/spo2\s*(\d{2,3})/i);
   if (spo2Match) result.tanda_vital.spo2 = `${spo2Match[1]}%`;

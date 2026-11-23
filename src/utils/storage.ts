@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 // Replaces physical localStorage completely for all module datasets or synchronizes with localStorage safely!
 export function useStorage<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -21,11 +21,19 @@ export function useStorage<T>(key: string, initialValue: T): [T, React.Dispatch<
           return;
         }
       }
-      const valueToStore = value instanceof Function ? (value as (prev: T) => T)(storedValue) : value;
-      setStoredValue(valueToStore);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(key, JSON.stringify(valueToStore));
-      }
+      // Updater fungsional dihitung dari state terbaru, bukan dari closure render terakhir,
+      // agar beberapa pembaruan berturut-turut dalam satu tick tidak saling menimpa.
+      setStoredValue((prev) => {
+        const valueToStore = value instanceof Function ? (value as (prev: T) => T)(prev) : value;
+        try {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(key, JSON.stringify(valueToStore));
+          }
+        } catch (error) {
+          console.warn(`Error setting localStorage key "${key}":`, error);
+        }
+        return valueToStore;
+      });
     } catch (error) {
       console.warn(`Error setting localStorage key "${key}":`, error);
     }

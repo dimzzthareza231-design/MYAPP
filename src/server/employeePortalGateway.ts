@@ -104,6 +104,7 @@ interface ConfigChangeProposal {
   id: string;
   proposedAt: string;
   proposedBy: string;
+  proposerNip?: string;
   category: 'FEATURE_FLAG' | 'ABAC_POLICY' | 'RBAC_MATRIX' | 'PORTAL_CONTENT';
   title: string;
   targetKey: string;
@@ -175,9 +176,11 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   const mfaChallenges = createSignedStore<MfaChallenge>('mfa_', 'challengeId', 10 * 60 * 1000);
   const sessions = createSignedStore<GatewaySession>('emp_', 'token', 12 * 60 * 60 * 1000);
   const idempotencyCache = new Map<string, { status: number; body: unknown; createdAt: number }>();
+  const IDEMPOTENCY_TTL_MS = 60 * 60 * 1000;
+  const IDEMPOTENCY_MAX_ENTRIES = 2000;
   const rateLimitMap = new Map<string, number[]>();
 
-  let abacPolicies: AbacPolicies = {
+  const abacPolicies: AbacPolicies = {
     requireOnDutyForClinicalEmr: true,
     requireUnitMatchForSensitiveActions: true,
     requireCareRelationshipForPatientRecords: false,
@@ -186,7 +189,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     mfaRequiredForClinicalAndAdmin: true
   };
 
-  let featureFlags: Record<string, { label: string; enabled: boolean; targetScope: string; description: string }> = {
+  const featureFlags: Record<string, { label: string; enabled: boolean; targetScope: string; description: string }> = {
     offline_attendance: {
       label: 'Absensi Mode Offline + Auto-Sync Idempoten',
       enabled: true,
@@ -225,7 +228,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
   };
 
-  let rbacMatrix: Record<
+  const rbacMatrix: Record<
     EmployeeUserRecord['portalRole'],
     {
       label: string;
@@ -300,7 +303,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
   };
 
-  let portalAnnouncements = [
+  const portalAnnouncements = [
     {
       id: 'ann-1',
       title: 'Pembaruan Kebijakan Keamanan PMK 24/2022 & MFA Klinis',
@@ -839,6 +842,30 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     return sessions.get(token)!;
   }
 
+  // Area Admin: sama dengan pemeriksaan GET /admin/state. Sebelumnya rute admin yang mengubah data
+  // (users, propose/review-change, integrations) hanya mensyaratkan sesi apa pun.
+  function requireAdminSession(req: express.Request, res: express.Response, resource: string): GatewaySession | null {
+    const session = requireGatewaySession(req, res);
+    if (!session) return null;
+    const division = HOSPITAL_DIVISIONS.find((d) => d.id === session.divisionId) || HOSPITAL_DIVISIONS[0];
+    if (evaluateAccess(session, division).adminAreaAccess) return session;
+    appendSiemLog({
+      actorNip: session.nip,
+      actorName: session.name,
+      divisionId: session.divisionId,
+      eventType: 'ADMIN_AREA_FORBIDDEN',
+      resource,
+      decision: 'DENY',
+      detail: 'Pengguna tanpa peran Admin/Direksi/SPI/DPO mencoba mengubah konfigurasi Area Admin.',
+      ipAddress: req.ip
+    });
+    res.status(403).json({
+      success: false,
+      message: 'Akses ditolak: Area Admin & Tata Kelola hanya untuk Unit SIMK/TI, SDM, Direksi, SPI, atau Hukum & Etik.'
+    });
+    return null;
+  }
+
   // Sliding window rate limiter + Idempotency middleware for /api/gateway/*
   app.use('/api/gateway', (req, res, next) => {
     const ip = req.ip || '127.0.0.1';
@@ -846,6 +873,11 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const history = (rateLimitMap.get(ip) || []).filter((ts) => now - ts < 60_000);
     history.push(now);
     rateLimitMap.set(ip, history);
+    if (rateLimitMap.size > 5000) {
+      for (const [key, timestamps] of rateLimitMap) {
+        if (!timestamps.some((ts) => now - ts < 60_000)) rateLimitMap.delete(key);
+      }
+    }
 
     res.setHeader('X-Gateway-Version', 'MYITARU-GW-2026.1');
     res.setHeader('X-RateLimit-Remaining', String(Math.max(0, 180 - history.length)));
@@ -859,8 +891,14 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
 
     const idemKey = req.headers['idempotency-key'];
-    if (req.method !== 'GET' && typeof idemKey === 'string' && idemKey.trim()) {
-      const cacheKey = `${req.path}::${idemKey.trim()}`;
+    // Endpoint autentikasi tidak di-cache: respons login berisi token sesi.
+    if (req.method !== 'GET' && !req.path.startsWith('/auth/') && typeof idemKey === 'string' && idemKey.trim()) {
+      for (const [key, entry] of idempotencyCache) {
+        if (now - entry.createdAt > IDEMPOTENCY_TTL_MS) idempotencyCache.delete(key);
+      }
+      // Kunci dibatasi per pemanggil (token sesi atau IP) agar respons pengguna lain tidak bisa diputar ulang.
+      const caller = crypto.createHash('sha256').update(extractBearerToken(req) || `ip:${ip}`).digest('hex').slice(0, 32);
+      const cacheKey = `${caller}::${req.method}::${req.path}::${idemKey.trim().slice(0, 200)}`;
       const existing = idempotencyCache.get(cacheKey);
       if (existing) {
         res.setHeader('X-Idempotent-Replay', 'true');
@@ -869,6 +907,10 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
       const originalJson = res.json.bind(res);
       res.json = ((body: unknown) => {
+        if (idempotencyCache.size >= IDEMPOTENCY_MAX_ENTRIES) {
+          const oldestKey = idempotencyCache.keys().next().value;
+          if (oldestKey !== undefined) idempotencyCache.delete(oldestKey);
+        }
         idempotencyCache.set(cacheKey, { status: res.statusCode || 200, body, createdAt: Date.now() });
         return originalJson(body);
       }) as typeof res.json;
@@ -1350,6 +1392,9 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const { swapId, decision } = req.body || {};
     const target = shiftSwapsStore.find((s) => s.id === swapId);
     if (!target) return res.status(404).json({ success: false, message: 'Pengajuan tukar shift tidak ditemukan.' });
+    if (target.requesterNip === session.nip) {
+      return res.status(403).json({ success: false, message: 'Pengaju tidak dapat menyetujui tukar shift miliknya sendiri.' });
+    }
 
     target.status = decision === 'REJECT' ? 'Ditolak' : 'Disetujui';
     appendSiemLog({
@@ -1562,6 +1607,9 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const { leaveId, action } = req.body || {};
     const item = leaveRequestsStore.find((l) => l.id === leaveId);
     if (!item) return res.status(404).json({ success: false, message: 'Pengajuan cuti tidak ditemukan.' });
+    if (item.nip === session.nip) {
+      return res.status(403).json({ success: false, message: 'Pengaju tidak dapat menyetujui cuti miliknya sendiri.' });
+    }
 
     if (action === 'REJECT') {
       item.status = 'Ditolak';
@@ -1987,7 +2035,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   });
 
   app.post('/api/gateway/admin/users', (req, res) => {
-    const session = requireGatewaySession(req, res);
+    const session = requireAdminSession(req, res, 'Manajemen Akun Pegawai');
     if (!session) return;
 
     const { action, userId, name, nip, divisionId } = req.body || {};
@@ -2054,7 +2102,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
   // Segregation-of-duties Change Proposal & Reviewer Approval
   app.post('/api/gateway/admin/propose-change', (req, res) => {
-    const session = requireGatewaySession(req, res);
+    const session = requireAdminSession(req, res, 'Usulan Perubahan Konfigurasi');
     if (!session) return;
 
     const { category, title, targetKey, proposedValue, justification } = req.body || {};
@@ -2062,6 +2110,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       id: 'chg-' + Date.now(),
       proposedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
       proposedBy: `${session.name} (${session.divisionName})`,
+      proposerNip: session.nip,
       category: category || 'FEATURE_FLAG',
       title: String(title || 'Usulan Perubahan Konfigurasi'),
       targetKey: String(targetKey || 'offline_attendance'),
@@ -2086,12 +2135,19 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   });
 
   app.post('/api/gateway/admin/review-change', (req, res) => {
-    const session = requireGatewaySession(req, res);
+    const session = requireAdminSession(req, res, 'Review Perubahan Konfigurasi');
     if (!session) return;
 
     const { proposalId, decision, reviewNote } = req.body || {};
     const proposal = configChangeProposals.find((p) => p.id === proposalId);
     if (!proposal) return res.status(404).json({ success: false, message: 'Usulan perubahan tidak ditemukan.' });
+    if (proposal.status !== 'PENDING_REVIEW') {
+      return res.status(409).json({ success: false, message: 'Usulan perubahan ini sudah direview.' });
+    }
+    // Pemisahan tugas (four-eyes): pengusul tidak boleh menyetujui usulannya sendiri.
+    if (proposal.proposerNip && proposal.proposerNip === session.nip) {
+      return res.status(403).json({ success: false, message: 'Pengusul tidak dapat mereview usulan perubahannya sendiri.' });
+    }
 
     proposal.reviewedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
     proposal.reviewedBy = `${session.name} (Reviewer Keamanan/Kepatuhan)`;
@@ -2164,7 +2220,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   });
 
   app.post('/api/gateway/admin/integrations/test', (req, res) => {
-    const session = requireGatewaySession(req, res);
+    const session = requireAdminSession(req, res, 'Uji Integrasi');
     if (!session) return;
 
     const { integrationId } = req.body || {};

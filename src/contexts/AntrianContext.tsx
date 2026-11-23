@@ -1,5 +1,6 @@
 import React, { createContext, useContext, ReactNode } from 'react';
 import { useHospital } from './HospitalContext';
+import { nextNomorAntrian } from '../utils/antrianNumber';
 
 // ============================================
 // DEFINISI POLI
@@ -81,10 +82,8 @@ interface AntrianContextType {
 
 const AntrianContext = createContext<AntrianContextType | undefined>(undefined);
 
-const getTanggalHariIni = () => new Date().toISOString().split('T')[0];
-
 export function AntrianProvider({ children }: { children: ReactNode }) {
-  const { kunjungan = [], pasien = [], poli = [], updateKunjunganStatus } = useHospital();
+  const { kunjungan = [], pasien = [], updateKunjunganStatus } = useHospital();
 
   const antrianList: Antrian[] = (kunjungan || [])
     .filter(k => k && k.tipe === 'Rawat Jalan')
@@ -123,9 +122,8 @@ export function AntrianProvider({ children }: { children: ReactNode }) {
   const getNomorBerikutnya = (poliId: string): string => {
     const poliObj = DAFTAR_POLI.find(p => p.id === poliId);
     if (!poliObj) return 'X-000';
-    const jumlahHariIni = antrianList.filter(a => a.poliId === poliId).length;
-    const nomor = jumlahHariIni + 1;
-    return `${poliObj.kode}-${String(nomor).padStart(3, '0')}`;
+    // Hanya kunjungan hari ini: sebelumnya seluruh riwayat dihitung sehingga nomor tidak pernah kembali ke 001.
+    return nextNomorAntrian(kunjungan || [], poliId, poliObj.kode);
   };
 
   const daftarkanAntrian = (data: { pasienId: string; namaPasien: string; noRm: string; poliId: string; keluhan?: string; penjamin?: string }): Antrian | null => {

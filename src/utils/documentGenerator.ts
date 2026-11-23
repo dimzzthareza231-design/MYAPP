@@ -4,7 +4,7 @@ import {
   DEFAULT_HOSPITAL_INFO,
   TableItemRow 
 } from '../types/document';
-import { SEMUA_DOKTER, MASTER_POLIKLINIK } from '../data/seedData';
+import { SEMUA_DOKTER } from '../data/seedData';
 import { detectIsRawatInap } from './resumeTemplateHelper';
 
 /**
