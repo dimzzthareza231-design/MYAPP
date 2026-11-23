@@ -26,10 +26,11 @@ MYITARU: web publik pasien + aplikasi inti SIMK/RME. Jalan di Cloudflare Workers
 
 Setiap perubahan yang selesai dan lolos `npm run typecheck` + `npm test` langsung:
 
-1. di-commit dan di-push ke branch `main` di GitHub (fast-forward, tanpa force push), lalu
-2. di-deploy ke Cloudflare dengan `npm run cf:deploy` (kedua Worker), lalu cek `/api/v1/health` di Worker inti.
+1. di-commit dan di-push ke branch `main` di GitHub (fast-forward, tanpa force push);
+2. push ke `main` memicu job `deploy` di `.github/workflows/ci.yml`: typecheck, test, build, `npm run cf:migrate`, `npm run cf:deploy` (kedua Worker), lalu cek `/api/v1/health` Worker inti;
+3. pastikan run workflow itu hijau dan laporkan hasilnya ke pengguna.
 
-Kalau tes gagal atau deploy gagal, jangan push/deploy setengah jalan; laporkan ke pengguna. Migrasi D1 baru (`migrations/`) dijalankan dengan `npm run cf:migrate` sebelum deploy. Secret baru diisi pengguna sendiri lewat `wrangler secret put`.
+Kalau tes lokal gagal, jangan push. Kalau workflow gagal, perbaiki atau laporkan; jangan biarkan repo dan Cloudflare berbeda. Deploy langsung dari container tidak bisa: proxy menimpa header `Authorization` saat unggah assets (401). Secret baru (mis. `LOCAL_AUTH_LAB_PASSWORD`) diisi pengguna sendiri lewat `wrangler secret put` atau dashboard Cloudflare.
 
 ## Jangan simpan jejak sesi di repo
 

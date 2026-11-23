@@ -11,6 +11,7 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 - Batas percobaan login lintas isolate lewat Cloudflare Rate Limiting binding `AUTH_LIMITER` (5 percobaan per IP per endpoint per 60 detik).
 - Role based access aplikasi inti per bidang: admin semua modul; dokter layanan medis; perawat keperawatan; RMIK rekam medis; farmasi obat dan stok; lab modul laboratorium; kasir keuangan. Ditegakkan di server dan UI.
 - Akun lokal opsional `lab` (role `laboran`, `LOCAL_AUTH_LAB_PASSWORD`) dan kartu Laboratorium di halaman login. Modul laboratorium tersedia di mode SIMK.
+- Deploy otomatis ke Cloudflare (migrasi D1 + kedua Worker + cek health) setiap push ke `main` lewat GitHub Actions.
 - File komunitas: `CONTRIBUTING.md`, `SECURITY.md`, template issue/PR, Dependabot.
 
 ### Diperbaiki
