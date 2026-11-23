@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Typecheck, test, build
+    name: Typecheck, lint, test, build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -28,6 +28,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint (ESLint)
+        run: npm run lint:eslint
+
       - name: Test
         run: npm test
 
@@ -36,3 +39,8 @@ jobs:
 
       - name: Build web publik
         run: npm run build:public
+
+      - name: Bundle Cloudflare Worker (dry run)
+        run: npx wrangler deploy --dry-run --env core --outdir .wrangler/dry-run
+        env:
+          WRANGLER_SEND_METRICS: 'false'
