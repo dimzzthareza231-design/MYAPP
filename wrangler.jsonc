@@ -31,7 +31,9 @@
       "d1_databases": [
         // Ganti database_id dengan hasil `npx wrangler d1 create myitaru-db`.
         { "binding": "DB", "database_name": "myitaru-db", "database_id": "80e76ffa-de80-4bfd-8863-30c640ab007f", "migrations_dir": "migrations" }
-      ]
+      ],
+      // Login: maks 5 percobaan per IP per endpoint per 60 detik, berlaku di semua isolate.
+      "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } }]
     },
     "core": {
       "name": "myitaru-core",
@@ -49,7 +51,9 @@
       },
       "d1_databases": [
         { "binding": "DB", "database_name": "myitaru-db", "database_id": "80e76ffa-de80-4bfd-8863-30c640ab007f", "migrations_dir": "migrations" }
-      ]
+      ],
+      // Login: maks 5 percobaan per IP per endpoint per 60 detik, berlaku di semua isolate.
+      "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } }]
     }
   }
 }

@@ -5,6 +5,7 @@ import { env } from 'cloudflare:workers';
 import { handleAsNodeRequest } from 'cloudflare:node';
 import { createApps, addErrorHandler } from '../server';
 import type { D1DatabaseLike } from '../src/server/databaseAdapter';
+import { checkAuthRateLimit, type RateLimiterLike } from './authRateLimit';
 
 const PORT = 8080;
 let ready: Promise<void> | undefined;
@@ -29,6 +30,7 @@ export default {
       console.error('[Worker] startup failed:', error);
       return Response.json({ success: false, code: 'STARTUP_FAILED' }, { status: 503 });
     }
-    return handleAsNodeRequest(PORT, request);
+    const limited = await checkAuthRateLimit(request, env.AUTH_LIMITER as RateLimiterLike | undefined);
+    return limited ?? handleAsNodeRequest(PORT, request);
   }
 };

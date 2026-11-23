@@ -8,9 +8,12 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 - Deployment di Cloudflare Workers dengan database Cloudflare D1 (`STORAGE_MODE=d1`), dua Worker (`myitaru-public`, `myitaru-core`) dari satu `wrangler.jsonc`.
 - `D1Adapter`, migrasi `migrations/0001_init.sql`, dan pengujian adapter di atas SQLite.
 - Autentikasi lokal (scrypt, sesi yang dapat dicabut), adapter persistence MySQL/Firebase/hybrid, QR pasien terenkripsi, dan mode operasional SIMK/SIMRS.
+- Batas percobaan login lintas isolate lewat Cloudflare Rate Limiting binding `AUTH_LIMITER` (5 percobaan per IP per endpoint per 60 detik).
 - File komunitas: `CONTRIBUTING.md`, `SECURITY.md`, template issue/PR, Dependabot.
 
 ### Diperbaiki
+- Rate limit di Workers kini per klien (`cf-connecting-ip`); sebelumnya semua pengunjung berbagi satu kuota karena `req.ip` selalu `127.0.0.1`.
+- Token sesi pasien, sesi pegawai, dan tantangan MFA yang kedaluwarsa tidak lagi diterima dari cache.
 - Secret token sesi dibuat saat pertama dipakai agar lolos validasi global scope Workers.
 - Nama paket `myitaru` dan field `repository` dipulihkan.
 
