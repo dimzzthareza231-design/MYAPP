@@ -51,7 +51,10 @@ const PRESCRIBER_ROLES = ['super_admin', 'dokter', 'bidan'];
 const PHARMACIST_ROLES = ['super_admin', 'apoteker'];
 
 const RECORD_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-const SERVER_FIELDS = new Set(['id', 'version', 'created_at', 'created_by', 'updated_at', 'updated_by']);
+const SERVER_FIELDS = new Set([
+  'id', 'version', 'created_at', 'created_by', 'updated_at', 'updated_by',
+  'finalized_at', 'finalized_by', 'paid_at', 'paid_by'
+]);
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const MAX_RECORD_BYTES = 256 * 1024;
 
@@ -211,7 +214,8 @@ function assertVersion(existing: ClinicalStoredRecord, body: unknown): void {
 const SOAP_FIELDS = new Set([
   'kunjungan_id', 'no_rm', 'pasien_id', 'pasien_nama', 'dokter', 'unit', 'source',
   'subjective', 'objective', 'assessment', 'plan', 'icd10', 'tindakan_icd9',
-  'vital_signs', 'alergi', 'kontrol', 'ai_governance_status', 'status', 'version'
+  'vital_signs', 'alergi', 'kontrol', 'riwayat_penyakit_dahulu', 'penunjang', 'diagnosis_sekunder',
+  'ai_governance_status', 'status', 'version'
 ]);
 
 export function validateSoapNote(body: unknown): JsonObject {
@@ -220,8 +224,11 @@ export function validateSoapNote(body: unknown): JsonObject {
   delete record.version;
   requireString(record, 'kunjungan_id', 128);
   requireString(record, 'no_rm', 64);
-  for (const field of ['pasien_id', 'pasien_nama', 'dokter', 'unit', 'source', 'alergi', 'kontrol', 'tindakan_icd9']) {
-    requireString(record, field, field === 'kontrol' || field === 'alergi' ? 2000 : 200, true);
+  for (const field of ['pasien_id', 'pasien_nama', 'dokter', 'unit', 'source', 'tindakan_icd9']) {
+    requireString(record, field, 200, true);
+  }
+  for (const field of ['alergi', 'kontrol', 'riwayat_penyakit_dahulu', 'penunjang', 'diagnosis_sekunder']) {
+    requireString(record, field, 5000, true);
   }
   requireString(record, 'icd10', 20, true);
   for (const section of ['subjective', 'objective', 'assessment', 'plan']) clinicalSection(record, section);

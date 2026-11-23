@@ -290,6 +290,31 @@ describe('validasi dan kontrol akses rute klinis (mode memory)', () => {
     assert.equal(negative.status, 422);
   });
 
+  test('SOAP poliklinik berbentuk teks diterima dan metadata server tidak dapat dipalsukan', async () => {
+    const outpatient = await call(base, 'POST', '/api/v1/dossier/soap', 'dokter-token', {
+      kunjungan_id: 'KJ-POLI-9',
+      no_rm: 'RM-TEST-0002',
+      source: 'poliklinik',
+      subjective: 'Batuk berdahak tiga hari',
+      objective: 'Ronki basah halus',
+      assessment: 'Bronkitis akut',
+      plan: 'Edukasi dan kontrol',
+      riwayat_penyakit_dahulu: 'Tidak ada',
+      vital_signs: { td: '120/80', nadi: '88' },
+      finalized_by: 'palsu@test.local'
+    });
+    assert.equal(outpatient.status, 201);
+    assert.equal(outpatient.body.data.status, 'Draft');
+    assert.equal(outpatient.body.data.finalized_by, undefined);
+
+    const forgedPayment = await call(base, 'POST', '/api/v1/billing/invoices', 'kasir-token', {
+      ...billingPayload, id: 'BIL-FORGE-1', paid_by: 'palsu@test.local', created_by: 'palsu@test.local'
+    });
+    assert.equal(forgedPayment.status, 201);
+    assert.equal(forgedPayment.body.data.paid_by, undefined);
+    assert.equal(forgedPayment.body.data.created_by, 'kasir@test.local');
+  });
+
   test('peran non-klinis tidak dapat menulis SOAP atau resep', async () => {
     const clerk = await call(base, 'POST', '/api/v1/dossier/soap', 'pendaftaran-token', soapPayload);
     assert.equal(clerk.status, 403);
