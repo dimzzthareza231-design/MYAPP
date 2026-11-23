@@ -10,7 +10,6 @@ import { Pasien, Kunjungan } from '../types';
 import { BillingRecord, BillingItem } from '../components/Finance/types';
 import { PrescriptionOrder, PrescriptionItem } from '../components/Pharmacy/types';
 import { LabOrder } from '../components/Laboratorium/types';
-import { STATUS_RJ, STATUS_RI } from '../contexts/PatientFlowContext';
 import { generate50InpatientBeds } from '../data/patientPelayananData';
 import { INITIAL_BILLINGS } from '../components/Finance/mockFinanceData';
 import { INITIAL_LAB_ORDERS_MOCK } from '../components/Laboratorium/data';
@@ -226,7 +225,6 @@ export function integrateOutpatientSOAP({
   try {
     const patientName = patient?.nama || patient?.nama_pasien || 'Pasien';
     const patientRm = patient?.no_rm || 'RM-000000';
-    const patientId = String(patient?.id || visit.pasien_id);
     const doctorName = doctor?.nama || 'dr. Spesialis DPJP';
     const poliName = poli?.nama || 'Poliklinik Rawat Jalan';
     const visitId = visit.id;
@@ -455,7 +453,7 @@ export function integrateOutpatientSOAP({
 
     // 2.4 Sinkronisasi ke Kasir / Billing (Finance Line)
     const billings = storage.get<BillingRecord[]>(SIMRS_STORAGE_KEYS.BILLINGS, INITIAL_BILLINGS);
-    let targetBill = billings.find(b => b.kunjunganId === visitId || (b.noRm === patientRm && b.status !== 'Lunas'));
+    const targetBill = billings.find(b => b.kunjunganId === visitId || (b.noRm === patientRm && b.status !== 'Lunas'));
 
     if (targetBill) {
       // Tambahkan item tindakan, lab, radiologi, atau resep jika belum ada
@@ -836,7 +834,9 @@ export function dischargePatientFromBed({
 }) {
   try {
     const beds = storage.get<any[]>(SIMRS_STORAGE_KEYS.BED_MANAGEMENT, generate50InpatientBeds());
-    const bedIdx = beds.findIndex(b => b.id === bedId || b.no_rm === no_rm);
+    // Utamakan bed yang dipilih; cocokkan No. RM hanya bila id bed tidak ditemukan.
+    let bedIdx = beds.findIndex(b => b.id === bedId);
+    if (bedIdx < 0 && no_rm) bedIdx = beds.findIndex(b => b.no_rm === no_rm);
 
     if (bedIdx >= 0) {
       const targetBed = beds[bedIdx];
@@ -844,10 +844,11 @@ export function dischargePatientFromBed({
       const tarifKamar = targetBed.class === 'VVIP' ? 850000 : (targetBed.class === 'VIP' ? 650000 : 350000);
       const totalBiayaKamar = lamaRawat * tarifKamar;
 
-      // Reset bed
+      // Reset bed: masuk antrean pembersihan dulu (sama dengan UI Bed Management). Sebelumnya langsung
+      // 'Kosong', dan event sinkronisasi menimpa status 'Dibersihkan' yang baru diset oleh UI.
       beds[bedIdx] = {
         ...targetBed,
-        status: 'Kosong',
+        status: 'Dibersihkan',
         patient: '',
         nama_pasien: '',
         no_rm: '',
@@ -884,13 +885,13 @@ export function dischargePatientFromBed({
         flowItem.status = 'PROSES_BILLING';
         flowItem.history_status = [
           ...(flowItem.history_status || []),
-          { status: 'DISCHARGE_PLAN', waktu: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }), oleh: 'DPJP Bangsal' },
+          { status: 'DISCHARGE_PLAN', waktu: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }), oleh: 'DPJP Bangsal', keterangan: `Kondisi pulang: ${kondisiPulang}` },
           { status: 'PROSES_BILLING', waktu: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }), oleh: 'Kasir Rawat Inap' }
         ];
         storage.set(SIMRS_STORAGE_KEYS.PATIENT_FLOW, flowList);
       }
 
-      notifyInterlineUpdate('PATIENT_DISCHARGED', { bedId, no_rm, totalBiayaKamar });
+      notifyInterlineUpdate('PATIENT_DISCHARGED', { bedId, no_rm, kondisiPulang, totalBiayaKamar });
     }
   } catch (err) {
     console.error('Error in dischargePatientFromBed:', err);
