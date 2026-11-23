@@ -180,7 +180,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   const IDEMPOTENCY_MAX_ENTRIES = 2000;
   const rateLimitMap = new Map<string, number[]>();
 
-  let abacPolicies: AbacPolicies = {
+  const abacPolicies: AbacPolicies = {
     requireOnDutyForClinicalEmr: true,
     requireUnitMatchForSensitiveActions: true,
     requireCareRelationshipForPatientRecords: false,
@@ -189,7 +189,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     mfaRequiredForClinicalAndAdmin: true
   };
 
-  let featureFlags: Record<string, { label: string; enabled: boolean; targetScope: string; description: string }> = {
+  const featureFlags: Record<string, { label: string; enabled: boolean; targetScope: string; description: string }> = {
     offline_attendance: {
       label: 'Absensi Mode Offline + Auto-Sync Idempoten',
       enabled: true,
@@ -228,7 +228,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
   };
 
-  let rbacMatrix: Record<
+  const rbacMatrix: Record<
     EmployeeUserRecord['portalRole'],
     {
       label: string;
@@ -303,7 +303,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
   };
 
-  let portalAnnouncements = [
+  const portalAnnouncements = [
     {
       id: 'ann-1',
       title: 'Pembaruan Kebijakan Keamanan PMK 24/2022 & MFA Klinis',

@@ -787,7 +787,6 @@ export function analyzeRadiologyDeterministic(input: {
   patientAge?: any;
   gender?: string;
 }) {
-  const exam = String(input.examinationName || 'Foto Thorax PA').toLowerCase();
   const modality = String(input.modality || 'X-Ray').toUpperCase();
   const dx = String(input.clinicalDiagnosis || '').toLowerCase();
 
@@ -943,12 +942,12 @@ export function generateDischargeSummaryDeterministic(input: {
 // ═══════════════════════════════════════════════════════════════════════════
 // 8. AI MEDICAL SEARCH & CLINICAL EVIDENCE
 // ═══════════════════════════════════════════════════════════════════════════
-export function generateMedicalSearchEvidenceDeterministic(query: string, context?: string) {
+export function generateMedicalSearchEvidenceDeterministic(query: string, _context?: string) {
   const q = String(query || '').trim();
   const qLower = q.toLowerCase();
 
   let answer = '';
-  let sources = [
+  const sources = [
     { title: 'Kementerian Kesehatan RI — Panduan Praktik Klinis Dokter di Faskes', url: 'https://kemkes.go.id' },
     { title: 'Badan Pengawas Obat dan Makanan (BPOM) — PIONAS Formularium', url: 'https://pionas.pom.go.id' },
     { title: 'Ikatan Dokter Indonesia (IDI) — Panduan Praktik Klinis', url: 'https://idionline.org' }
@@ -1053,7 +1052,7 @@ export function generateGeospatialHealthLocatorDeterministic(query: string, cate
 // ═══════════════════════════════════════════════════════════════════════════
 // 10. AI CLINICAL COPILOT (CONVERSATIONAL ASSISTANT)
 // ═══════════════════════════════════════════════════════════════════════════
-export function generateClinicalCopilotReplyDeterministic(message: string, context?: any) {
+export function generateClinicalCopilotReplyDeterministic(message: string, _context?: any) {
   const msg = String(message || '').toLowerCase();
 
   let reply = 'Halo Dokter, saya AI Clinical Assistant MYITARU. Sistem siap membantu telaah klinis, rekomendasi kodefikasi ICD-10/ICD-9, kalkulasi dosis obat, serta panduan audit klaim BPJS. Apa yang dapat saya bantu?';

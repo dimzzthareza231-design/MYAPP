@@ -1,11 +1,8 @@
 import { 
-  collection, 
   doc, 
   getDoc, 
-  getDocs, 
   setDoc, 
   updateDoc, 
-  deleteDoc, 
   onSnapshot, 
   getDocFromServer,
   writeBatch
