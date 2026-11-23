@@ -4,16 +4,114 @@
 @theme {
   --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Legacy brand tokens (dipertahankan untuk kompatibilitas) */
   --color-primary-blue: #0066CC;
   --color-primary-blue-hover: #0052a3;
   --color-secondary-gray: #f3f4f6;
   --color-midnight: #0f172a;
   --color-midnight-light: #1e293b;
+
+  /* ===== Design tokens: warna semantik (light; dioverride di .dark) ===== */
+  --color-brand: #2563eb;          /* blue-600 — aksi utama, kontras 5.2:1 pada putih */
+  --color-brand-hover: #1d4ed8;    /* blue-700 */
+  --color-brand-soft: #eff6ff;     /* blue-50 */
+  --color-brand-fg: #ffffff;
+  --color-accent: #c9a94e;         /* emas MYITARU (dekoratif, bukan teks kecil) */
+  --color-accent-strong: #8a6d1f;  /* emas gelap — aman untuk teks di latar terang */
+  --color-accent-soft: #e8d49e;
+
+  --color-canvas: #f8fafc;         /* latar halaman */
+  --color-surface: #ffffff;        /* kartu, modal */
+  --color-surface-muted: #f1f5f9;  /* header modal, kontrol sekunder */
+  --color-line: #e2e8f0;           /* border default */
+  --color-line-strong: #cbd5e1;
+  --color-ink: #0f172a;            /* teks utama */
+  --color-ink-muted: #475569;      /* teks sekunder (slate-600, 7.5:1) */
+  --color-ink-subtle: #64748b;     /* teks tersier (slate-500, 4.8:1) */
+
+  --color-shell: #08121e;          /* navbar gelap */
+  --color-shell-raised: #0b1728;   /* dropdown navbar */
+
+  --color-success: #059669;
+  --color-warning: #b45309;
+  --color-danger: #e11d48;
+  --color-info: #0891b2;
+  --color-focus: #3b82f6;
+
+  /* ===== Radius ===== */
+  --radius-control: 0.75rem;       /* tombol, input (rounded-xl) */
+  --radius-card: 1rem;             /* kartu (rounded-2xl) */
+  --radius-panel: 1.5rem;          /* panel besar / modal hero (rounded-3xl) */
+
+  /* ===== Bayangan ===== */
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 1px 3px 0 rgb(15 23 42 / 0.06);
+  --shadow-raised: 0 4px 12px -2px rgb(15 23 42 / 0.10), 0 2px 4px -2px rgb(15 23 42 / 0.06);
+  --shadow-overlay: 0 24px 60px -12px rgb(2 6 23 / 0.55);
+
+  /* ===== Ukuran sentuh minimum ===== */
+  --spacing-touch: 2.5rem;         /* 40px — dipakai via min-h-touch / min-w-touch / size-touch */
 }
 
-body {
-  font-family: var(--font-sans);
-  @apply bg-slate-50 dark:bg-[#071322] text-slate-900 dark:text-slate-100 antialiased;
+/* Token mode gelap: Tailwind v4 membaca var(--color-*) saat runtime, jadi cukup
+   override variabelnya di bawah .dark (toggle tema di HospitalContext). */
+.dark {
+  color-scheme: dark;
+  --color-brand: #3b82f6;
+  --color-brand-hover: #60a5fa;
+  --color-brand-soft: rgb(30 58 138 / 0.35);
+  --color-accent-strong: #e8d49e;
+  --color-canvas: #071322;
+  --color-surface: #0f172a;
+  --color-surface-muted: #1e293b;
+  --color-line: #1e293b;
+  --color-line-strong: #334155;
+  --color-ink: #f1f5f9;
+  --color-ink-muted: #cbd5e1;
+  --color-ink-subtle: #94a3b8;
+  --color-focus: #60a5fa;
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-raised: 0 8px 24px -4px rgb(0 0 0 / 0.5);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    /* Jaring pengaman: cegah scroll horizontal halaman tanpa membuat scroll
+       container baru (overflow: clip tidak merusak position: sticky). */
+    overflow-x: clip;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    overflow-x: clip;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Cincin fokus konsisten untuk navigasi keyboard (tidak muncul saat klik mouse). */
+  :where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [role="button"], [role="switch"], [role="tab"], [role="option"]):focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
+/* Tautan "lewati ke konten" — tersembunyi sampai difokuskan dengan keyboard. */
+@utility skip-link {
+  @apply sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[300] focus:px-4 focus:py-2.5 focus:rounded-xl focus:bg-brand focus:text-brand-fg focus:font-semibold focus:shadow-raised;
 }
 
 .font-mono,
@@ -22,20 +120,38 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.btn-primary {
-  @apply px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer;
-}
+/* Kelas komponen ada di layer "components" agar utilitas Tailwind (mis. `hidden`,
+   `w-full`, `pl-10`) tetap bisa menimpanya. */
+@layer components {
+  .btn-primary {
+    @apply min-h-touch px-4 py-2 bg-brand text-brand-fg rounded-control font-semibold hover:bg-brand-hover active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed;
+  }
 
-.btn-secondary {
-  @apply px-4 py-2 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 rounded-xl font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer;
-}
+  .btn-secondary {
+    @apply min-h-touch px-4 py-2 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 rounded-control font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed;
+  }
 
-.card {
-  @apply bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 transition-all;
-}
+  .card {
+    @apply bg-surface text-ink rounded-card shadow-card border border-line transition-all;
+  }
 
-.input-field {
-  @apply w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900/90 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 dark:focus:border-blue-400 transition-all;
+  .input-field {
+    @apply w-full min-h-touch px-4 py-2.5 rounded-control border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900/90 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 dark:focus:border-blue-400 transition-all;
+  }
+
+  /* Ikon-tombol dengan area sentuh minimum 40x40px */
+  .icon-btn {
+    @apply inline-flex items-center justify-center size-touch shrink-0 rounded-control transition-colors;
+  }
+
+  /* Bungkus tabel lebar agar menggulir horizontal di dalam kartu, bukan halaman */
+  .table-scroll {
+    @apply w-full max-w-full overflow-x-auto overscroll-x-contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .table-scroll > table {
+    @apply min-w-full;
+  }
 }
 
 /* Custom Scrollbar */
@@ -199,10 +315,6 @@ body.printing {
   animation-play-state: paused;
 }
 
-.dark {
-  color-scheme: dark;
-}
-
 .dark ::-webkit-scrollbar-track { background: #0f172a; }
 .dark ::-webkit-scrollbar-thumb { background: #334155; }
 
@@ -211,4 +323,21 @@ a, button, input, select, textarea, .card, .btn-primary, .btn-secondary {
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   transition-duration: 150ms;
+}
+
+/* Hormati preferensi pengguna untuk mengurangi gerakan (vestibular / motion sickness). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-marquee {
+    animation: none !important;
+    transform: none !important;
+    white-space: normal;
+  }
 }

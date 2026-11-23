@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { Search, ChevronRight, CornerDownLeft, X } from 'lucide-react';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface CommandItem {
   id: number;
@@ -17,6 +18,11 @@ export function CommandPalette() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const closePalette = useCallback(() => setIsOpen(false), []);
+  // Focus trap, Escape, kunci scroll & kembalikan fokus ke pemicu saat ditutup.
+  useDialogA11y(isOpen, closePalette, dialogRef, { initialFocusRef: inputRef });
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -130,50 +136,74 @@ export function CommandPalette() {
     };
   }, [isOpen, selectedIndex, filteredCommands, executeCommand]);
 
+  // Pastikan opsi yang dipilih via keyboard tetap terlihat di daftar.
+  useEffect(() => {
+    if (!isOpen) return;
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-cmd-index="${selectedIndex}"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [isOpen, selectedIndex]);
+
   if (!isOpen) return null;
+
+  const activeOptionId = filteredCommands[selectedIndex] ? `cmd-option-${filteredCommands[selectedIndex].id}` : undefined;
 
   return (
     <div 
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center z-[200] p-4 pt-[10vh] animate-in fade-in duration-200"
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center z-[200] p-3 sm:p-4 pt-[max(1rem,8vh)] animate-in fade-in duration-200"
       onClick={() => setIsOpen(false)}
     >
       <div 
-        className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in slide-in-from-top-4 duration-200 flex flex-col max-h-[80vh]"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette: cari modul dan aksi cepat"
+        className="bg-surface text-ink rounded-card shadow-overlay w-full max-w-2xl overflow-hidden border border-line animate-in slide-in-from-top-4 duration-200 flex flex-col max-h-[80dvh]"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50">
-          <Search className="w-5 h-5 text-slate-400 shrink-0" />
+          <Search className="w-5 h-5 text-slate-400 shrink-0" aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="command-palette-list"
+            aria-activedescendant={activeOptionId}
+            aria-autocomplete="list"
+            aria-label="Cari modul, layanan, atau aksi cepat"
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
               setSelectedIndex(0);
             }}
-            placeholder="Ketik nama modul, layanan, atau aksi cepat... (ESC untuk tutup)"
-            className="w-full bg-transparent border-none outline-none text-slate-900 dark:text-white placeholder-slate-400 text-sm md:text-base font-medium"
+            placeholder="Cari modul, layanan, atau aksi..."
+            className="w-full min-w-0 bg-transparent border-none outline-none focus-visible:outline-none text-slate-900 dark:text-white placeholder-slate-400 text-sm md:text-base font-medium"
             autoFocus
           />
           {searchQuery && (
             <button 
-              onClick={() => setSearchQuery('')}
-              className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                inputRef.current?.focus();
+              }}
+              className="icon-btn -my-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+              aria-label="Hapus kata kunci pencarian"
             >
-              <X className="w-4 h-4" />
+              <X className="w-4 h-4" aria-hidden="true" />
             </button>
           )}
         </div>
 
-        <div className="overflow-y-auto p-2 divide-y divide-slate-100 dark:divide-slate-800/60 flex-1">
+        <div ref={listRef} id="command-palette-list" role="listbox" aria-label="Hasil pencarian" className="overflow-y-auto overscroll-contain p-2 divide-y divide-slate-100 dark:divide-slate-800/60 flex-1 min-h-0">
           {filteredCommands.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm">
+            <div role="status" className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm">
               Tidak ada modul atau aksi yang cocok dengan "{searchQuery}"
             </div>
           ) : (
             Object.entries(groupedCommands).map(([category, items]) => (
-              <div key={category} className="py-2">
-                <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              <div key={category} role="group" aria-label={category} className="py-2">
+                <div aria-hidden="true" className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   {category}
                 </div>
                 <div className="space-y-1">
@@ -183,17 +213,23 @@ export function CommandPalette() {
                     return (
                       <button
                         key={cmd.id}
+                        id={`cmd-option-${cmd.id}`}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        tabIndex={-1}
+                        data-cmd-index={globalIndex}
                         onClick={() => executeCommand(cmd)}
                         onMouseEnter={() => setSelectedIndex(globalIndex)}
-                        className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center justify-between transition-colors ${
+                        className={`w-full min-h-touch text-left px-3 py-2.5 rounded-xl flex items-center justify-between transition-colors ${
                           isSelected 
                             ? 'bg-blue-600 text-white' 
                             : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/70'
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <span className="text-xl shrink-0">{cmd.icon}</span>
-                          <div>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-xl shrink-0" aria-hidden="true">{cmd.icon}</span>
+                          <div className="min-w-0">
                             <div className={`font-semibold text-sm leading-tight ${isSelected ? 'text-white' : 'text-slate-800 dark:text-slate-100'}`}>
                               {cmd.label}
                             </div>
@@ -217,7 +253,7 @@ export function CommandPalette() {
           )}
         </div>
 
-        <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center gap-4 text-xs font-medium text-slate-500 dark:text-slate-400">
+        <div aria-hidden="true" className="hidden sm:flex p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 items-center justify-center gap-4 text-xs font-medium text-slate-500 dark:text-slate-400">
           <span className="flex items-center gap-1">
             <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded shadow-xs text-[10px]">↑</kbd>
             <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded shadow-xs text-[10px]">↓</kbd>

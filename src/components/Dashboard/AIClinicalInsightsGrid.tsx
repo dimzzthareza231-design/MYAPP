@@ -461,9 +461,9 @@ export function AIClinicalInsightsGrid() {
               <div className={`absolute top-0 right-0 w-48 h-48 bg-gradient-to-br ${card.bgGlow} to-transparent rounded-bl-full pointer-events-none opacity-40 group-hover:opacity-70 transition-opacity duration-500`}></div>
 
               {/* CARD HEADER */}
-              <div className="p-5 pb-3 relative z-10 border-b border-slate-200/80 dark:border-white/[0.06]">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
+              <div className="p-4 sm:p-5 pb-3 relative z-10 border-b border-slate-200/80 dark:border-white/[0.06]">
+                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     {/* Drag Handle */}
                     <div 
                       className={`p-1.5 rounded-lg cursor-grab active:cursor-grabbing transition-colors ${
@@ -480,7 +480,7 @@ export function AIClinicalInsightsGrid() {
                       {renderIcon(card.iconName)}
                     </div>
 
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="font-bold text-slate-900 dark:text-white text-base leading-snug group-hover:text-blue-700 dark:group-hover:text-[#E5CA78] transition-colors">
                           {card.title}
@@ -493,7 +493,7 @@ export function AIClinicalInsightsGrid() {
                   </div>
 
                   {/* Actions & Collapse Toggle */}
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0 ml-auto">
                     {isRearrangeMode && (
                       <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-black/20 rounded-lg p-0.5 border border-slate-200 dark:border-white/10">
                         <button
@@ -501,6 +501,7 @@ export function AIClinicalInsightsGrid() {
                           disabled={index === 0}
                           className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 rounded hover:bg-slate-200 dark:hover:bg-white/10 text-xs"
                           title="Geser ke kiri / atas"
+                          aria-label={`Geser kartu ${card.title} ke atas`}
                         >
                           ◀
                         </button>
@@ -509,6 +510,7 @@ export function AIClinicalInsightsGrid() {
                           disabled={index === cards.length - 1}
                           className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 rounded hover:bg-slate-200 dark:hover:bg-white/10 text-xs"
                           title="Geser ke kanan / bawah"
+                          aria-label={`Geser kartu ${card.title} ke bawah`}
                         >
                           ▶
                         </button>
@@ -520,11 +522,14 @@ export function AIClinicalInsightsGrid() {
                     </span>
 
                     <button
+                      type="button"
                       onClick={() => toggleCollapse(card.id)}
-                      className="p-1 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.05] transition-colors"
+                      aria-expanded={!isCollapsed}
+                      aria-label={`${isCollapsed ? 'Perluas' : 'Ciutkan'} kartu ${card.title}`}
+                      className="inline-flex items-center justify-center size-9 -m-1 text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-white/[0.05] transition-colors"
                       title={isCollapsed ? 'Perluas Kartu' : 'Ciutkan Kartu'}
                     >
-                      {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                      {isCollapsed ? <ChevronDown className="w-4 h-4" aria-hidden="true" /> : <ChevronUp className="w-4 h-4" aria-hidden="true" />}
                     </button>
                   </div>
                 </div>

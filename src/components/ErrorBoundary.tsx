@@ -66,40 +66,42 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
-          <div className="max-w-lg w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8 text-center">
-            <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-10 h-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="min-h-[60vh] flex items-center justify-center bg-canvas p-4">
+          <div role="alert" aria-live="assertive" className="max-w-lg w-full bg-surface text-ink rounded-card shadow-raised border border-line p-6 sm:p-8 text-center">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg aria-hidden="true" className="w-10 h-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-3">
+            <h1 className="text-xl sm:text-2xl font-bold text-ink mb-3">
               Terjadi Kesalahan
             </h1>
-            <p className="text-slate-600 dark:text-slate-400 mb-6">
+            <p className="text-ink-muted mb-6">
               Modul ini mengalami error. Anda bisa mencoba memuat ulang atau kembali ke dashboard.
             </p>
 
             {this.state.error && (
-              <div className="mb-6 p-4 bg-slate-100 dark:bg-slate-900/50 rounded-lg text-left overflow-auto max-h-40">
-                <code className="text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap">
+              <div className="mb-6 p-4 bg-surface-muted rounded-control text-left overflow-auto max-h-40">
+                <code className="text-xs text-red-700 dark:text-red-400 whitespace-pre-wrap break-words">
                   {this.state.error.toString()}
                 </code>
               </div>
             )}
 
-            <div className="flex gap-3 justify-center">
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <button
+                type="button"
                 onClick={this.handleReset}
-                className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                className="btn-primary px-6"
               >
-                🔄 Coba Lagi
+                <span aria-hidden="true">🔄</span> Coba Lagi
               </button>
               <button
+                type="button"
                 onClick={this.handleGoHome}
-                className="px-6 py-2.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg font-medium hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+                className="btn-secondary px-6"
               >
-                🏠 Ke Dashboard
+                <span aria-hidden="true">🏠</span> Ke Dashboard
               </button>
             </div>
           </div>

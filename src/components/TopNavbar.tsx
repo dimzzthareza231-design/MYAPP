@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 import { MODULE_REGISTRY } from '../data/moduleRegistry';
 import { isModuleAvailableInMode, type OperatingMode } from '../data/operatingModes';
 import { useAuth } from '../contexts/AuthContext';
@@ -74,6 +76,30 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
 
   const megaMenuRef = useRef<HTMLDivElement>(null);
   const aiSuiteRef = useRef<HTMLDivElement>(null);
+  const mobileDrawerRef = useRef<HTMLDivElement>(null);
+
+  // Drawer navigasi mobile berperilaku seperti dialog modal: Escape menutup,
+  // fokus terkunci di dalam drawer, dan kembali ke tombol menu saat ditutup.
+  useDialogA11y(showMobileDrawer, () => setShowMobileDrawer(false), mobileDrawerRef);
+
+  // Escape menutup dropdown navbar (mega menu & AI suite) lalu mengembalikan fokus ke pemicunya.
+  useEffect(() => {
+    if (!showMegaMenu && !showAISuiteMenu) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      if (showMegaMenu) {
+        setShowMegaMenu(false);
+        megaMenuRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup]')?.focus();
+      }
+      if (showAISuiteMenu) {
+        setShowAISuiteMenu(false);
+        aiSuiteRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup]')?.focus();
+      }
+    };
+    document.addEventListener('keydown', handleEscape, true);
+    return () => document.removeEventListener('keydown', handleEscape, true);
+  }, [showMegaMenu, showAISuiteMenu]);
 
   // Filter modules based on user authorization
   const accessibleCategories = useMemo(() => {
@@ -408,6 +434,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
             onClick={() => navigate('/dashboard')}
             className="flex items-center gap-3 group text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A94E]/50 rounded-xl p-1 -m-1 transition-all"
             title="Kembali ke Dashboard Utama"
+            aria-label={`${hospitalSettings?.name || 'MYITARU SIMK'} - kembali ke Dashboard Utama`}
           >
             {/* Logo Emblem with Ambient Backlight */}
             <div className="relative">
@@ -417,12 +444,12 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
               </div>
             </div>
 
-            {/* Klinik Name */}
-            <div className="hidden sm:block">
+            {/* Klinik Name (disembunyikan di lg agar navigasi tengah muat) */}
+            <div className="hidden sm:block lg:hidden xl:block">
               <h1 className="text-base font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-[#E8D49E] leading-tight whitespace-nowrap">
                 {hospitalSettings?.name || 'MYITARU SIMK'}
               </h1>
-              <p className="text-[10px] text-slate-400 uppercase tracking-widest font-medium truncate max-w-[200px]">
+              <p className="text-[10px] text-slate-400 uppercase tracking-widest font-medium truncate max-w-[160px] 2xl:max-w-[200px]">
                 {hospitalSettings?.subname || 'Smart Klinik Suite'}
               </p>
             </div>
@@ -431,15 +458,20 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
           {/* Mega Menu Launcher Button */}
           <div className="relative hidden md:block shrink-0" ref={megaMenuRef}>
             <button
+              type="button"
               onClick={() => setShowMegaMenu(!showMegaMenu)}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all border shadow-sm whitespace-nowrap shrink-0 ${
+              aria-haspopup="true"
+              aria-expanded={showMegaMenu}
+              aria-label="Direktori Modul"
+              className={`flex items-center gap-2 min-h-touch px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all border shadow-sm whitespace-nowrap shrink-0 ${
                 showMegaMenu
                   ? 'bg-gradient-to-r from-[#173A63] to-[#1B4677] text-white border-[#E8D49E] shadow-[0_0_15px_rgba(201,169,78,0.25)]'
                   : 'bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 hover:text-white border-white/10 hover:border-[#C9A94E]/40'
               }`}
             >
-              <Layers className="w-3.5 h-3.5 text-[#E8D49E] shrink-0" />
-              <span>Direktori Modul</span>
+              <Layers className="w-3.5 h-3.5 text-[#E8D49E] shrink-0" aria-hidden="true" />
+              <span className="hidden xl:inline">Direktori Modul</span>
+              <span className="xl:hidden">Modul</span>
               <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${showMegaMenu ? 'rotate-180 text-[#E8D49E]' : ''}`} />
             </button>
 
@@ -476,9 +508,10 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
 
                   {/* Filter inside Mega Menu */}
                   <div className="relative w-56">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
                     <input
                       type="text"
+                      aria-label="Cari modul atau submenu"
                       placeholder="Cari modul / submenu..."
                       value={menuSearchQuery}
                       onChange={(e) => setMenuSearchQuery(e.target.value)}
@@ -660,9 +693,9 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
         {/* ========================================================================= */}
         {/* 2. TENGAH: CURATED DIRECT LINKS & SLEEK SEARCH BAR                        */}
         {/* ========================================================================= */}
-        <div className="hidden lg:flex items-center gap-2 flex-1 justify-center max-w-2xl mx-auto">
-          {/* Quick Direct Links (Paling Sering Digunakan) */}
-          <nav className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-2xl border border-white/[0.07] backdrop-blur-md shrink-0">
+        <div className="hidden lg:flex items-center gap-2 flex-1 min-w-0 justify-center max-w-2xl mx-auto">
+          {/* Quick Direct Links (Paling Sering Digunakan) - label teks hanya di layar 2xl, selebihnya ikon + tooltip */}
+          <nav aria-label="Navigasi cepat" className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-2xl border border-white/[0.07] backdrop-blur-md shrink-0">
             {quickDirectLinks.filter(link =>
               link.path === '/dashboard' ||
               isModuleAvailableInMode(link.path.replace('/modul/', ''), operatingMode)
@@ -672,15 +705,19 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
               return (
                 <button
                   key={link.path}
+                  type="button"
                   onClick={() => navigate(link.path)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all relative whitespace-nowrap shrink-0 ${
+                  title={link.label}
+                  aria-label={link.label}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`flex items-center justify-center gap-1.5 min-h-9 min-w-9 px-2.5 2xl:px-3 py-1.5 rounded-xl text-xs font-semibold transition-all relative whitespace-nowrap shrink-0 ${
                     isActive
                       ? 'bg-gradient-to-r from-[#183F6D] to-[#123157] text-white shadow-sm border border-[#C9A94E]/40'
                       : 'text-slate-300 hover:text-white hover:bg-white/[0.05]'
                   }`}
                 >
-                  <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-[#E8D49E]' : 'text-slate-400'}`} />
-                  <span>{link.label}</span>
+                  <Icon aria-hidden="true" className={`w-4 h-4 2xl:w-3.5 2xl:h-3.5 shrink-0 ${isActive ? 'text-[#E8D49E]' : 'text-slate-400'}`} />
+                  <span className="hidden 2xl:inline">{link.label}</span>
                 </button>
               );
             })}
@@ -688,13 +725,16 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
 
           {/* Unified Smart Omnisearch Trigger (Command Bar Style) */}
           <button
+            type="button"
             onClick={openCommandPalette}
-            className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 hover:text-white border border-white/10 hover:border-[#C9A94E]/40 text-xs font-medium transition-all shadow-inner group whitespace-nowrap shrink-0"
+            aria-label="Cari pasien atau aksi (Ctrl+K)"
+            aria-keyshortcuts="Control+K Meta+K"
+            className="flex items-center gap-2.5 min-h-9 px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 hover:text-white border border-white/10 hover:border-[#C9A94E]/40 text-xs font-medium transition-all shadow-inner group whitespace-nowrap shrink-0"
             title="Buka Command Palette (Ctrl+K)"
           >
-            <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#E8D49E] transition-colors shrink-0" />
-            <span className="hidden xl:inline text-slate-400 group-hover:text-slate-200">Cari pasien / aksi...</span>
-            <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-black/40 text-[#E8D49E] border border-white/10">
+            <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#E8D49E] transition-colors shrink-0" aria-hidden="true" />
+            <span className="hidden 2xl:inline text-slate-400 group-hover:text-slate-200">Cari pasien / aksi...</span>
+            <kbd aria-hidden="true" className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-black/40 text-[#E8D49E] border border-white/10">
               <Command className="w-2.5 h-2.5" /> K
             </kbd>
           </button>
@@ -703,20 +743,24 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
         {/* ========================================================================= */}
         {/* 3. KANAN: AI CLINICAL SUITE HUB + NOTIF + USER PROFILE                    */}
         {/* ========================================================================= */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           
           {/* Unified AI & Clinical Tools Dropdown Hub */}
           <div className="relative" ref={aiSuiteRef}>
             <button
+              type="button"
               onClick={() => setShowAISuiteMenu(!showAISuiteMenu)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-sm whitespace-nowrap shrink-0 ${
+              aria-haspopup="true"
+              aria-expanded={showAISuiteMenu}
+              aria-label="AI & Tools: alat kecerdasan klinis"
+              className={`flex items-center justify-center gap-2 min-h-touch px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-sm whitespace-nowrap shrink-0 ${
                 showAISuiteMenu
                   ? 'bg-gradient-to-r from-[#16365D] via-[#1C4373] to-[#102A4A] text-white border-[#C9A94E]/60 shadow-[0_0_15px_rgba(201,169,78,0.25)]'
                   : 'bg-gradient-to-r from-white/[0.05] to-white/[0.02] hover:bg-white/[0.08] text-white border-white/10 hover:border-[#C9A94E]/45'
               }`}
               title="Akses Alat Kecerdasan Klinis AI & Diagnostik Cepat"
             >
-              <Sparkles className="w-3.5 h-3.5 text-[#E8D49E] shrink-0" />
+              <Sparkles className="w-3.5 h-3.5 text-[#E8D49E] shrink-0" aria-hidden="true" />
               <span className="hidden sm:inline bg-gradient-to-r from-[#E8D49E] via-white to-cyan-200 bg-clip-text text-transparent">
                 AI & Tools
               </span>
@@ -725,7 +769,10 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
 
             {/* AI Tools Luxury Dropdown Palette */}
             {showAISuiteMenu && (
-              <div className="absolute right-0 mt-3 w-[360px] sm:w-[480px] bg-[#0B1728]/98 border border-[#C9A94E]/30 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.85)] z-50 backdrop-blur-2xl p-3 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div
+                role="region"
+                aria-label="MYITARU AI Suite"
+                className="fixed sm:absolute inset-x-2 sm:inset-x-auto top-[70px] sm:top-auto sm:right-0 sm:mt-3 sm:w-[480px] max-h-[calc(100dvh-80px)] overflow-y-auto overscroll-contain bg-[#0B1728]/98 border border-[#C9A94E]/30 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.85)] z-50 backdrop-blur-2xl p-3 animate-in fade-in slide-in-from-top-2 duration-200">
                 {/* AI Suite Header */}
                 <div className="px-2 py-2 border-b border-white/10 mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -752,6 +799,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                     <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
                       type="text"
+                      aria-label="Cari fitur AI"
                       placeholder="Cari fitur AI (suara, diagnosa, obat, klaim, triage)..."
                       value={aiSearchQuery}
                       onChange={(e) => setAiSearchQuery(e.target.value)}
@@ -759,10 +807,12 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                     />
                     {aiSearchQuery && (
                       <button
+                        type="button"
                         onClick={() => setAiSearchQuery('')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                        aria-label="Hapus pencarian fitur AI"
+                        className="absolute right-0.5 top-1/2 -translate-y-1/2 size-8 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-white"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="w-3 h-3" aria-hidden="true" />
                       </button>
                     )}
                   </div>
@@ -780,8 +830,10 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                   ].map(tab => (
                     <button
                       key={tab.id}
+                      type="button"
                       onClick={() => setAiCategoryFilter(tab.id as any)}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all ${
+                      aria-pressed={aiCategoryFilter === tab.id}
+                      className={`px-2.5 py-1.5 min-h-8 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all ${
                         aiCategoryFilter === tab.id
                           ? 'bg-gradient-to-r from-purple-700 to-indigo-700 text-white shadow-xs border border-purple-400/50'
                           : 'bg-white/[0.03] text-slate-400 hover:text-white hover:bg-white/[0.08] border border-white/5'
@@ -793,7 +845,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                 </div>
 
                 {/* AI Tools List Grid */}
-                <div className="max-h-[360px] overflow-y-auto space-y-1.5 p-1 custom-scrollbar">
+                <div className="sm:max-h-[360px] sm:overflow-y-auto space-y-1.5 p-1 custom-scrollbar">
                   {filteredAITools.length === 0 ? (
                     <div className="p-6 text-center text-xs text-slate-400">
                       Tidak ada fitur AI yang cocok dengan "{aiSearchQuery}"
@@ -857,21 +909,86 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
 
           {/* Mobile Menu Toggle Button */}
           <button
+            type="button"
             onClick={() => setShowMobileDrawer(!showMobileDrawer)}
-            className="lg:hidden p-2 rounded-xl bg-white/[0.05] border border-white/10 text-white hover:bg-white/10 transition-colors"
+            className="lg:hidden icon-btn bg-white/[0.05] border border-white/10 text-white hover:bg-white/10"
             title="Buka Navigasi Mobile"
+            aria-label={showMobileDrawer ? 'Tutup menu navigasi' : 'Buka menu navigasi'}
+            aria-expanded={showMobileDrawer}
+            aria-controls="mobile-nav-drawer"
           >
-            {showMobileDrawer ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {showMobileDrawer ? <X className="w-5 h-5" aria-hidden="true" /> : <Menu className="w-5 h-5" aria-hidden="true" />}
           </button>
         </div>
       </div>
 
+      {/* Drawer & modal dirender lewat portal ke <body>: header memakai backdrop-filter
+          yang menjadikannya containing block bagi elemen position:fixed, sehingga
+          overlay di dalam header terpotong setinggi header. */}
+      {typeof document !== 'undefined' && createPortal(
+        <>
       {/* ========================================================================= */}
       {/* 4. MOBILE NAVIGATION DRAWER (REPLACING OLD UGLY SELECT BOX)               */}
       {/* ========================================================================= */}
       {showMobileDrawer && (
-        <div className="lg:hidden fixed inset-x-0 top-[66px] bottom-0 bg-[#07111D]/95 backdrop-blur-2xl z-40 border-t border-[#C9A94E]/25 p-4 overflow-y-auto animate-in slide-in-from-top-4 duration-200">
-          <div className="space-y-4 max-w-lg mx-auto">
+        <div className="lg:hidden fixed inset-0 z-[90]">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200"
+            onClick={() => setShowMobileDrawer(false)}
+            aria-hidden="true"
+          />
+          {/* Panel off-canvas dari kanan */}
+          <div
+            ref={mobileDrawerRef}
+            id="mobile-nav-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu navigasi"
+            className="absolute inset-y-0 right-0 w-full max-w-sm bg-[#07111D] border-l border-[#C9A94E]/25 shadow-[0_0_60px_rgba(0,0,0,0.6)] flex flex-col animate-in slide-in-from-right-8 duration-200"
+          >
+          <div className="flex items-center justify-between gap-3 px-4 h-[68px] shrink-0 border-b border-white/10">
+            <span className="text-sm font-bold text-white">Menu Navigasi</span>
+            <button
+              type="button"
+              onClick={() => setShowMobileDrawer(false)}
+              className="icon-btn bg-white/[0.05] border border-white/10 text-white hover:bg-white/10"
+              aria-label="Tutup menu navigasi"
+            >
+              <X className="w-5 h-5" aria-hidden="true" />
+            </button>
+          </div>
+          <nav aria-label="Navigasi utama" className="flex-1 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="space-y-4">
+            {/* Tautan cepat */}
+            <div className="grid grid-cols-2 gap-2">
+              {quickDirectLinks.filter(link =>
+                link.path === '/dashboard' ||
+                isModuleAvailableInMode(link.path.replace('/modul/', ''), operatingMode)
+              ).map(link => {
+                const Icon = link.icon;
+                const isActive = location.pathname === link.path;
+                return (
+                  <button
+                    key={link.path}
+                    type="button"
+                    onClick={() => {
+                      setShowMobileDrawer(false);
+                      navigate(link.path);
+                    }}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`flex items-center gap-2 min-h-touch px-3 py-2 rounded-xl border text-xs font-bold text-left ${
+                      isActive
+                        ? 'bg-[#183F6D] border-[#C9A94E]/50 text-white'
+                        : 'bg-white/[0.04] border-white/10 text-slate-200 hover:bg-white/10'
+                    }`}
+                  >
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#E8D49E]' : 'text-slate-400'}`} aria-hidden="true" />
+                    <span className="truncate">{link.label}</span>
+                  </button>
+                );
+              })}
+            </div>
             {/* Quick Actions Bar */}
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -879,7 +996,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                   setShowMobileDrawer(false);
                   openCommandPalette();
                 }}
-                className="flex items-center justify-center gap-2 p-3 rounded-xl bg-white/[0.05] border border-white/10 text-white text-xs font-bold"
+                className="flex items-center justify-center gap-2 min-h-touch p-3 rounded-xl bg-white/[0.05] border border-white/10 text-white text-xs font-bold"
               >
                 <Search className="w-4 h-4 text-[#E8D49E]" />
                 <span>Pencarian (⌘K)</span>
@@ -889,7 +1006,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                   setShowMobileDrawer(false);
                   setShowCDSSModal(true);
                 }}
-                className="flex items-center justify-center gap-2 p-3 rounded-xl bg-gradient-to-r from-purple-900/60 to-indigo-900/60 border border-purple-500/30 text-white text-xs font-bold"
+                className="flex items-center justify-center gap-2 min-h-touch p-3 rounded-xl bg-gradient-to-r from-purple-900/60 to-indigo-900/60 border border-purple-500/30 text-white text-xs font-bold"
               >
                 <Brain className="w-4 h-4 text-cyan-300" />
                 <span>AI CDSS</span>
@@ -899,7 +1016,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                   setShowMobileDrawer(false);
                   setShowVoiceScribeModal(true);
                 }}
-                className="flex items-center justify-center gap-2 p-3 rounded-xl bg-gradient-to-r from-emerald-900/60 to-teal-900/60 border border-emerald-500/30 text-white text-xs font-bold"
+                className="flex items-center justify-center gap-2 min-h-touch p-3 rounded-xl bg-gradient-to-r from-emerald-900/60 to-teal-900/60 border border-emerald-500/30 text-white text-xs font-bold"
               >
                 <Mic className="w-4 h-4 text-emerald-300" />
                 <span>Voice Scribe</span>
@@ -909,7 +1026,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                   setShowMobileDrawer(false);
                   setShowQRScanner(true);
                 }}
-                className="flex items-center justify-center gap-2 p-3 rounded-xl bg-white/[0.05] border border-white/10 text-white text-xs font-bold"
+                className="flex items-center justify-center gap-2 min-h-touch p-3 rounded-xl bg-white/[0.05] border border-white/10 text-white text-xs font-bold"
               >
                 <QrCode className="w-4 h-4 text-emerald-300" />
                 <span>Scan QR RM</span>
@@ -937,7 +1054,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                         setShowMobileDrawer(false);
                         tool.action();
                       }}
-                      className="flex items-center justify-between p-2 rounded-lg bg-white/[0.03] hover:bg-white/10 text-left text-xs text-slate-200 transition-colors"
+                      className="flex items-center justify-between gap-2 min-h-touch p-2 rounded-lg bg-white/[0.03] hover:bg-white/10 text-left text-xs text-slate-200 transition-colors"
                     >
                       <span className="flex items-center gap-2 truncate">
                         <Icon className="w-3.5 h-3.5 text-purple-300 shrink-0" />
@@ -974,7 +1091,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                           navigate(`/modul/${mod.id}`);
                           setShowMobileDrawer(false);
                         }}
-                        className="flex items-center justify-between p-2 rounded-lg text-xs text-slate-200 hover:bg-white/10 hover:text-white text-left transition-colors"
+                        className="flex items-center justify-between gap-2 min-h-touch p-2 rounded-lg text-xs text-slate-200 hover:bg-white/10 hover:text-white text-left transition-colors"
                       >
                         <span className="flex items-center gap-2 truncate">
                           <span>{mod.icon}</span>
@@ -987,6 +1104,8 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
                 </div>
               ))}
             </div>
+          </div>
+          </nav>
           </div>
         </div>
       )}
@@ -1006,8 +1125,8 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
       )}
 
       {showSearchModal && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[120] flex items-center justify-center p-4">
-          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl">
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[120] flex items-center justify-center p-2 sm:p-4">
+          <div className="w-full max-w-4xl max-h-[92dvh] overflow-y-auto overscroll-contain rounded-2xl shadow-2xl">
             <MedicalSearchGrounding
               isOpen={showSearchModal}
               onClose={() => setShowSearchModal(false)}
@@ -1029,6 +1148,9 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
           isOpen={showVoiceScribeModal}
           onClose={() => setShowVoiceScribeModal(false)}
         />
+      )}
+        </>,
+        document.body
       )}
     </header>
   );
