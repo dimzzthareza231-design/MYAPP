@@ -646,6 +646,17 @@ export function registerPatientPortalRoutes(
     };
   }
 
+  // Endpoint dispatch berada di web publik tanpa autentikasi staf. Di luar mode demo, hanya pemanggil
+  // server-ke-server yang membawa PATIENT_NOTIFY_DISPATCH_TOKEN yang boleh mengubah status antrean/hasil lab pasien.
+  function isDispatchAuthorized(req: express.Request): boolean {
+    if (useDemoData) return true;
+    const expected = process.env.PATIENT_NOTIFY_DISPATCH_TOKEN;
+    const provided = req.get('x-dispatch-token');
+    if (!expected || !provided) return false;
+    const digest = (value: string) => crypto.createHash('sha256').update(value, 'utf8').digest();
+    return crypto.timingSafeEqual(digest(provided), digest(expected));
+  }
+
   function issueSession(no_rm: string, authMethod: 'rm_dob' | 'google', email?: string): PatientSession {
     const session: PatientSession = {
       token: '',
@@ -730,11 +741,14 @@ export function registerPatientPortalRoutes(
       };
     });
 
-    const sampleTickets = appointmentsStore.slice(0, 4).map((apt) => ({
-      nomor_antrian: apt.nomor_antrian,
-      no_rm: apt.no_rm,
-      poli: apt.poli
-    }));
+    // Contoh tiket (dengan No. RM) hanya untuk data demo; pada data pasien nyata ini membocorkan No. RM ke publik.
+    const sampleTickets = useDemoData
+      ? appointmentsStore.slice(0, 4).map((apt) => ({
+          nomor_antrian: apt.nomor_antrian,
+          no_rm: apt.no_rm,
+          poli: apt.poli
+        }))
+      : [];
 
     if (!rawQuery) {
       return res.json({
@@ -747,11 +761,14 @@ export function registerPatientPortalRoutes(
       });
     }
 
+    // Endpoint publik tanpa sesi: di luar mode demo hanya pencocokan persis, agar No. RM pasien lain
+    // tidak bisa dienumerasi dengan potongan kueri (mis. "RM" atau "0").
+    const matchedByRm = (apt: ServerAppointmentRecord) => normalizeRm(apt.no_rm) === rawQuery;
     const matches = appointmentsStore
-      .filter(
-        (a) =>
-          a.nomor_antrian.toUpperCase().includes(rawQuery) ||
-          normalizeRm(a.no_rm).includes(rawQuery)
+      .filter((a) =>
+        useDemoData
+          ? a.nomor_antrian.toUpperCase().includes(rawQuery) || normalizeRm(a.no_rm).includes(rawQuery)
+          : a.nomor_antrian.toUpperCase() === rawQuery || matchedByRm(a)
       )
       .map((apt) => {
         const poliItem = MASTER_POLIKLINIK.find(
@@ -779,7 +796,7 @@ export function registerPatientPortalRoutes(
         return {
           id: apt.id,
           nomor_antrian: apt.nomor_antrian,
-          no_rm: apt.no_rm,
+          no_rm: useDemoData || matchedByRm(apt) ? apt.no_rm : '',
           pasien_nama_masked: maskPatientName(apt.pasien_nama),
           poli: apt.poli,
           dokter: apt.dokter,
@@ -1075,8 +1092,11 @@ export function registerPatientPortalRoutes(
         const yy = String(now.getFullYear()).slice(-2);
         const mm = String(now.getMonth() + 1).padStart(2, '0');
         const dd = String(now.getDate()).padStart(2, '0');
-        const seq = String(patientsStore.length + 101).padStart(4, '0');
-        resolvedRm = `RM-${yy}${mm}${dd}-${seq}`;
+        // Hindari No. RM ganda (mis. setelah data pasien dihapus/dimuat ulang dari database).
+        let seqNumber = patientsStore.length + 101;
+        const existingRms = new Set(patientsStore.map((p) => normalizeRm(p.no_rm)));
+        while (existingRms.has(`RM-${yy}${mm}${dd}-${String(seqNumber).padStart(4, '0')}`)) seqNumber += 1;
+        resolvedRm = `RM-${yy}${mm}${dd}-${String(seqNumber).padStart(4, '0')}`;
         patientsStore.unshift({
           id: `p-${Date.now()}`,
           no_rm: resolvedRm,
@@ -1096,10 +1116,16 @@ export function registerPatientPortalRoutes(
       }
 
       const poliKode = poliObj.kode;
-      const existingForPoli = appointmentsStore.filter((a) =>
-        a.nomor_antrian.startsWith(`${poliKode}-`)
-      ).length;
-      const nomorAntrian = `${poliKode}-${String(existingForPoli + 2).padStart(3, '0')}`;
+      // Nomor antrean per poli per tanggal kunjungan (sebelumnya dihitung dari seluruh riwayat semua tanggal),
+      // memakai urutan tertinggi agar tidak bentrok bila ada antrean yang dihapus.
+      const sameDayForPoli = appointmentsStore.filter((a) =>
+        a.tanggal === targetDate && a.nomor_antrian.startsWith(`${poliKode}-`)
+      );
+      const highestSeq = sameDayForPoli.reduce((max, a) => {
+        const seq = Number.parseInt(a.nomor_antrian.slice(poliKode.length + 1), 10);
+        return Number.isFinite(seq) ? Math.max(max, seq) : max;
+      }, 0);
+      const nomorAntrian = `${poliKode}-${String(Math.max(highestSeq, sameDayForPoli.length + 1) + 1).padStart(3, '0')}`;
 
       const newApt: ServerAppointmentRecord = {
         id: `apt-${crypto.randomUUID()}`,
@@ -1133,7 +1159,7 @@ export function registerPatientPortalRoutes(
       doctorServedBoost.set(dokter_id, (doctorServedBoost.get(dokter_id) || 0) + 1);
 
       createAuditLog?.({
-        user: resolvedName,
+        user: patientName,
         role: 'Pasien Portal',
         action: 'ONLINE_APPOINTMENT_BOOKING',
         module: 'Portal & App Pasien',
@@ -1305,6 +1331,7 @@ export function registerPatientPortalRoutes(
     req.on('close', () => {
       clearInterval(heartbeat);
       listeners?.delete(res);
+      if (listeners?.size === 0 && sseClientsByRm.get(targetRm) === listeners) sseClientsByRm.delete(targetRm);
     });
   });
 
@@ -1393,6 +1420,10 @@ export function registerPatientPortalRoutes(
     if (!session) {
       return res.status(401).json({ success: false, message: 'Sesi pasien tidak valid.' });
     }
+    // Simulasi mengubah status antrean pasien menjadi 'Panggil'; hanya untuk data demo.
+    if (!useDemoData) {
+      return res.status(403).json({ success: false, code: 'DEMO_ONLY', message: 'Simulasi notifikasi hanya tersedia pada mode demo.' });
+    }
     const { type } = req.body || {};
     if (type !== 'queue_call' && type !== 'lab_ready') {
       return res.status(400).json({
@@ -1425,6 +1456,9 @@ export function registerPatientPortalRoutes(
 
   // 12. SIMK Staff Dispatch Endpoint (Called from Outpatient Queue Call & Lab Sp.PK Validation)
   app.post('/api/v1/patient-notifications/dispatch', async (req, res) => {
+    if (!isDispatchAuthorized(req)) {
+      return res.status(403).json({ success: false, code: 'DISPATCH_FORBIDDEN', message: 'Pemanggil dispatch notifikasi tidak terotorisasi.' });
+    }
     try {
       const {
         no_rm,
