@@ -11,3 +11,4 @@ dev-dist
 .wrangler/
 .dev.vars*
 .secrets.cloudflare.*.json
+.10x/

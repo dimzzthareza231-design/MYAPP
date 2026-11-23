@@ -104,7 +104,6 @@ flowchart LR
 ## Struktur proyek
 
 ```
-├── .10x/                   Spec, ADR, dan catatan keputusan tim
 ├── api/                    Vercel Function untuk seluruh /api/*
 ├── database/schemas/       Skema SQL untuk migrasi ke basis data relasional
 ├── migrations/             Migrasi skema Cloudflare D1
@@ -264,7 +263,7 @@ Laporkan celah keamanan secara pribadi sesuai [SECURITY.md](SECURITY.md), bukan 
 
 ## Kontribusi
 
-Kontribusi terbuka. Baca [CONTRIBUTING.md](CONTRIBUTING.md) dan [Kode Etik](CODE_OF_CONDUCT.md) untuk penyiapan, konvensi branch/commit, dan pemeriksaan sebelum pull request. Riwayat perubahan dicatat di [CHANGELOG.md](CHANGELOG.md); keputusan arsitektur (ADR) dan spec ada di [`.10x/`](.10x/).
+Kontribusi terbuka. Baca [CONTRIBUTING.md](CONTRIBUTING.md) dan [Kode Etik](CODE_OF_CONDUCT.md) untuk penyiapan, konvensi branch/commit, dan pemeriksaan sebelum pull request. Riwayat perubahan dicatat di [CHANGELOG.md](CHANGELOG.md).
 
 ## Lisensi dan kredit
 

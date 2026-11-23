@@ -9,7 +9,7 @@ Setiap sesi di repo ini memakai dua skill berikut sejak pesan pertama, tanpa per
   - Review perubahan: `/ponytail-review`.
   - Audit seluruh repo: `/ponytail-audit`.
 
-Jangan memakai 10x-Team (skill `10x-Team:*`) untuk proyek ini. Folder `.10x/` hanya arsip keputusan migrasi Cloudflare; boleh dibaca, jangan ditambah.
+Jangan memakai 10x-Team (skill `10x-Team:*`) untuk proyek ini.
 
 Kedua mode tetap aktif sampai pengguna bilang "stop caveman", "stop ponytail", atau "normal mode".
 
@@ -20,4 +20,18 @@ MYITARU: web publik pasien + aplikasi inti SIMK/RME. Jalan di Cloudflare Workers
 - Tes: `npm test`
 - Typecheck: `npm run typecheck`
 - Build Cloudflare: `npm run cf:build`
-- Deploy: `npm run cf:deploy` (hanya atas permintaan pengguna)
+- Deploy: `npm run cf:deploy`
+
+## Aturan sinkron (permintaan pengguna)
+
+Setiap perubahan yang selesai dan lolos `npm run typecheck` + `npm test` langsung:
+
+1. di-commit dan di-push ke branch `main` di GitHub (fast-forward, tanpa force push), lalu
+2. di-deploy ke Cloudflare dengan `npm run cf:deploy` (kedua Worker), lalu cek `/api/v1/health` di Worker inti.
+
+Kalau tes gagal atau deploy gagal, jangan push/deploy setengah jalan; laporkan ke pengguna. Migrasi D1 baru (`migrations/`) dijalankan dengan `npm run cf:migrate` sebelum deploy. Secret baru diisi pengguna sendiri lewat `wrangler secret put`.
+
+## Jangan simpan jejak sesi di repo
+
+- Jangan menulis catatan sesi, spec, atau log kerja agen ke repo (misalnya `.10x/`).
+- Pesan commit tanpa baris `Claude-Session:` atau tautan sesi lain.
