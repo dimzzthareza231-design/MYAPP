@@ -8,6 +8,9 @@ import {
 import { useHospital } from '../contexts/HospitalContext';
 import { useToast } from '../contexts/ToastContext';
 import { storage } from '../utils/storage';
+import { useClinicalCollection } from '../hooks/useClinicalCollection';
+import { clinicalPaths } from '../lib/clinicalApi';
+import { ClinicalSyncStatus } from './ClinicalSyncStatus';
 
 import { BillingRecord, MasterTarifItem, ShiftKasirRecord, PaymentMethod } from './Finance/types';
 import { INITIAL_BILLINGS, INITIAL_MASTER_TARIF, INITIAL_SHIFTS } from './Finance/mockFinanceData';
@@ -42,10 +45,18 @@ export function Billing() {
     }
   }, [searchParams, outletCtx?.activeTab]);
 
-  // Persistent States using storage wrapper
-  const [billings, setBillings] = useState<BillingRecord[]>(() => {
-    return storage.getItem<BillingRecord[]>('hospital_finance_billings', INITIAL_BILLINGS);
+  // Tagihan tersimpan di server (/api/v1/billing/invoices); data contoh hanya di mode demo (STORAGE_MODE=memory).
+  const billingCollection = useClinicalCollection<BillingRecord>({
+    listPath: clinicalPaths.billings,
+    itemPath: (id) => clinicalPaths.item(clinicalPaths.billings, id),
+    createPath: clinicalPaths.billings,
+    demoKey: 'hospital_finance_billings',
+    demoInitial: INITIAL_BILLINGS,
+    onError: (message) => toast.error(message)
   });
+  const { records: billings, setRecords: setBillings, reload: reloadBillings } = billingCollection;
+
+  // Persistent States using storage wrapper
 
   const [tarifs, setTarifs] = useState<MasterTarifItem[]>(() => {
     return storage.getItem<MasterTarifItem[]>('hospital_finance_tarifs', INITIAL_MASTER_TARIF);
@@ -59,11 +70,7 @@ export function Billing() {
   const [activeBillingForPayment, setActiveBillingForPayment] = useState<BillingRecord | null>(null);
   const [activeKwitansiBilling, setActiveKwitansiBilling] = useState<BillingRecord | null>(null);
 
-  // Sync back to storage on update
-  useEffect(() => {
-    storage.setItem('hospital_finance_billings', billings);
-  }, [billings]);
-
+  // Sync back to storage on update (tagihan disimpan oleh useClinicalCollection)
   useEffect(() => {
     storage.setItem('hospital_finance_tarifs', tarifs);
   }, [tarifs]);
@@ -75,18 +82,11 @@ export function Billing() {
   // Real-time interline listener for bills from Registration, Outpatient, Lab, Farmasi, and Bed
   useEffect(() => {
     const handleSync = () => {
-      try {
-        const saved = storage.getItem<BillingRecord[]>('hospital_finance_billings', null);
-        if (saved && Array.isArray(saved) && saved.length > 0) {
-          setBillings(saved);
-        }
-      } catch (e) {
-        console.warn('Billing sync error:', e);
-      }
+      void reloadBillings().catch((e) => console.warn('Billing sync error:', e));
     };
     window.addEventListener('simrs-interline-sync', handleSync);
     return () => window.removeEventListener('simrs-interline-sync', handleSync);
-  }, []);
+  }, [reloadBillings]);
 
   // Sync new visits from HospitalContext into billings if not already present
   const handleSyncFromKunjungan = () => {
@@ -211,6 +211,14 @@ export function Billing() {
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
+      <ClinicalSyncStatus
+        label="tagihan"
+        backend={billingCollection.backend}
+        loading={billingCollection.loading}
+        saving={billingCollection.saving}
+        error={billingCollection.error}
+        onRetry={() => void reloadBillings()}
+      />
       
       {/* Top Financial Dashboard KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

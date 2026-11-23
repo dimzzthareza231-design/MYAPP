@@ -1,13 +1,32 @@
 import toast from "react-hot-toast";
 import { useToast } from "../contexts/ToastContext";
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import TalkToText from './TalkToText';
 import { MedicalSearchGrounding } from './MedicalSearchGrounding';
 import ClinicalDecisionSupportWidget from './ClinicalDecisionSupportWidget';
 import { Brain, Sparkles, Stethoscope } from 'lucide-react';
+import {
+  clinicalPaths,
+  clinicalRequest,
+  describeClinicalError,
+  resolveClinicalBackend,
+  type ClinicalBackend
+} from '../lib/clinicalApi';
 
-export default function FormSOAP({ kunjunganId, pasien, onClose }: { kunjunganId?: number, pasien?: any, onClose?: () => void }) {
-  const [soap, setSoap] = useState({
+const DEMO_SOAP_KEY = 'hospital_soap_records';
+type SoapGovernanceStatus = 'AI_GENERATED' | 'PENDING_REVIEW' | 'HUMAN_VERIFIED' | 'FINAL';
+
+function readDemoSoapRecords(): any[] {
+  try {
+    const raw = localStorage.getItem(DEMO_SOAP_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export default function FormSOAP({ kunjunganId, pasien, onClose }: { kunjunganId?: number | string, pasien?: any, onClose?: () => void }) {
+  const [soap, setSoap] = useState<any>({
     subjective: { keluhan_utama: '', riwayat_penyakit_sekarang: '', riwayat_alergi: '' },
     objective: { tanda_vital: { tekanan_darah: '', nadi: '', suhu: '', rr: '', spo2: '' }, pemeriksaan_fisik: '' },
     assessment: { diagnosis_primer: null as any, diagnosis_sekunder: [] as any[], catatan_assessment: '' },
@@ -17,7 +36,56 @@ export default function FormSOAP({ kunjunganId, pasien, onClose }: { kunjunganId
   const [activeTab, setActiveTab] = useState('subjective');
   const [isSaving, setIsSaving] = useState(false);
   const [showCDSModal, setShowCDSModal] = useState(false);
-  const [aiStatus, setAiStatus] = useState<'AI_GENERATED' | 'PENDING_REVIEW' | 'HUMAN_VERIFIED' | 'FINAL'>('PENDING_REVIEW');
+  const [aiStatus, setAiStatus] = useState<SoapGovernanceStatus>('PENDING_REVIEW');
+  // Penyimpanan: server (/api/v1/dossier/soap) atau demo localStorage hanya saat STORAGE_MODE=memory.
+  const [backend, setBackend] = useState<ClinicalBackend | null>(null);
+  const [savedNote, setSavedNote] = useState<{ id: string; version: number; status: string } | null>(null);
+  const [isLoadingNote, setIsLoadingNote] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const isLocked = savedNote?.status === 'Final';
+
+  useEffect(() => {
+    let active = true;
+    const applyNote = (note: any) => {
+      setSoap((prev: any) => ({
+        subjective: note.subjective && typeof note.subjective === 'object' ? note.subjective : prev.subjective,
+        objective: note.objective && typeof note.objective === 'object' ? note.objective : prev.objective,
+        assessment: note.assessment && typeof note.assessment === 'object' ? note.assessment : prev.assessment,
+        plan: note.plan && typeof note.plan === 'object' ? note.plan : prev.plan
+      }));
+      if (note.ai_governance_status) setAiStatus(note.ai_governance_status);
+    };
+    (async () => {
+      setIsLoadingNote(true);
+      setLoadError(null);
+      const mode = await resolveClinicalBackend();
+      if (!active) return;
+      setBackend(mode);
+      if (kunjunganId === undefined || kunjunganId === null) return;
+      if (mode === 'demo') {
+        const existing = readDemoSoapRecords().find((r: any) => r.kunjungan_id === kunjunganId);
+        if (existing) applyNote(existing);
+        return;
+      }
+      const params = new URLSearchParams({ kunjungan_id: String(kunjunganId), limit: '1' });
+      if (pasien?.no_rm) params.set('no_rm', String(pasien.no_rm));
+      const body = await clinicalRequest<{ data: any[] }>(`${clinicalPaths.soap}?${params}`, 'GET');
+      const note = body.data?.[0];
+      if (!active || !note) return;
+      applyNote(note);
+      setSavedNote({ id: note.id, version: note.version, status: note.status });
+    })()
+      .catch((error) => {
+        if (active) setLoadError(describeClinicalError(error));
+      })
+      .finally(() => {
+        if (active) setIsLoadingNote(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [kunjunganId, pasien?.no_rm, reloadKey]);
   
   const handleTranscriptReady = (newSoap: any) => {
     setSoap(newSoap);
@@ -32,12 +100,56 @@ export default function FormSOAP({ kunjunganId, pasien, onClose }: { kunjunganId
     }));
   };
   
+  const saveToServer = async () => {
+    if (kunjunganId === undefined || kunjunganId === null || !pasien?.no_rm) {
+      toast.error('Kunjungan dan No. RM pasien wajib ada untuk menyimpan rekam medis.');
+      return;
+    }
+    if (isLocked) {
+      toast.error('Rekam medis sudah FINAL dan terkunci.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const payload = {
+        kunjungan_id: String(kunjunganId),
+        no_rm: String(pasien.no_rm),
+        pasien_nama: pasien?.nama_pasien || pasien?.nama || undefined,
+        dokter: pasien?.dokter || undefined,
+        unit: pasien?.poli || undefined,
+        source: 'form-soap',
+        subjective: soap.subjective,
+        objective: soap.objective,
+        assessment: soap.assessment,
+        plan: soap.plan,
+        icd10: soap.assessment?.diagnosis_primer?.code || undefined,
+        ai_governance_status: aiStatus,
+        ...(savedNote ? { version: savedNote.version } : {})
+      };
+      const body = await clinicalRequest<{ data: any }>(
+        savedNote ? clinicalPaths.item(clinicalPaths.soap, savedNote.id) : clinicalPaths.soap,
+        savedNote ? 'PUT' : 'POST',
+        payload
+      );
+      setSavedNote({ id: body.data.id, version: body.data.version, status: body.data.status });
+      toast.success(body.data.status === 'Final' ? 'Rekam medis tersimpan dan dikunci FINAL' : 'Rekam medis berhasil disimpan');
+      if (onClose) onClose();
+    } catch (error) {
+      toast.error(`Rekam medis belum tersimpan: ${describeClinicalError(error)}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSave = async () => {
+    if (backend !== 'demo') {
+      await saveToServer();
+      return;
+    }
     setIsSaving(true);
     await new Promise(r => setTimeout(r, 1000));
     
-    const raw = localStorage.getItem('hospital_soap_records');
-    const saved: any[] = raw ? JSON.parse(raw) : [];
+    const saved: any[] = readDemoSoapRecords();
     const existingIndex = saved.findIndex((r: any) => r.kunjungan_id === kunjunganId);
     
     const data = { 
@@ -50,7 +162,7 @@ export default function FormSOAP({ kunjunganId, pasien, onClose }: { kunjunganId
     if (existingIndex >= 0) saved[existingIndex] = data;
     else saved.push(data);
     
-    localStorage.setItem('hospital_soap_records', JSON.stringify(saved));
+    localStorage.setItem(DEMO_SOAP_KEY, JSON.stringify(saved));
 
     setIsSaving(false);
     toast.success('Rekam medis berhasil disimpan');
@@ -110,6 +222,26 @@ export default function FormSOAP({ kunjunganId, pasien, onClose }: { kunjunganId
         </div>
       </div>
       
+      {isLoadingNote && (
+        <div role="status" className="mb-3 text-xs text-slate-500">Memuat catatan SOAP tersimpan...</div>
+      )}
+      {loadError && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+          <span>Catatan SOAP tersimpan tidak dapat dimuat: {loadError}</span>
+          <button type="button" onClick={() => setReloadKey((key) => key + 1)} className="font-bold underline">Muat ulang</button>
+        </div>
+      )}
+      {isLocked && (
+        <div role="status" className="mb-3 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+          🔒 Rekam medis kunjungan ini sudah FINAL dan tidak dapat diubah.
+        </div>
+      )}
+      {backend === 'demo' && (
+        <div role="status" className="mb-3 text-[11px] text-amber-700 dark:text-amber-300">
+          Mode demo (STORAGE_MODE=memory): catatan SOAP hanya tersimpan di peramban ini.
+        </div>
+      )}
+
       {/* TalkToText - di atas form */}
       <TalkToText
         onTranscriptReady={handleTranscriptReady}
@@ -390,7 +522,7 @@ export default function FormSOAP({ kunjunganId, pasien, onClose }: { kunjunganId
         <div className="border-t dark:border-gray-700 p-4 flex gap-2">
           <button
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || isLoadingNote || isLocked || (backend !== 'demo' && Boolean(loadError))}
             className="flex-1 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50"
           >
             {isSaving ? '⏳ Menyimpan...' : '💾 Simpan Rekam Medis'}

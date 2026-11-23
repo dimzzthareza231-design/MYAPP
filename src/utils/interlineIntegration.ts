@@ -222,7 +222,9 @@ export function integrateOutpatientSOAP({
   };
   prescriptions?: Array<{ name: string; qty: string; rules: string }>;
   labRadOrders?: string;
-}) {
+}): { prescription?: PrescriptionOrder } {
+  // Resep yang baru dibuat dikembalikan agar pemanggil dapat menyimpannya ke server (e-resep persisten).
+  let createdPrescription: PrescriptionOrder | undefined;
   try {
     const patientName = patient?.nama || patient?.nama_pasien || 'Pasien';
     const patientRm = patient?.no_rm || 'RM-000000';
@@ -310,6 +312,7 @@ export function integrateOutpatientSOAP({
 
         existingPrescriptions.unshift(newRxOrder);
         storage.set(SIMRS_STORAGE_KEYS.PHARMACY_PRESCRIPTIONS, existingPrescriptions);
+        createdPrescription = newRxOrder;
       }
     }
 
@@ -556,6 +559,7 @@ export function integrateOutpatientSOAP({
   } catch (err) {
     console.error('Error in integrateOutpatientSOAP:', err);
   }
+  return { prescription: createdPrescription };
 }
 
 /**

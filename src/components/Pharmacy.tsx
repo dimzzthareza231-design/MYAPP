@@ -4,6 +4,9 @@ import { useHospital } from '../contexts/HospitalContext';
 import { useToast } from '../contexts/ToastContext';
 import { storage } from '../utils/storage';
 import { integratePharmacyDispense } from '../utils/interlineIntegration';
+import { useClinicalCollection } from '../hooks/useClinicalCollection';
+import { clinicalPaths } from '../lib/clinicalApi';
+import { ClinicalSyncStatus } from './ClinicalSyncStatus';
 
 // TYPES & MOCK DATA
 import { 
@@ -109,9 +112,21 @@ export function Pharmacy() {
     return storage.get<MedicationStock[]>('hospital_pharmacy_stocks', INITIAL_MEDICATIONS);
   });
 
-  const [prescriptions, setPrescriptions] = useState<PrescriptionOrder[]>(() => {
-    return storage.get<PrescriptionOrder[]>('hospital_pharmacy_prescriptions', INITIAL_PRESCRIPTIONS);
+  // E-resep dari server (/api/v1/inventory/prescriptions, scope farmasi); data contoh hanya di mode demo.
+  const prescriptionCollection = useClinicalCollection<PrescriptionOrder>({
+    listPath: clinicalPaths.pharmacyPrescriptions,
+    itemPath: (id) => clinicalPaths.item(clinicalPaths.pharmacyPrescriptions, id),
+    createDeniedMessage: 'Resep baru wajib diterbitkan DPJP melalui modul Poliklinik/RME.',
+    demoKey: 'hospital_pharmacy_prescriptions',
+    demoInitial: INITIAL_PRESCRIPTIONS,
+    onError: (message) => toast.error(message)
   });
+  const {
+    records: prescriptions,
+    setRecords: setPrescriptions,
+    reload: reloadPrescriptions,
+    backend: prescriptionBackend
+  } = prescriptionCollection;
 
   const [uddSchedules, setUddSchedules] = useState<UDDSchedule[]>(() => {
     return storage.get<UDDSchedule[]>('hospital_pharmacy_udd', INITIAL_UDD_SCHEDULES);
@@ -139,10 +154,6 @@ export function Pharmacy() {
   }, [stocks]);
 
   useEffect(() => {
-    storage.set('hospital_pharmacy_prescriptions', prescriptions);
-  }, [prescriptions]);
-
-  useEffect(() => {
     storage.set('hospital_pharmacy_udd', uddSchedules);
   }, [uddSchedules]);
 
@@ -166,10 +177,7 @@ export function Pharmacy() {
   useEffect(() => {
     const handleSync = () => {
       try {
-        const savedRx = storage.get<PrescriptionOrder[]>('hospital_pharmacy_prescriptions', null);
-        if (savedRx && Array.isArray(savedRx)) {
-          setPrescriptions(savedRx);
-        }
+        void reloadPrescriptions();
         const savedStocks = storage.get<MedicationStock[]>('hospital_pharmacy_stocks', null);
         if (savedStocks && Array.isArray(savedStocks)) {
           setStocks(savedStocks);
@@ -180,10 +188,12 @@ export function Pharmacy() {
     };
     window.addEventListener('simrs-interline-sync', handleSync);
     return () => window.removeEventListener('simrs-interline-sync', handleSync);
-  }, []);
+  }, [reloadPrescriptions]);
 
   // SYNC WITH HOSPITAL CONTEXT KUNJUNGAN (Auto import prescriptions with status 'Farmasi')
+  // Hanya mode demo: resep contoh ini bukan resep DPJP sungguhan sehingga tidak boleh masuk ke server.
   useEffect(() => {
+    if (prescriptionBackend !== 'demo') return;
     const farmasiKunjungan = kunjungan.filter(k => k.status === 'Farmasi');
     if (farmasiKunjungan.length === 0) return;
 
@@ -281,7 +291,7 @@ export function Pharmacy() {
       });
       return newItemsToAdd.length > 0 ? [...newItemsToAdd, ...prev] : prev;
     });
-  }, [kunjungan]);
+  }, [kunjungan, prescriptionBackend]);
 
   // STOCK DEDUCTION UPON DISPENSING
   const handleDispenseDeductStock = (items: PrescriptionItem[], depoKey: 'depo_ralan' | 'depo_ranap' | 'depo_igd' = 'depo_ralan') => {
@@ -317,6 +327,14 @@ export function Pharmacy() {
 
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-[1600px] mx-auto flex-1 w-full">
+      <ClinicalSyncStatus
+        label="e-resep"
+        backend={prescriptionCollection.backend}
+        loading={prescriptionCollection.loading}
+        saving={prescriptionCollection.saving}
+        error={prescriptionCollection.error}
+        onRetry={() => void reloadPrescriptions()}
+      />
       {/* 1. TOP HEADER & MAIN MODULE NAVIGATION TABS */}
       <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center gap-3">

@@ -22,6 +22,7 @@ import { PoliklinikQueueDisplay } from './PoliklinikQueueDisplay';
 import { RegistrationForm } from './Registration/RegistrationForm';
 import { WilayahSelector } from './WilayahSelector';
 import { integrateOutpatientSOAP, integrateRegistration } from '../utils/interlineIntegration';
+import { describeClinicalError, persistOutpatientEncounter } from '../lib/clinicalApi';
 
 export function Outpatient() {
   const { activeTab } = useOutletContext<{ activeTab: string }>() || { activeTab: 'Pemeriksaan' };
@@ -651,7 +652,7 @@ export function Outpatient() {
     }
 
     // 5. Interline System Integration (Farmasi, Laboratorium, Radiologi, Kasir, Patient Flow)
-    integrateOutpatientSOAP({
+    const { prescription: createdPrescription } = integrateOutpatientSOAP({
       patient: activePatient,
       visit: activeVisit,
       doctor: activeDoctor,
@@ -659,6 +660,35 @@ export function Outpatient() {
       soapData: soapData,
       prescriptions: prescriptions,
       labRadOrders: soapData.lab_rad
+    });
+
+    // 6. Simpan SOAP & e-resep ke penyimpanan server (D1/MySQL/Firebase); mode demo tetap lokal.
+    void persistOutpatientEncounter({
+      soap: {
+        kunjungan_id: String(activeVisit.id),
+        no_rm: newEncounter.no_rm,
+        pasien_id: newEncounter.patientId,
+        pasien_nama: newEncounter.nama,
+        dokter: newEncounter.dokter,
+        unit: newEncounter.unit,
+        source: 'poliklinik',
+        subjective: soapData.s,
+        objective: soapData.o,
+        assessment: soapData.a,
+        plan: soapData.p,
+        icd10: soapData.icd10 || undefined,
+        tindakan_icd9: soapData.tindakan_icd9 || undefined,
+        alergi: soapData.alergi || undefined,
+        kontrol: soapData.kontrol || undefined,
+        riwayat_penyakit_dahulu: soapData.rpd || undefined,
+        penunjang: soapData.lab_rad || undefined,
+        diagnosis_sekunder: soapData.diagnosis_sekunder || undefined,
+        vital_signs: soapData.vitalSigns || undefined,
+        ai_governance_status: 'HUMAN_VERIFIED'
+      },
+      prescription: createdPrescription as unknown as ({ id: string } & Record<string, unknown>) | undefined
+    }).catch((error) => {
+      toast.error(`Rekam medis/e-resep belum tersimpan di server: ${describeClinicalError(error)}`);
     });
 
     toast.success(`✅ Pemeriksaan selesai! Data tersinkronisasi ke Rekam Medis (RME) pasien ${activePatient?.nama || ''} & Resep diteruskan ke Farmasi.`);
