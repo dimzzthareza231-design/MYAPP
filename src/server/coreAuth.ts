@@ -4,6 +4,8 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { COMMON_MODULES, MODULE_ALIASES, ROLES } from '../data/roles';
 import { getDocumentQrScope, readSecurePatientQrToken } from './securePatientQr';
+import type { LocalAuthProvider } from './localAuth';
+import { LOCAL_MFA_PUBLIC_ENDPOINTS, localAuthContext, lockedMessage, registerLocalMfaRoutes } from './localAuthMfaRoutes';
 
 const SESSION_COOKIE = 'myitaru_core_session';
 const LOCAL_SESSION_COOKIE = 'myitaru_local_session';
@@ -17,6 +19,8 @@ export interface CorePrincipal {
   roleId: string;
   mfaVerified: boolean;
   authMode?: CoreAuthMode;
+  /** Mode lokal: sesi wajib menyelesaikan pendaftaran MFA (LOCAL_AUTH_REQUIRE_MFA) sebelum akses API lain. */
+  mfaEnrollmentRequired?: boolean;
 }
 
 export interface CoreAuthRequest extends express.Request {
@@ -33,35 +37,7 @@ export interface CoreAuthOptions {
   resolvePrincipal?: (token: string, isSessionCookie: boolean) => Promise<CorePrincipal | null>;
   createSessionCookie?: (idToken: string) => Promise<string>;
   revokeRefreshTokens?: (uid: string) => Promise<void>;
-  localAuth?: {
-    initialize(): Promise<void>;
-    login(identifier: string, password: string): Promise<{
-      token: string;
-      user: {
-        id: string;
-        username: string;
-        email: string;
-        nama: string;
-        roleId: string;
-        aktif: true;
-        dibuatPada: string;
-      };
-      principal: CorePrincipal;
-    } | null>;
-    resolveSession(token: string): Promise<{
-      user: {
-        id: string;
-        username: string;
-        email: string;
-        nama: string;
-        roleId: string;
-        aktif: true;
-        dibuatPada: string;
-      };
-      principal: CorePrincipal;
-    } | null>;
-    logout(token: string): Promise<void>;
-  };
+  localAuth?: LocalAuthProvider;
 }
 
 declare global {
@@ -255,12 +231,32 @@ export function registerCoreAuthentication(
       }
 
       try {
-        const result = await localAuth!.login(req.body.identifier, req.body.password);
-        if (!result) {
+        const result = await localAuth!.authenticate(req.body.identifier, req.body.password, localAuthContext(req));
+        res.setHeader('Cache-Control', 'no-store');
+        if (result.status === 'locked') {
+          res.setHeader('Retry-After', String(result.retryAfterSeconds));
+          return res.status(429).json({ success: false, code: 'ACCOUNT_LOCKED', message: lockedMessage(result.retryAfterSeconds) });
+        }
+        if (result.status === 'invalid') {
           return res.status(401).json({ success: false, code: 'INVALID_CREDENTIALS', message: 'Username/email atau kata sandi tidak valid.' });
         }
+        if (result.status === 'mfa_required') {
+          // Belum ada sesi: klien harus mengirim tantangan ini + kode TOTP ke /api/auth/mfa/verify.
+          return res.json({
+            success: true,
+            authMode: 'local',
+            mfaRequired: true,
+            challengeToken: result.challengeToken,
+            expiresAt: result.expiresAt
+          });
+        }
         setSessionCookie(res, result.token, SESSION_TTL_MS / 1000, LOCAL_SESSION_COOKIE);
-        return res.json({ success: true, authMode: 'local', user: result.user });
+        return res.json({
+          success: true,
+          authMode: 'local',
+          user: result.user,
+          mfa: { enrollmentRequired: result.mfaEnrollmentRequired }
+        });
       } catch (error) {
         return next(error);
       }
@@ -275,7 +271,12 @@ export function registerCoreAuthentication(
           setSessionCookie(res, '', 0, LOCAL_SESSION_COOKIE);
           return res.status(401).json({ success: false, code: 'INVALID_SESSION' });
         }
-        return res.json({ success: true, authMode: 'local', user: session.user });
+        return res.json({
+          success: true,
+          authMode: 'local',
+          user: session.user,
+          mfa: { enrollmentRequired: Boolean(session.principal.mfaEnrollmentRequired) }
+        });
       } catch (error) {
         return next(error);
       }
@@ -293,6 +294,14 @@ export function registerCoreAuthentication(
       } catch (error) {
         return next(error);
       }
+    });
+
+    registerLocalMfaRoutes(app, localAuth!, {
+      sessionCookieName: LOCAL_SESSION_COOKIE,
+      sessionTtlSeconds: SESSION_TTL_MS / 1000,
+      getCookie,
+      setSessionCookie,
+      isSameOrigin
     });
   } else {
     app.post('/api/auth/session', async (req, res, next) => {
@@ -353,7 +362,7 @@ export function registerCoreAuthentication(
   app.use('/api', async (req: CoreAuthRequest, res, next) => {
     const apiPath = `${req.baseUrl}${req.path}`;
     const publicAuthEndpoint = authMode === 'local'
-      ? ['/api/auth/login', '/api/auth/me', '/api/auth/logout'].includes(apiPath)
+      ? ['/api/auth/login', '/api/auth/me', '/api/auth/logout', ...LOCAL_MFA_PUBLIC_ENDPOINTS].includes(apiPath)
       : apiPath === '/api/auth/session';
     if (publicAuthEndpoint || apiPath === '/api/v1/health') return next();
 
@@ -370,6 +379,14 @@ export function registerCoreAuthentication(
       const principal = await resolvePrincipal(token, Boolean(cookieToken));
       if (!principal) {
         return res.status(401).json({ success: false, code: 'INVALID_SESSION' });
+      }
+
+      if (principal.mfaEnrollmentRequired) {
+        return res.status(403).json({
+          success: false,
+          code: 'MFA_ENROLLMENT_REQUIRED',
+          message: 'Aktifkan verifikasi dua langkah (MFA) sebelum mengakses sistem.'
+        });
       }
 
       const scope = scopeForPath(apiPath, req);

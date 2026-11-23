@@ -1,7 +1,7 @@
-// D1Adapter dijalankan terhadap SQLite sungguhan (node:sqlite) memakai skema migrations/0001_init.sql.
+// D1Adapter dijalankan terhadap SQLite sungguhan (node:sqlite) memakai semua skema migrations/*.sql berurutan.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { D1Adapter, PERSISTENCE_ENTITIES, type D1DatabaseLike, type D1PreparedStatementLike } from '../src/server/databaseAdapter';
 
@@ -32,7 +32,10 @@ function createD1Shim(db: DatabaseSync): D1DatabaseLike {
 
 function migratedAdapter(): D1Adapter {
   const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  const migrationsDir = new URL('../migrations/', import.meta.url);
+  for (const file of readdirSync(migrationsDir).filter((name) => name.endsWith('.sql')).sort()) {
+    db.exec(readFileSync(new URL(file, migrationsDir), 'utf8'));
+  }
   return new D1Adapter(createD1Shim(db));
 }
 

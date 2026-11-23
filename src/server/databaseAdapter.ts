@@ -21,7 +21,9 @@ export const PERSISTENCE_ENTITIES = [
   'bookings',
   'system_data',
   'local_auth_users',
-  'local_auth_sessions'
+  'local_auth_sessions',
+  'local_auth_mfa',
+  'local_auth_attempts'
 ] as const;
 export type PersistenceEntity = typeof PERSISTENCE_ENTITIES[number];
 
@@ -40,7 +42,9 @@ const MYSQL_TABLES: Record<PersistenceEntity, string> = {
   bookings: 'bookings',
   system_data: 'system_data',
   local_auth_users: 'local_auth_users',
-  local_auth_sessions: 'local_auth_sessions'
+  local_auth_sessions: 'local_auth_sessions',
+  local_auth_mfa: 'local_auth_mfa',
+  local_auth_attempts: 'local_auth_attempts'
 };
 
 const FIRESTORE_COLLECTIONS: Record<PersistenceEntity, string> = {
@@ -58,7 +62,9 @@ const FIRESTORE_COLLECTIONS: Record<PersistenceEntity, string> = {
   bookings: 'bookings',
   system_data: 'system_data',
   local_auth_users: 'local_auth_users',
-  local_auth_sessions: 'local_auth_sessions'
+  local_auth_sessions: 'local_auth_sessions',
+  local_auth_mfa: 'local_auth_mfa',
+  local_auth_attempts: 'local_auth_attempts'
 };
 
 export interface StoredRecord<T = unknown> {
@@ -487,7 +493,7 @@ export interface D1DatabaseLike {
   batch(statements: D1PreparedStatementLike[]): Promise<unknown[]>;
 }
 
-// Schema lives in migrations/0001_init.sql (applied with `wrangler d1 migrations apply`).
+// Schema lives in migrations/*.sql (applied with `wrangler d1 migrations apply`).
 export class D1Adapter implements PersistenceRepository {
   readonly mode = 'd1' as const;
   private lastError?: string;

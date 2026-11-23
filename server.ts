@@ -187,6 +187,8 @@ export async function createApps(
     const limits: Record<string, { max: number; windowMs: number }> = {
       '/auth/session': { max: 20, windowMs: 15 * 60 * 1000 },
       '/auth/login': { max: 10, windowMs: 15 * 60 * 1000 },
+      '/auth/mfa/verify': { max: 10, windowMs: 15 * 60 * 1000 },
+      '/auth/mfa/enroll/confirm': { max: 10, windowMs: 15 * 60 * 1000 },
       '/auth/logout': { max: 20, windowMs: 15 * 60 * 1000 },
       '/patient/verify': { max: 10, windowMs: 15 * 60 * 1000 },
       '/patient/google-session': { max: 10, windowMs: 15 * 60 * 1000 },

@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ActivityLogsTab } from './ActivityLogsTab';
+import { LocalMfaSettings } from './LocalMfaSettings';
+import { isLocalAuthMode } from '../../lib/firebase';
 import { UserManagement } from './UserManagement';
 import { useAuth } from '../../contexts/AuthContext';
 import { ROLES, getRoleById, getCustomPermissions, saveCustomPermissions, COMMON_MODULES } from '../../data/roles';
@@ -82,7 +84,7 @@ export function AuthManagement() {
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pb-6">
         {activeTab === 'activity' && <ActivityLogsTab />}
-        {activeTab === 'login' && <LoginSimulator />}
+        {activeTab === 'login' && (isLocalAuthMode ? <LocalMfaSettings /> : <LoginSimulator />)}
         {activeTab === 'users' && <UserManagement />}
         {activeTab === 'roles' && <RolesTab />}
         {activeTab === 'sessions' && <SessionsTab />}
