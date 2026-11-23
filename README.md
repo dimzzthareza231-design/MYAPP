@@ -86,7 +86,7 @@ flowchart LR
 - **Lokal/Docker:** kedua aplikasi berjalan dalam satu proses pada port `3000` (publik) dan `3001` (inti).
 - **Vercel:** dua proyek terpisah. `api/index.ts` adalah satu Vercel Function yang memilih aplikasi lewat variabel `APP_TARGET`.
 - Sesi pasien dan beberapa komponen prototipe memakai token bertanda tangan HMAC-SHA256 (`src/server/signedStore.ts`). Token stateless tidak menyediakan pencabutan global; jangan gunakan sesi demo untuk data nyata.
-- Autentikasi staf dapat memakai `AUTH_MODE=local` untuk intranet tanpa Firebase atau `AUTH_MODE=firebase` untuk Firebase Auth. Mode lokal menyimpan akun dan sesi di MySQL, memverifikasi sandi scrypt di server, dan memakai cookie HttpOnly yang dapat dicabut. Mode Firebase memverifikasi ID token/session cookie dan profil aktif/role dari Firestore; akses operasional memerlukan MFA TOTP.
+- Autentikasi staf dapat memakai `AUTH_MODE=local` untuk intranet tanpa Firebase atau `AUTH_MODE=firebase` untuk Firebase Auth. Mode lokal menyimpan akun dan sesi di MySQL/D1, memverifikasi sandi scrypt di server, memakai cookie HttpOnly yang dapat dicabut, dan mendukung MFA TOTP (RFC 6238) dengan kode pemulihan sekali pakai. Mode Firebase memverifikasi ID token/session cookie dan profil aktif/role dari Firestore; akses operasional memerlukan MFA TOTP.
 - Kartu peran pada login hanya mengisi username. Role efektif selalu berasal dari akun yang diverifikasi server; browser tidak dapat memilih atau menaikkan hak akses sendiri.
 
 ## Teknologi
@@ -152,6 +152,7 @@ npm run dev
 | `AUTH_MODE` / `VITE_AUTH_MODE` | Tidak | Gunakan `local` untuk intranet (tanpa Firebase) atau `firebase`; keduanya harus selaras. Tanpa `VITE_FIREBASE_API_KEY`, klien memilih mode lokal. |
 | `LOCAL_AUTH_*_PASSWORD` | Mode lokal | Sandi awal unik kuat untuk enam akun peran; hanya dibaca server lalu di-hash dengan scrypt. Jangan memasukkan nilai sandi ke repositori. |
 | `LOCAL_AUTH_ADMIN_EMAIL` | Tidak | Alamat email akun admin lokal; bawaan `admin@myitaru.local`. |
+| `LOCAL_AUTH_REQUIRE_MFA` | Tidak | `true` mewajibkan peran admin (`super_admin`, `admin`, `it_support`) mendaftarkan MFA TOTP sebelum mengakses API lain; memerlukan `SESSION_SECRET`. Bawaan `false`. |
 | `MYITARU_QR_SECRET` | Produksi | Kunci enkripsi QR khusus server; bila kosong, QR memakai `SESSION_SECRET`. |
 | `STORAGE_MODE` / `VITE_STORAGE_MODE` | Produksi | Set nilainya sama. Cloudflare memakai `d1`; mode lokal memakai `mysql`; Firebase/hybrid untuk integrasi cloud, sedangkan `memory` hanya untuk demo dan tes. |
 | `DB_HOST` / `DB_PORT` | Jika MySQL aktif | Host dan port MySQL/MariaDB (bawaan `127.0.0.1:3306`). |
@@ -255,7 +256,12 @@ Mode `NODE_ENV=production` hanya dapat startup bila `STORAGE_MODE` menunjuk ke p
 ## Keamanan dan keterbatasan
 
 - **Jangan gunakan data pasien nyata.** Walau beberapa endpoint kini memakai persistent adapter dan API inti memerlukan autentikasi server-side, sejumlah modul klinis masih belum terhubung ke persistence tersebut.
-- Mode autentikasi lokal tidak mewajibkan MFA. Batasi ke intranet tersegmentasi, gunakan sandi unik kuat, lindungi akses jaringan dan database, serta jaga kerahasiaan `SESSION_SECRET`. Akun awal dibuat dari variabel `LOCAL_AUTH_*_PASSWORD` dan tidak memiliki sandi bawaan.
+- Mode autentikasi lokal mendukung MFA TOTP (RFC 6238, aplikasi autentikator apa pun). MFA bersifat opsional per akun, kecuali `LOCAL_AUTH_REQUIRE_MFA=true` yang memaksa peran admin mendaftar sebelum API lain dapat diakses; peran klinis lain tetap opsional. Pengaturan ada di menu Keamanan, tab *Login & 2FA* (`/api/auth/mfa/*`).
+  - Rahasia TOTP disimpan terenkripsi AES-256-GCM dengan kunci turunan HKDF dari `SESSION_SECRET`; sepuluh kode pemulihan sekali pakai hanya disimpan sebagai hash HMAC dan ditampilkan sekali. **Mengganti `SESSION_SECRET` membuat rahasia MFA dan kode pemulihan tidak dapat dibaca** sehingga pengguna harus mendaftar ulang (administrator menghapus baris `local_auth_mfa` pengguna tersebut).
+  - Kode TOTP menerima toleransi ±30 detik dan setiap langkah waktu hanya dapat dipakai sekali per akun. Setelah sandi benar, server menerbitkan token tantangan bertanda tangan yang berlaku 5 menit, bukan sesi.
+  - Percobaan sandi dan kode MFA yang gagal dikunci 15 menit setelah 5 kegagalan per akun+IP, atau 20 (sandi)/10 (MFA) kegagalan per akun dari IP mana pun. Penguncian per akun dapat dipicu pihak lain untuk menahan login akun tertentu sementara. IP diambil dari `cf-connecting-ip` (Cloudflare) atau alamat soket; di Node tanpa proxy tepercaya header tersebut dapat dipalsukan sehingga hanya batas per akun yang efektif.
+  - Pendaftaran MFA bersifat *trust on first use*: siapa pun yang mengetahui sandi akun admin yang belum mendaftar dapat mendaftarkan autentikatornya sendiri. Daftarkan MFA segera setelah akun dibuat.
+  - Batasi tetap ke intranet tersegmentasi, gunakan sandi unik kuat, lindungi akses jaringan dan database, serta jaga kerahasiaan `SESSION_SECRET`. Akun awal dibuat dari variabel `LOCAL_AUTH_*_PASSWORD` dan tidak memiliki sandi bawaan.
 - **Ketahanan operasional belum lengkap.** Backup/pemulihan dan integrasi BPJS, SATUSEHAT, serta QRIS belum tervalidasi end-to-end; integrasi yang belum tersedia harus tetap dianggap simulasi.
 - Keluaran AI belum dievaluasi akurasinya terhadap standar klinis dan wajib diverifikasi tenaga kesehatan.
 - Portal karyawan masih prototipe dan belum memiliki integrasi identitas HRIS.
