@@ -17,7 +17,7 @@
     "public": {
       "name": "myitaru-public",
       // Custom domain: Cloudflare membuat record DNS dan sertifikat TLS otomatis saat deploy.
-      "routes": [{ "pattern": "dimsskuyy.myitaru.my.id", "custom_domain": true }],
+      "routes": [{ "pattern": "www.myitaru.my.id", "custom_domain": true }],
       "vars": {
         "APP_TARGET": "public",
         "CLOUDFLARE_WORKER": "1",
@@ -40,7 +40,7 @@
     "core": {
       "name": "myitaru-core",
       // Custom domain: Cloudflare membuat record DNS dan sertifikat TLS otomatis saat deploy.
-      "routes": [{ "pattern": "inti.myitaru.my.id", "custom_domain": true }],
+      "routes": [{ "pattern": "myitaru.my.id", "custom_domain": true }],
       "vars": {
         "APP_TARGET": "core",
         "CLOUDFLARE_WORKER": "1",

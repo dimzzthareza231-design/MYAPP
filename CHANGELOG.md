@@ -12,7 +12,7 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 - Role based access aplikasi inti per bidang: admin semua modul; dokter layanan medis; perawat keperawatan; RMIK rekam medis; farmasi obat dan stok; lab modul laboratorium; kasir keuangan. Ditegakkan di server dan UI.
 - Akun lokal opsional `lab` (role `laboran`, `LOCAL_AUTH_LAB_PASSWORD`) dan kartu Laboratorium di halaman login. Modul laboratorium tersedia di mode SIMK.
 - Deploy otomatis ke Cloudflare (migrasi D1 + kedua Worker + cek health) setiap push ke `main` lewat GitHub Actions, aktif bila secret repo Cloudflare tersedia.
-- Custom domain: web publik di `dimsskuyy.myitaru.my.id`, aplikasi inti di `inti.myitaru.my.id`.
+- Custom domain: web publik di `www.myitaru.my.id`, aplikasi inti di `myitaru.my.id`.
 - File komunitas: `CONTRIBUTING.md`, `SECURITY.md`, template issue/PR, Dependabot.
 
 ### Diperbaiki
