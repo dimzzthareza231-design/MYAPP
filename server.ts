@@ -30,6 +30,7 @@ import {
   type CoreAuthOptions
 } from './src/server/coreAuth';
 import { LocalAuthService } from './src/server/localAuth';
+import { clientIp } from './src/server/clientIp';
 import {
   createSecurePatientQrToken,
   getDocumentQrScope,
@@ -203,7 +204,7 @@ export async function createApps(
     if (!limit) return next();
 
     const now = Date.now();
-    const key = `${req.ip || req.socket.remoteAddress || 'unknown'}:${req.path}`;
+    const key = `${clientIp(req)}:${req.path}`;
     let bucket = rateLimitBuckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
       bucket = { count: 0, resetAt: now + limit.windowMs };

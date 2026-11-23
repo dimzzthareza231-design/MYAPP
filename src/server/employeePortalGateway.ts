@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type express from 'express';
 import { createSignedStore } from './signedStore';
+import { clientIp } from './clientIp';
 import {
   HOSPITAL_DIVISIONS,
   CORE_EMPLOYEE_MODULES,
@@ -841,7 +842,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
   // Sliding window rate limiter + Idempotency middleware for /api/gateway/*
   app.use('/api/gateway', (req, res, next) => {
-    const ip = req.ip || '127.0.0.1';
+    const ip = clientIp(req);
     const now = Date.now();
     const history = (rateLimitMap.get(ip) || []).filter((ts) => now - ts < 60_000);
     history.push(now);

@@ -41,15 +41,21 @@ export function createSignedStore<T extends object>(prefix: string, tokenField: 
       const body = Buffer.from(JSON.stringify({ exp: Date.now() + ttlMs, data: payload })).toString('base64url');
       const token = `${prefix}${body}.${sign(body)}`;
       (data as any)[tokenField] = token;
+      if (cache.size > 5000) for (const key of cache.keys()) if (!verify(key)) cache.delete(key);
       cache.set(token, data);
       return token;
     },
     get(token: string): T | undefined {
       if (!token || revoked.has(token)) return undefined;
+      // Selalu verifikasi ulang agar token kedaluwarsa ditolak walau masih ada di cache.
+      const data = verify(token);
+      if (!data) {
+        cache.delete(token);
+        return undefined;
+      }
       const hit = cache.get(token);
       if (hit) return hit;
-      const data = verify(token);
-      if (data) cache.set(token, data);
+      cache.set(token, data);
       return data;
     },
     has(token: string): boolean {
