@@ -44,6 +44,8 @@ interface AuthContextType {
   mfaFlow: MfaFlow | null;
   completeMfa: (code: string) => Promise<{ success: boolean; message: string }>;
   completeMfaEnrollment: (code: string) => Promise<{ success: boolean; message: string; reauthenticationRequired?: boolean }>;
+  /** Mode lokal: menutup layar kode pemulihan setelah pendaftaran MFA dan masuk ke aplikasi. */
+  finishLocalMfaEnrollment: () => void;
   cancelMfa: () => Promise<void>;
   signInWithGoogle: () => Promise<{ success: boolean; message: string; isCancelled?: boolean }>;
   logout: () => Promise<void>;
@@ -57,9 +59,43 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-type MfaFlow =
+export type MfaFlow =
   | { type: 'enrollment'; qrCodeUrl: string; secretKey: string }
-  | { type: 'challenge' };
+  | { type: 'challenge' }
+  // Mode autentikasi lokal (server MYITARU, bukan Firebase).
+  | { type: 'local-challenge'; challengeToken: string }
+  | { type: 'local-enrollment'; qrCodeUrl: string; secretKey: string; required: boolean }
+  | { type: 'local-recovery-codes'; recoveryCodes: string[] };
+
+function payloadRecord(payload: unknown): Record<string, unknown> | null {
+  return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
+}
+
+function payloadMessage(payload: unknown, fallback: string): string {
+  const message = payloadRecord(payload)?.message;
+  return typeof message === 'string' ? message : fallback;
+}
+
+function localEnrollmentRequired(payload: unknown): boolean {
+  const mfa = payloadRecord(payloadRecord(payload)?.mfa);
+  return mfa?.enrollmentRequired === true;
+}
+
+/** Memulai pendaftaran MFA lokal untuk sesi saat ini; mengembalikan URI otpauth dan kunci manual. */
+export async function startLocalMfaEnrollment(): Promise<{ qrCodeUrl: string; secretKey: string }> {
+  const response = await fetch('/api/auth/mfa/enroll', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}'
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  const record = payloadRecord(payload);
+  if (!response.ok || typeof record?.otpauthUri !== 'string' || typeof record.secret !== 'string') {
+    throw new Error(payloadMessage(payload, 'Pendaftaran MFA tidak dapat dimulai.'));
+  }
+  return { qrCodeUrl: record.otpauthUri, secretKey: record.secret };
+}
 
 function parseLocalUser(value: unknown): User | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -135,7 +171,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [mfaFlow, setMfaFlow] = useState<MfaFlow | null>(null);
   const pendingMfaResolver = useRef<MultiFactorResolver | null>(null);
   const pendingTotpSecret = useRef<TotpSecret | null>(null);
+  const pendingLocalUser = useRef<User | null>(null);
   const suppressAuthRestore = useRef(false);
+
+  // Sesi lokal sudah ada tetapi kebijakan mewajibkan MFA: tahan profil sampai pendaftaran selesai.
+  const beginLocalMfaEnrollment = async (user: User) => {
+    pendingLocalUser.current = user;
+    const enrollment = await startLocalMfaEnrollment();
+    setMfaFlow({ type: 'local-enrollment', ...enrollment, required: true });
+  };
 
   const beginMfaEnrollment = async (user: FirebaseUser) => {
     const session = await multiFactor(user).getSession();
@@ -151,6 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearMfaFlow = () => {
     pendingMfaResolver.current = null;
     pendingTotpSecret.current = null;
+    pendingLocalUser.current = null;
     setMfaFlow(null);
   };
 
@@ -191,7 +236,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         const user = parseLocalUser((payload as Record<string, unknown>).user);
         if (!user) throw new Error('Local session returned an invalid staff profile.');
-        if (isMounted) setCurrentUser(user);
+        if (!isMounted) return;
+        if (localEnrollmentRequired(payload)) {
+          setCurrentUser(null);
+          await beginLocalMfaEnrollment(user);
+        } else {
+          setCurrentUser(user);
+        }
       } catch (error) {
         if (!(error instanceof Error && error.name === 'AbortError')) {
           console.error('Could not restore the local staff session:', error);
@@ -368,18 +419,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         const payload: unknown = await response.json().catch(() => null);
         if (!response.ok) {
-          const message = payload && typeof payload === 'object' && !Array.isArray(payload) &&
-            typeof (payload as Record<string, unknown>).message === 'string'
-            ? (payload as Record<string, unknown>).message as string
-            : 'Username/email atau kata sandi tidak valid.';
-          return { success: false, message };
+          return { success: false, message: payloadMessage(payload, 'Username/email atau kata sandi tidak valid.') };
         }
-        if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
-            (payload as Record<string, unknown>).authMode !== 'local') {
+        const record = payloadRecord(payload);
+        if (!record || record.authMode !== 'local') {
           return { success: false, message: 'Respons autentikasi lokal tidak valid.' };
         }
-        const user = parseLocalUser((payload as Record<string, unknown>).user);
+        if (record.mfaRequired === true) {
+          if (typeof record.challengeToken !== 'string') {
+            return { success: false, message: 'Tantangan MFA dari server tidak valid.' };
+          }
+          setMfaFlow({ type: 'local-challenge', challengeToken: record.challengeToken });
+          return {
+            success: false,
+            mfaFlow: 'challenge',
+            message: 'Masukkan kode dari aplikasi autentikator untuk menyelesaikan login.'
+          };
+        }
+        const user = parseLocalUser(record.user);
         if (!user) return { success: false, message: 'Profil staf lokal dari server tidak valid.' };
+
+        if (localEnrollmentRequired(payload)) {
+          try {
+            await beginLocalMfaEnrollment(user);
+          } catch (error: any) {
+            return { success: false, message: error?.message || 'Pendaftaran MFA tidak dapat dimulai.' };
+          }
+          return {
+            success: false,
+            mfaFlow: 'enrollment',
+            message: 'Kebijakan fasilitas mewajibkan verifikasi dua langkah. Daftarkan aplikasi autentikator Anda.'
+          };
+        }
 
         setCurrentUser(user);
         return {
@@ -509,7 +580,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  const completeLocalMfa = async (challengeToken: string, code: string): Promise<{ success: boolean; message: string }> => {
+    const trimmed = code.trim();
+    const isTotp = /^\d{6}$/.test(trimmed);
+    if (!isTotp && !/^[a-zA-Z2-7]{5}[\s-]?[a-zA-Z2-7]{5}$/.test(trimmed)) {
+      return { success: false, message: 'Masukkan kode autentikator 6 digit atau kode pemulihan.' };
+    }
+    try {
+      const response = await fetch('/api/auth/mfa/verify', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(isTotp ? { challengeToken, code: trimmed } : { challengeToken, recoveryCode: trimmed })
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (payloadRecord(payload)?.code === 'MFA_CHALLENGE_EXPIRED') clearMfaFlow();
+        return { success: false, message: payloadMessage(payload, 'Verifikasi MFA gagal.') };
+      }
+      const user = parseLocalUser(payloadRecord(payload)?.user);
+      if (!user) return { success: false, message: 'Profil staf lokal dari server tidak valid.' };
+      const mfa = payloadRecord(payloadRecord(payload)?.mfa);
+      clearMfaFlow();
+      setCurrentUser(user);
+      const remaining = typeof mfa?.recoveryCodesRemaining === 'number' ? mfa.recoveryCodesRemaining : 0;
+      return {
+        success: true,
+        message: mfa?.recoveryCodeUsed === true
+          ? `Selamat datang, ${user.nama}. Kode pemulihan telah dipakai; sisa ${remaining} kode.`
+          : `Selamat datang, ${user.nama} (${getRoleById(user.roleId)?.nama || 'Staf'}).`
+      };
+    } catch (error) {
+      console.error('Local MFA verification failed:', error);
+      return { success: false, message: 'Server autentikasi lokal tidak dapat dijangkau. Periksa koneksi intranet.' };
+    }
+  };
+
   const completeMfa = async (code: string): Promise<{ success: boolean; message: string }> => {
+    if (mfaFlow?.type === 'local-challenge') return completeLocalMfa(mfaFlow.challengeToken, code);
     const resolver = pendingMfaResolver.current;
     const factor = resolver?.hints.find((hint) => hint.factorId === TotpMultiFactorGenerator.FACTOR_ID);
     if (!resolver || !factor) {
@@ -534,6 +642,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const completeMfaEnrollment = async (code: string): Promise<{ success: boolean; message: string; reauthenticationRequired?: boolean }> => {
+    if (mfaFlow?.type === 'local-enrollment') {
+      if (!/^\d{6}$/.test(code)) {
+        return { success: false, message: 'Masukkan kode autentikator 6 digit.' };
+      }
+      try {
+        const response = await fetch('/api/auth/mfa/enroll/confirm', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code })
+        });
+        const payload: unknown = await response.json().catch(() => null);
+        const recoveryCodes = payloadRecord(payload)?.recoveryCodes;
+        if (!response.ok || !Array.isArray(recoveryCodes) || !recoveryCodes.every((item) => typeof item === 'string')) {
+          return { success: false, message: payloadMessage(payload, 'Pendaftaran MFA gagal.') };
+        }
+        setMfaFlow({ type: 'local-recovery-codes', recoveryCodes: recoveryCodes as string[] });
+        return { success: true, message: 'MFA aktif. Simpan kode pemulihan sebelum melanjutkan.' };
+      } catch (error) {
+        console.error('Local MFA enrollment failed:', error);
+        return { success: false, message: 'Server autentikasi lokal tidak dapat dijangkau. Periksa koneksi intranet.' };
+      }
+    }
     const user = auth?.currentUser;
     const secret = pendingTotpSecret.current;
     if (!user || !secret) {
@@ -566,7 +697,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const finishLocalMfaEnrollment = () => {
+    const user = pendingLocalUser.current;
+    clearMfaFlow();
+    if (user) setCurrentUser(user);
+  };
+
   const cancelMfa = async () => {
+    if (isLocalAuthMode) {
+      // Tantangan login belum menerbitkan sesi; pendaftaran wajib berjalan di atas sesi yang harus diakhiri.
+      if (mfaFlow?.type !== 'local-challenge') {
+        const response = await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (!response.ok) throw new Error('Sesi lokal tidak dapat diakhiri. Silakan coba kembali.');
+      }
+      clearMfaFlow();
+      setCurrentUser(null);
+      return;
+    }
     const response = await fetch('/api/auth/session', { method: 'DELETE', credentials: 'same-origin' });
     if (!response.ok) throw new Error('Sesi server tidak dapat dibersihkan. Silakan coba kembali.');
     await firebaseSignOut(auth);
@@ -690,6 +841,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mfaFlow,
       completeMfa,
       completeMfaEnrollment,
+      finishLocalMfaEnrollment,
       cancelMfa,
       signInWithGoogle,
       logout,

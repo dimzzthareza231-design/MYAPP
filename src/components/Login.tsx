@@ -3,6 +3,7 @@ import {
   AlertCircle,
   ArrowRight,
   Building2,
+  Copy,
   Eye,
   EyeOff,
   FileSpreadsheet,
@@ -91,6 +92,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
     mfaFlow,
     completeMfa,
     completeMfaEnrollment,
+    finishLocalMfaEnrollment,
     cancelMfa
   } = useAuth();
   const { hospitalSettings } = useHospital();
@@ -99,6 +101,8 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [mfaCode, setMfaCode] = useState('');
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+  const [recoveryCodesSaved, setRecoveryCodesSaved] = useState(false);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const usernameInputRef = useRef<HTMLInputElement>(null);
@@ -158,12 +162,13 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
 
     setIsLoading(true);
     try {
-      const result = mfaFlow.type === 'enrollment'
+      const result = mfaFlow.type === 'enrollment' || mfaFlow.type === 'local-enrollment'
         ? await completeMfaEnrollment(mfaCode)
         : await completeMfa(mfaCode);
       if (result.success) {
         toast.success(result.message);
         setMfaCode('');
+        setUseRecoveryCode(false);
         setUsername('');
         setPassword('');
       } else if ('reauthenticationRequired' in result && result.reauthenticationRequired) {
@@ -198,12 +203,37 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
     try {
       await cancelMfa();
       setMfaCode('');
+      setUseRecoveryCode(false);
+      setRecoveryCodesSaved(false);
       toast('Login dibatalkan. Silakan mulai kembali.');
     } catch (error: any) {
       toast.error(error?.message || 'Sesi tidak dapat dibersihkan.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const isEnrollmentFlow = mfaFlow?.type === 'enrollment' || mfaFlow?.type === 'local-enrollment';
+  const recoveryInput = mfaFlow?.type === 'local-challenge' && useRecoveryCode;
+  const mfaCodeReady = recoveryInput
+    ? mfaCode.replace(/[\s-]/g, '').length === 10
+    : mfaCode.length === 6;
+
+  const handleCopyRecoveryCodes = async (codes: string[]) => {
+    try {
+      await navigator.clipboard.writeText(codes.join('\n'));
+      toast.success('Kode pemulihan disalin.');
+    } catch {
+      toast.error('Gagal menyalin. Catat kode secara manual.');
+    }
+  };
+
+  const handleFinishEnrollment = () => {
+    setRecoveryCodesSaved(false);
+    setUsername('');
+    setPassword('');
+    finishLocalMfaEnrollment();
+    toast.success('Verifikasi dua langkah aktif. Selamat bekerja.');
   };
 
   const loginCard = (
@@ -236,11 +266,59 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
 
-        {mfaFlow ? (
+        {mfaFlow?.type === 'local-recovery-codes' ? (
           <div className="space-y-4">
-            {mfaFlow.type === 'enrollment' ? (
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 p-4 space-y-3">
+              <p className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" /> MFA aktif. Simpan kode pemulihan
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                Kode ini hanya ditampilkan sekali. Setiap kode dapat dipakai satu kali untuk masuk bila perangkat autentikator hilang.
+                Simpan di tempat aman yang terpisah dari perangkat Anda.
+              </p>
+              <ul className="grid grid-cols-2 gap-2" aria-label="Kode pemulihan">
+                {mfaFlow.recoveryCodes.map((code) => (
+                  <li key={code} className="rounded-lg bg-white dark:bg-slate-900 px-2 py-1.5 text-center font-mono text-sm text-slate-800 dark:text-slate-200 select-all">
+                    {code}
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={() => handleCopyRecoveryCodes(mfaFlow.recoveryCodes)}
+                className="w-full flex items-center justify-center gap-2 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 py-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-slate-800"
+              >
+                <Copy className="w-3.5 h-3.5" /> Salin semua kode
+              </button>
+            </div>
+            <label className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={recoveryCodesSaved}
+                onChange={(e) => setRecoveryCodesSaved(e.target.checked)}
+                className="mt-0.5"
+              />
+              Saya sudah menyimpan kode pemulihan di tempat yang aman.
+            </label>
+            <button
+              type="button"
+              onClick={handleFinishEnrollment}
+              disabled={!recoveryCodesSaved}
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
+            >
+              <LogIn className="w-4 h-4" /> Lanjutkan ke Sistem Inti
+            </button>
+          </div>
+        ) : mfaFlow ? (
+          <div className="space-y-4">
+            {mfaFlow.type === 'enrollment' || mfaFlow.type === 'local-enrollment' ? (
               <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 p-4 text-center space-y-3">
                 <p className="text-sm font-bold text-slate-800 dark:text-white">Aktifkan verifikasi dua langkah</p>
+                {mfaFlow.type === 'local-enrollment' && mfaFlow.required && (
+                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                    Kebijakan fasilitas mewajibkan MFA untuk peran administrator sebelum sistem dapat diakses.
+                  </p>
+                )}
                 <p className="text-xs text-slate-600 dark:text-slate-300">
                   Pindai QR dengan aplikasi autentikator TOTP. Simpan kunci manual dengan aman jika pemindaian tidak tersedia.
                 </p>
@@ -258,35 +336,67 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
               <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 p-4 text-center">
                 <KeyRound className="w-6 h-6 mx-auto mb-2 text-blue-700 dark:text-blue-300" />
                 <p className="text-sm font-bold text-slate-800 dark:text-white">Verifikasi aplikasi autentikator</p>
-                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">Masukkan kode TOTP 6 digit untuk menyelesaikan login.</p>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                  {recoveryInput
+                    ? 'Masukkan salah satu kode pemulihan (format xxxxx-xxxxx). Kode yang dipakai tidak dapat digunakan lagi.'
+                    : 'Masukkan kode TOTP 6 digit untuk menyelesaikan login.'}
+                </p>
               </div>
             )}
 
             <form onSubmit={handleMfaSubmit} className="space-y-3">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                Kode autentikator
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  className="mt-1 w-full p-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-center text-lg tracking-[0.4em] focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="000000"
-                  required
-                />
+                {recoveryInput ? 'Kode pemulihan' : 'Kode autentikator'}
+                {recoveryInput ? (
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    maxLength={11}
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value.toLowerCase().replace(/[^a-z2-7-]/g, '').slice(0, 11))}
+                    className="mt-1 w-full p-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-center text-lg font-mono tracking-widest focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="xxxxx-xxxxx"
+                    required
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="mt-1 w-full p-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-center text-lg tracking-[0.4em] focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="000000"
+                    required
+                  />
+                )}
               </label>
               <button
                 type="submit"
-                disabled={isLoading || loading || mfaCode.length !== 6}
+                disabled={isLoading || loading || !mfaCodeReady}
                 className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
               >
                 <ShieldCheck className="w-4 h-4" />
-                {isLoading ? 'Memverifikasi...' : mfaFlow.type === 'enrollment' ? 'Aktifkan MFA dan Masuk' : 'Verifikasi dan Masuk'}
+                {isLoading ? 'Memverifikasi...' : isEnrollmentFlow ? 'Aktifkan MFA dan Masuk' : 'Verifikasi dan Masuk'}
               </button>
             </form>
+            {mfaFlow.type === 'local-challenge' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setUseRecoveryCode((value) => !value);
+                  setMfaCode('');
+                }}
+                disabled={isLoading}
+                className="w-full text-xs font-semibold text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200 disabled:opacity-50"
+              >
+                {useRecoveryCode ? 'Gunakan kode aplikasi autentikator' : 'Perangkat hilang? Gunakan kode pemulihan'}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleCancelMfa}
@@ -406,7 +516,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
 
         <p className="mt-5 text-center text-xs text-slate-500 dark:text-slate-400">
           {isLocalAuthMode
-            ? 'Akun dan sesi diverifikasi oleh server lokal. Kata sandi dikelola administrator fasilitas kesehatan.'
+            ? 'Akun dan sesi diverifikasi oleh server lokal. Kata sandi dikelola administrator fasilitas kesehatan; akun dengan MFA memerlukan kode aplikasi autentikator.'
             : 'Akses memerlukan akun Firebase aktif dan verifikasi dua langkah melalui aplikasi autentikator.'}
         </p>
 
