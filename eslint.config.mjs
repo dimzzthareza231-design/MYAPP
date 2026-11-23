@@ -5,7 +5,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist/**/*', 'dev-dist/**/*', 'node_modules/**/*', '.wrangler/**/*', 'coverage/**/*', 'scripts/**/*']
+    ignores: ['dist/**/*', 'dev-dist/**/*', 'node_modules/**/*', '.wrangler/**/*', 'coverage/**/*', 'scripts/**/*', '.claude/**/*']
   },
   firebaseRulesPlugin.configs['flat/recommended'],
   // TypeScript sources: app (src), API server, Cloudflare Worker and tests.
@@ -41,13 +41,5 @@ export default [
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn'
     }
-  },
-  {
-    // KNOWN BUG (owned by the layout work stream): ModuleLayout calls useMemo after an early
-    // `return` for users without module access, so React throws "Rendered more hooks than during
-    // the previous render" when access changes while mounted. Downgraded to a warning until the
-    // early return is moved below the hooks; remove this block once fixed.
-    files: ['src/layouts/ModuleLayout.tsx'],
-    rules: { 'react-hooks/rules-of-hooks': 'warn' }
   }
 ];
