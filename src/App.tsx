@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import { HospitalProvider, useHospital } from './contexts/HospitalContext';
@@ -9,77 +9,98 @@ import { PatientFlowProvider } from './contexts/PatientFlowContext';
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { UserManagement } from './components/Auth/UserManagement';
-import { ProtectedRoute, withAuthorization } from './components/Auth/ProtectedRoute';
-import Dashboard from './components/Dashboard';
+import { ProtectedRoute } from './components/Auth/ProtectedRoute';
 import ModuleLayout from './layouts/ModuleLayout';
 import { GenericModuleContent } from './components/GenericModuleContent';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Login } from './components/Login';
-import { EmployeeAppLanding } from './components/Employee/EmployeeAppLanding';
-import { EmployeePortal } from './components/Employee/EmployeePortal';
-import { EmployeeMobileApp } from './components/Employee/EmployeeMobileApp';
 import { OfflineIndicator } from './components/PWA/OfflineIndicator';
+import CommandPalette from './components/CommandPalette';
+import { AntrianProvider } from './contexts/AntrianContext';
+
+// Route-level code splitting: setiap modul dimuat sebagai chunk terpisah saat rutenya dibuka,
+// sehingga bundle awal tidak memuat seluruh aplikasi.
+function lazyPage(loader: () => Promise<{ default: React.ComponentType<any> }>) {
+  const LazyComponent = lazy(loader);
+  return function LazyPage(props: Record<string, unknown>) {
+    return (
+      <Suspense
+        fallback={
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="w-10 h-10 border-4 border-sky-400 border-t-transparent rounded-full animate-spin" />
+          </div>
+        }
+      >
+        <LazyComponent {...props} />
+      </Suspense>
+    );
+  };
+}
+
+const Dashboard = lazyPage(() => import('./components/Dashboard'));
+const UserManagement = lazyPage(() => import('./components/Auth/UserManagement').then((m) => ({ default: m.UserManagement })));
+
+const EmployeeAppLanding = lazyPage(() => import('./components/Employee/EmployeeAppLanding').then((m) => ({ default: m.EmployeeAppLanding })));
+const EmployeePortal = lazyPage(() => import('./components/Employee/EmployeePortal').then((m) => ({ default: m.EmployeePortal })));
+const EmployeeMobileApp = lazyPage(() => import('./components/Employee/EmployeeMobileApp').then((m) => ({ default: m.EmployeeMobileApp })));
 
 // Existing Modules
-import { Registration } from './components/Registration';
-import { Emergency } from './components/Emergency';
-import { Outpatient } from './components/Outpatient';
-import { BedManagement } from './components/BedManagement';
-import { KamarOperasi } from './components/KamarOperasi';
-import { Laboratorium } from './components/Laboratorium';
-import { RadiologiDashboard } from './components/Radiologi/RadiologiDashboard';
-import { MedicalRecords } from './components/MedicalRecords';
-import { ManajemenSDM } from './components/ManajemenSDM';
-import { InventoryManagement } from './components/InventoryManagement';
-import PatientFlowDashboard from './components/PatientFlowDashboard';
-import { PatientSafety } from './components/Safety/PatientSafety';
-import { Pharmacy } from './components/Pharmacy';
-import { Billing } from './components/Billing';
-import { BPJSModule } from './components/BPJS/BPJSModule';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
-import { SatuSehatIntegration } from './components/SatuSehatIntegration';
-import { ApiManagementSystem } from './components/ApiManagement/ApiManagementSystem';
-import { PanduanModule } from './components/Panduan/PanduanModule';
-import NotificationPreferences from './components/NotificationPreferences';
-import { Profile } from './components/Profile';
-import { AuthManagement } from './components/Auth/AuthManagement';
-import AuditTrail from './components/AuditTrail';
-import { BackupManagement } from './components/Backup/BackupManagement';
-import { MonitoringSystem } from './components/Monitoring/MonitoringSystem';
-import ModulTriase from './components/ModulTriase';
-import { PengaturanRS } from './components/Settings/PengaturanRS';
-import { JKNMobile } from './components/JKNMobile/JKNMobile';
-import { AntrianProvider } from "./contexts/AntrianContext";
-import { PoliPelayanan } from "./components/Poli/PoliPelayanan";
-import { DisplayAntrianPoli } from "./components/Poli/DisplayAntrianPoli";
-import CommandPalette from './components/CommandPalette';
-import { ICUMonitoring } from './components/ICU/ICUMonitoring';
-import { RehabMedik } from './components/Rehab/RehabMedik';
-import { GiziDiet } from './components/Gizi/GiziDiet';
-import { Telemedicine } from './components/Telemed/Telemedicine';
-import { PatientPortal } from './components/Portal/PatientPortal';
-import MultiBranchSystem from './components/MultiBranch/MultiBranchSystem';
-import { CRMManagement } from './components/CRM/CRMManagement';
-import { BlueprintSystemView } from './components/Blueprint/BlueprintSystemView';
+const Registration = lazyPage(() => import('./components/Registration').then((m) => ({ default: m.Registration })));
+const Emergency = lazyPage(() => import('./components/Emergency').then((m) => ({ default: m.Emergency })));
+const Outpatient = lazyPage(() => import('./components/Outpatient').then((m) => ({ default: m.Outpatient })));
+const BedManagement = lazyPage(() => import('./components/BedManagement').then((m) => ({ default: m.BedManagement })));
+const KamarOperasi = lazyPage(() => import('./components/KamarOperasi').then((m) => ({ default: m.KamarOperasi })));
+const Laboratorium = lazyPage(() => import('./components/Laboratorium').then((m) => ({ default: m.Laboratorium })));
+const RadiologiDashboard = lazyPage(() => import('./components/Radiologi/RadiologiDashboard').then((m) => ({ default: m.RadiologiDashboard })));
+const MedicalRecords = lazyPage(() => import('./components/MedicalRecords').then((m) => ({ default: m.MedicalRecords })));
+const ManajemenSDM = lazyPage(() => import('./components/ManajemenSDM').then((m) => ({ default: m.ManajemenSDM })));
+const InventoryManagement = lazyPage(() => import('./components/InventoryManagement').then((m) => ({ default: m.InventoryManagement })));
+const PatientFlowDashboard = lazyPage(() => import('./components/PatientFlowDashboard'));
+const PatientSafety = lazyPage(() => import('./components/Safety/PatientSafety').then((m) => ({ default: m.PatientSafety })));
+const Pharmacy = lazyPage(() => import('./components/Pharmacy').then((m) => ({ default: m.Pharmacy })));
+const Billing = lazyPage(() => import('./components/Billing').then((m) => ({ default: m.Billing })));
+const BPJSModule = lazyPage(() => import('./components/BPJS/BPJSModule').then((m) => ({ default: m.BPJSModule })));
+const AnalyticsDashboard = lazyPage(() => import('./components/AnalyticsDashboard'));
+const SatuSehatIntegration = lazyPage(() => import('./components/SatuSehatIntegration').then((m) => ({ default: m.SatuSehatIntegration })));
+const ApiManagementSystem = lazyPage(() => import('./components/ApiManagement/ApiManagementSystem').then((m) => ({ default: m.ApiManagementSystem })));
+const PanduanModule = lazyPage(() => import('./components/Panduan/PanduanModule').then((m) => ({ default: m.PanduanModule })));
+const NotificationPreferences = lazyPage(() => import('./components/NotificationPreferences'));
+const Profile = lazyPage(() => import('./components/Profile').then((m) => ({ default: m.Profile })));
+const AuthManagement = lazyPage(() => import('./components/Auth/AuthManagement').then((m) => ({ default: m.AuthManagement })));
+const AuditTrail = lazyPage(() => import('./components/AuditTrail'));
+const BackupManagement = lazyPage(() => import('./components/Backup/BackupManagement').then((m) => ({ default: m.BackupManagement })));
+const MonitoringSystem = lazyPage(() => import('./components/Monitoring/MonitoringSystem').then((m) => ({ default: m.MonitoringSystem })));
+const ModulTriase = lazyPage(() => import('./components/ModulTriase'));
+const PengaturanRS = lazyPage(() => import('./components/Settings/PengaturanRS').then((m) => ({ default: m.PengaturanRS })));
+const JKNMobile = lazyPage(() => import('./components/JKNMobile/JKNMobile').then((m) => ({ default: m.JKNMobile })));
+const PoliPelayanan = lazyPage(() => import('./components/Poli/PoliPelayanan').then((m) => ({ default: m.PoliPelayanan })));
+const DisplayAntrianPoli = lazyPage(() => import('./components/Poli/DisplayAntrianPoli').then((m) => ({ default: m.DisplayAntrianPoli })));
+const ICUMonitoring = lazyPage(() => import('./components/ICU/ICUMonitoring').then((m) => ({ default: m.ICUMonitoring })));
+const RehabMedik = lazyPage(() => import('./components/Rehab/RehabMedik').then((m) => ({ default: m.RehabMedik })));
+const GiziDiet = lazyPage(() => import('./components/Gizi/GiziDiet').then((m) => ({ default: m.GiziDiet })));
+const Telemedicine = lazyPage(() => import('./components/Telemed/Telemedicine').then((m) => ({ default: m.Telemedicine })));
+const PatientPortal = lazyPage(() => import('./components/Portal/PatientPortal').then((m) => ({ default: m.PatientPortal })));
+const MultiBranchSystem = lazyPage(() => import('./components/MultiBranch/MultiBranchSystem'));
+const CRMManagement = lazyPage(() => import('./components/CRM/CRMManagement').then((m) => ({ default: m.CRMManagement })));
+const BlueprintSystemView = lazyPage(() => import('./components/Blueprint/BlueprintSystemView').then((m) => ({ default: m.BlueprintSystemView })));
 
 // Bridging Modules
-import { BridgingHub } from './components/Bridging/BridgingHub';
-import { VClaimBridging } from './components/Bridging/VClaimBridging';
-import { SatuSehatBridging } from './components/Bridging/SatuSehatBridging';
-import { WAGatewayBridging } from './components/Bridging/WAGatewayBridging';
-import { AnjunganBridging } from './components/Bridging/AnjunganBridging';
-import { HFISBridging } from './components/Bridging/HFISBridging';
-import { VedikaBridging } from './components/Bridging/VedikaBridging';
-import { VeronisaBridging } from './components/Bridging/VeronisaBridging';
-import { BPJSEMRBridging } from './components/Bridging/BPJSEMRBridging';
-import { SertisignBridging } from './components/Bridging/SertisignBridging';
-import { OrthancBridging } from './components/Bridging/OrthancBridging';
-import { ApiGatewayBridging } from './components/Bridging/ApiGatewayBridging';
-import { CloudflareBridging } from './components/Bridging/CloudflareBridging';
+const BridgingHub = lazyPage(() => import('./components/Bridging/BridgingHub').then((m) => ({ default: m.BridgingHub })));
+const VClaimBridging = lazyPage(() => import('./components/Bridging/VClaimBridging').then((m) => ({ default: m.VClaimBridging })));
+const SatuSehatBridging = lazyPage(() => import('./components/Bridging/SatuSehatBridging').then((m) => ({ default: m.SatuSehatBridging })));
+const WAGatewayBridging = lazyPage(() => import('./components/Bridging/WAGatewayBridging').then((m) => ({ default: m.WAGatewayBridging })));
+const AnjunganBridging = lazyPage(() => import('./components/Bridging/AnjunganBridging').then((m) => ({ default: m.AnjunganBridging })));
+const HFISBridging = lazyPage(() => import('./components/Bridging/HFISBridging').then((m) => ({ default: m.HFISBridging })));
+const VedikaBridging = lazyPage(() => import('./components/Bridging/VedikaBridging').then((m) => ({ default: m.VedikaBridging })));
+const VeronisaBridging = lazyPage(() => import('./components/Bridging/VeronisaBridging').then((m) => ({ default: m.VeronisaBridging })));
+const BPJSEMRBridging = lazyPage(() => import('./components/Bridging/BPJSEMRBridging').then((m) => ({ default: m.BPJSEMRBridging })));
+const SertisignBridging = lazyPage(() => import('./components/Bridging/SertisignBridging').then((m) => ({ default: m.SertisignBridging })));
+const OrthancBridging = lazyPage(() => import('./components/Bridging/OrthancBridging').then((m) => ({ default: m.OrthancBridging })));
+const ApiGatewayBridging = lazyPage(() => import('./components/Bridging/ApiGatewayBridging').then((m) => ({ default: m.ApiGatewayBridging })));
+const CloudflareBridging = lazyPage(() => import('./components/Bridging/CloudflareBridging').then((m) => ({ default: m.CloudflareBridging })));
 
 function AppContent() {
-  const { currentUser, logout, loading } = useAuth();
+  const { currentUser, loading } = useAuth();
   const { isDarkMode } = useHospital();
 
   useEffect(() => {
