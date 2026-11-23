@@ -45,6 +45,7 @@ import {
   type PersistenceEntity,
   type PersistenceRepository
 } from './src/server/databaseAdapter';
+import { registerClinicalRoutes, type ClinicalStoredRecord } from './src/server/clinicalRecords';
 
 dotenv.config();
 
@@ -549,6 +550,10 @@ export async function createApps(
   ];
 
   const qrTokensStore: QRTokenRecord[] = [];
+  // Store klinis inti (RME SOAP, e-resep, tagihan kasir); rute ada di src/server/clinicalRecords.ts.
+  const soapNotesStore: ClinicalStoredRecord[] = [];
+  const prescriptionsStore: ClinicalStoredRecord[] = [];
+  const billingsStore: ClinicalStoredRecord[] = [];
   const persistentBindings: PersistentArrayBinding[] = [
     { entity: 'patients', records: patientsStore },
     { entity: 'registrations', records: appointmentsStore },
@@ -557,7 +562,10 @@ export async function createApps(
     { entity: 'inventory', records: inventoryStore },
     { entity: 'documents', records: dossierStore },
     { entity: 'audit_logs', records: auditLogsStore },
-    { entity: 'qr_tokens', records: qrTokensStore }
+    { entity: 'qr_tokens', records: qrTokensStore },
+    { entity: 'emr_soap', records: soapNotesStore },
+    { entity: 'prescriptions', records: prescriptionsStore },
+    { entity: 'billings', records: billingsStore }
   ];
 
   if (persistence.mode !== 'memory') {
@@ -1536,6 +1544,29 @@ export async function createApps(
       message: `Berkas ${title} berhasil disimpan ke Rekam Medis Elektronik (RME).`,
       data: newDoc
     });
+  });
+
+  // 12b. Clinical Core Persistence: SOAP RME, E-Resep, Tagihan Kasir (persisten via persistentBindings)
+  registerClinicalRoutes(app, {
+    soapNotes: soapNotesStore,
+    prescriptions: prescriptionsStore,
+    billings: billingsStore,
+    storageMode: persistence.mode,
+    ready: persistence.mode === 'memory' || startupStorageHealth.persistentReady,
+    audit: (req, entry) => {
+      const principal = req.corePrincipal;
+      auditLogsStore.unshift({
+        id: `log-${randomUUID()}`,
+        timestamp: new Date().toISOString(),
+        user: principal?.email || 'unknown',
+        role: principal?.roleId || 'unknown',
+        action: entry.action,
+        module: entry.module,
+        ip: req.ip || 'unknown',
+        status: entry.status || 'SUCCESS',
+        details: entry.details
+      });
+    }
   });
 
   // 13. Audit Trail API
