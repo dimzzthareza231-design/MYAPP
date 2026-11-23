@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 interface Shortcut {
@@ -20,7 +20,9 @@ export function KeyboardShortcutsProvider({ children }: { children: React.ReactN
   const [showHelp, setShowHelp] = useState(false);
   const navigate = useNavigate();
   
-  const shortcuts: Shortcut[] = [
+  // Dimemo: array baru tiap render membuat listener keydown dilepas-pasang setiap render
+  // (dan buffer kombinasi "g x" ikut tereset).
+  const shortcuts: Shortcut[] = useMemo(() => [
     { key: 'Ctrl+K', description: 'Command Palette', action: () => window.dispatchEvent(new CustomEvent('open-command-palette')), category: 'Global' },
     { key: '?', description: 'Show Shortcuts Help', action: () => setShowHelp(true), category: 'Global' },
     { key: 'Ctrl+/', description: 'Toggle Help', action: () => setShowHelp(prev => !prev), category: 'Global' },
@@ -53,7 +55,7 @@ export function KeyboardShortcutsProvider({ children }: { children: React.ReactN
         document.exitFullscreen().catch(() => {});
       }
     }, category: 'View' },
-  ];
+  ], [navigate]);
   
   useEffect(() => {
     let keyBuffer = '';
@@ -107,7 +109,10 @@ export function KeyboardShortcutsProvider({ children }: { children: React.ReactN
     };
     
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      clearTimeout(keyTimeout);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [shortcuts]);
   
   return (

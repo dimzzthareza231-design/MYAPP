@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { storage } from '../utils/storage';
 
 export interface Notification {
@@ -109,47 +109,53 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     }
   }, []);
   
+  // Semua perubahan memakai updater fungsional: sebelumnya tiap aksi membaca `notifications` dari
+  // closure render terakhir, sehingga dua addNotification berturut-turut menghapus yang pertama.
+  const lastId = useRef(0);
+  const applyNotifications = (update: (current: Notification[]) => Notification[]) => {
+    setNotifications(current => {
+      const updated = update(current);
+      storage.set('notifications', updated);
+      return updated;
+    });
+  };
+
   const addNotification = (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
+    // Id unik meskipun beberapa notifikasi dibuat pada milidetik yang sama.
+    lastId.current = Math.max(Date.now(), lastId.current + 1);
     const newNotif: Notification = {
-      id: Date.now(),
+      id: lastId.current,
       ...notification,
       timestamp: new Date().toISOString(),
       read: false
     };
-    const updated = [newNotif, ...notifications];
-    setNotifications(updated);
-    storage.set('notifications', updated);
+    applyNotifications(current => [newNotif, ...current]);
     
     return newNotif;
   };
   
   const markAsRead = (id: number) => {
-    const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
-    setNotifications(updated);
-    storage.set('notifications', updated);
+    applyNotifications(current => current.map(n => n.id === id ? { ...n, read: true } : n));
   };
   
   const markAllAsRead = () => {
-    const updated = notifications.map(n => ({ ...n, read: true }));
-    setNotifications(updated);
-    storage.set('notifications', updated);
+    applyNotifications(current => current.map(n => ({ ...n, read: true })));
   };
   
   const deleteNotification = (id: number) => {
-    const updated = notifications.filter(n => n.id !== id);
-    setNotifications(updated);
-    storage.set('notifications', updated);
+    applyNotifications(current => current.filter(n => n.id !== id));
   };
   
   const clearAll = () => {
-    setNotifications([]);
-    storage.set('notifications', []);
+    applyNotifications(() => []);
   };
   
   const updatePreferences = (newPrefs: Partial<NotificationPreferences>) => {
-    const updated = { ...preferences, ...newPrefs };
-    setPreferences(updated);
-    storage.set('notification_preferences', updated);
+    setPreferences(current => {
+      const updated = { ...current, ...newPrefs };
+      storage.set('notification_preferences', updated);
+      return updated;
+    });
   };
   
   const unreadCount = notifications.filter(n => !n.read).length;

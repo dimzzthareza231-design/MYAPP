@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState, ReactNode } from 'react';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -19,22 +19,26 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Id berurutan: Date.now() bentrok untuk toast pada milidetik yang sama (key React ganda, dan
+  // menutup satu toast ikut menutup yang lain).
+  const nextId = useRef(0);
   
-  const showToast = (message: string, type: ToastType = 'info', duration: number = 3000) => {
-    const id = Date.now();
+  const showToast = useCallback((message: string, type: ToastType = 'info', duration: number = 3000) => {
+    const id = ++nextId.current;
     setToasts(p => [...p, { id, message, type }]);
     
     setTimeout(() => {
       setToasts(p => p.filter(t => t.id !== id));
     }, duration);
-  };
+  }, []);
   
-  const toast: ToastContextType = {
+  // Referensi stabil agar konsumen yang memasukkan `toast` ke dependensi efek tidak menjalankan ulang efeknya tiap render.
+  const toast: ToastContextType = useMemo(() => ({
     success: (msg: string) => showToast(msg, 'success'),
     error: (msg: string) => showToast(msg, 'error', 5000),
     warning: (msg: string) => showToast(msg, 'warning', 4000),
     info: (msg: string) => showToast(msg, 'info')
-  };
+  }), [showToast]);
   
   return (
     <ToastContext.Provider value={toast}>
