@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Tombol "Run workflow" di tab Actions untuk deploy ulang main secara manual.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -40,7 +42,7 @@ jobs:
   deploy:
     name: Deploy ke Cloudflare
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Deploy tidak boleh dibatalkan di tengah jalan oleh push berikutnya.
