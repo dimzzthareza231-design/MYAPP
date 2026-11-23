@@ -11,8 +11,8 @@ Sistem informasi manajemen dan rekam medis elektronik (RME) berbasis web, dileng
 
 | Aplikasi | Untuk | Alamat |
 |---|---|---|
-| **Web Publik MYITARU** | Pasien dan masyarakat: portal layanan, jadwal dokter, pendaftaran daring, cek antrean, aplikasi pasien (PWA) | https://myitaru-public.myappv1.workers.dev |
-| **Aplikasi Inti MYITARU** | Staf: login pegawai, dasbor, 55 modul SIMK/RME, portal karyawan | https://myitaru-core.myappv1.workers.dev |
+| **Web Publik MYITARU** | Pasien dan masyarakat: portal layanan, jadwal dokter, pendaftaran daring, cek antrean, aplikasi pasien (PWA) | https://dimsskuyy.myitaru.my.id |
+| **Aplikasi Inti MYITARU** | Staf: login pegawai, dasbor, 55 modul SIMK/RME, portal karyawan | https://inti.myitaru.my.id |
 
 Kode yang sama tetap dapat dijalankan secara lokal, dengan Docker, atau di Vercel (lihat [Deployment](#deployment)).
 
@@ -206,7 +206,7 @@ GitHub Actions menjalankan typecheck, pengujian, dan kedua build pada setiap pus
 
 Dua Worker dari satu kode (`wrangler.jsonc`): `myitaru-public` (`--env public`) dan `myitaru-core` (`--env core`), berbagi satu database D1 `myitaru-db`. Express dijalankan lewat `worker/index.ts`; frontend disajikan sebagai Static Assets. Di Cloudflare hanya `AUTH_MODE=local` + `STORAGE_MODE=d1` yang didukung (firebase-admin tidak berjalan di Workers).
 
-Deployment aktif: web publik di https://myitaru-public.myappv1.workers.dev dan aplikasi inti di https://myitaru-core.myappv1.workers.dev. Untuk men-deploy perubahan cukup jalankan `npm run cf:deploy`.
+Deployment aktif: web publik di https://dimsskuyy.myitaru.my.id dan aplikasi inti di https://inti.myitaru.my.id (custom domain di `wrangler.jsonc`; alamat `*.myappv1.workers.dev` tetap aktif). Untuk men-deploy perubahan cukup jalankan `npm run cf:deploy`.
 
 Penyiapan dari nol (akun Cloudflare baru):
 
