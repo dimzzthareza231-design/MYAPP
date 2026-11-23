@@ -58,6 +58,7 @@ before(async () => {
     resolvePrincipal: async (token, isSessionCookie) => {
       if (token === 'viewer-token') return { uid: 'viewer', email: 'viewer@test.local', roleId: 'viewer', mfaVerified: true };
       if (token === 'cashier-token') return { uid: 'cashier', email: 'cashier@test.local', roleId: 'kasir', mfaVerified: true };
+      if (token.startsWith('role:')) return { uid: token, email: 'role@test.local', roleId: token.slice(5), mfaVerified: true };
       if (token === 'no-mfa-token') return { uid: 'admin', email: 'admin@test.local', roleId: 'super_admin', mfaVerified: false };
       if (token === 'test-token' || token === 'test-session-token' || token.startsWith('emp_')) {
         return { uid: 'admin', email: 'admin@test.local', roleId: 'super_admin', mfaVerified: true };
@@ -433,5 +434,54 @@ describe('portal karyawan', () => {
     assert.equal(ok.status, 200);
     assert.equal((await call(core, 'GET', '/api/gateway/profile', undefined, ok.body.token)).status, 200);
     assert.equal((await call(core, 'GET', '/api/gateway/profile')).status, 401);
+  });
+});
+
+describe('role based access aplikasi inti', () => {
+  const status = async (role: string, path: string, method = 'GET', body?: unknown) =>
+    (await call(core, method, path, body, `role:${role}`)).status;
+  const cases: [role: string, path: string, expected: number][] = [
+    // admin: semua modul
+    ['admin', '/api/v1/audit/logs', 200],
+    ['admin', '/api/v1/inventory/stock', 200],
+    ['admin', '/api/v1/bed-management/status', 200],
+    ['admin', '/api/v1/patients', 200],
+    // dokter: medis, bukan farmasi/keuangan/sistem
+    ['dokter', '/api/v1/bed-management/status', 200],
+    ['dokter', '/api/v1/patients', 200],
+    ['dokter', '/api/v1/inventory/stock', 403],
+    ['dokter', '/api/v1/audit/logs', 403],
+    // perawat: keperawatan
+    ['perawat', '/api/v1/bed-management/status', 200],
+    ['perawat', '/api/v1/inventory/stock', 403],
+    // farmasi: obat dan stok
+    ['apoteker', '/api/v1/inventory/stock', 200],
+    ['apoteker', '/api/v1/patients', 200],
+    ['apoteker', '/api/v1/bed-management/status', 403],
+    // lab: modul lab saja, tetap bisa membaca identitas pasien
+    ['laboran', '/api/v1/patients', 200],
+    ['laboran', '/api/v1/inventory/stock', 403],
+    ['laboran', '/api/v1/bed-management/status', 403],
+    // kasir: keuangan
+    ['kasir', '/api/v1/patients', 200],
+    ['kasir', '/api/v1/inventory/stock', 403],
+    ['kasir', '/api/v1/bed-management/status', 403],
+    // rekam medis
+    ['rekam_medis', '/api/v1/patients', 200],
+    ['rekam_medis', '/api/v1/inventory/stock', 403],
+    // IT tanpa modul layanan pasien tidak melihat data pasien
+    ['it_support', '/api/v1/patients', 403]
+  ];
+
+  for (const [role, path, expected] of cases) {
+    test(`${role} GET ${path} -> ${expected}`, async () => {
+      assert.equal(await status(role, path), expected);
+    });
+  }
+
+  test('menulis data pasien tetap khusus pendaftaran/rekam medis', async () => {
+    assert.equal(await status('dokter', '/api/v1/patients', 'POST', { nama: 'Uji' }), 403);
+    assert.equal(await status('laboran', '/api/v1/patients', 'POST', { nama: 'Uji' }), 403);
+    assert.notEqual(await status('rekam_medis', '/api/v1/patients', 'POST', { nama: 'Uji' }), 403);
   });
 });

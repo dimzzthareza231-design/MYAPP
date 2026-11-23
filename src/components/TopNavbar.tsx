@@ -665,7 +665,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
           <nav className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-2xl border border-white/[0.07] backdrop-blur-md shrink-0">
             {quickDirectLinks.filter(link =>
               link.path === '/dashboard' ||
-              isModuleAvailableInMode(link.path.replace('/modul/', ''), operatingMode)
+              (isModuleAvailableInMode(link.path.replace('/modul/', ''), operatingMode) && hasAccess(link.path.replace('/modul/', '')))
             ).map(link => {
               const Icon = link.icon;
               const isActive = location.pathname === link.path;

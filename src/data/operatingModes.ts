@@ -8,6 +8,7 @@ const SIMK_MODULES = new Set([
   'patient-portal',
   'apotek-ralan',
   'stok-obat',
+  'laboratorium',
   'inventory',
   'kasir',
   'jkn-mobile',

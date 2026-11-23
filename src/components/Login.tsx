@@ -6,6 +6,7 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
+  FlaskConical,
   KeyRound,
   LogIn,
   Lock,
@@ -71,6 +72,14 @@ const ROLE_CARDS: {
     subtitle: 'Verifikasi resep, stok, dan penyerahan obat',
     badgeColor: 'bg-emerald-600 text-white',
     icon: Pill
+  },
+  {
+    roleId: 'laboran',
+    loginIdentifier: 'lab',
+    title: 'Laboratorium',
+    subtitle: 'Order pemeriksaan, spesimen, dan hasil lab',
+    badgeColor: 'bg-rose-600 text-white',
+    icon: FlaskConical
   },
   {
     roleId: 'kasir',

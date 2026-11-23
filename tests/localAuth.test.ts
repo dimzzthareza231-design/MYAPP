@@ -111,3 +111,33 @@ describe('autentikasi staf lokal', () => {
     assert.equal((await restartedService.resolveSession(session.token))?.principal.roleId, 'admin');
   });
 });
+
+describe('akun bawaan per role', () => {
+  const required = ['ADMIN', 'DOKTER', 'PERAWAT', 'RMIK', 'APOTEKER', 'KASIR'];
+  const withEnv = async (vars: Record<string, string | undefined>, run: () => Promise<void>) => {
+    const saved = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, vars);
+    for (const [key, value] of Object.entries(vars)) if (value === undefined) delete process.env[key];
+    try { await run(); } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  };
+  const passwords = Object.fromEntries(required.map((role) => [`LOCAL_AUTH_${role}_PASSWORD`, `Uji-${role}-Sandi-2026`]));
+
+  test('produksi tetap start tanpa sandi lab; akun lab dibuat bila sandinya diisi', async () => {
+    await withEnv({ ...passwords, NODE_ENV: 'production', LOCAL_AUTH_LAB_PASSWORD: undefined }, async () => {
+      const store = new MemoryPersistenceRepository();
+      await new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) }).initialize();
+      assert.equal((await store.list('local_auth_users')).length, 6);
+    });
+    await withEnv({ ...passwords, NODE_ENV: 'production', LOCAL_AUTH_LAB_PASSWORD: 'Uji-LAB-Sandi-2026' }, async () => {
+      const store = new MemoryPersistenceRepository();
+      const service = new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) });
+      await service.initialize();
+      assert.equal((await service.login('lab', 'Uji-LAB-Sandi-2026'))?.principal.roleId, 'laboran');
+    });
+  });
+});

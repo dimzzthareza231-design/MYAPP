@@ -72,7 +72,9 @@ const ROLE_SEEDS = [
   { username: 'perawat', email: 'perawat@myitaru.local', nama: 'Perawat MYITARU', roleId: 'perawat', passwordEnv: 'LOCAL_AUTH_PERAWAT_PASSWORD' },
   { username: 'rmik', email: 'rmik@myitaru.local', nama: 'Perekam Medis MYITARU', roleId: 'rekam_medis', passwordEnv: 'LOCAL_AUTH_RMIK_PASSWORD' },
   { username: 'apoteker', email: 'apoteker@myitaru.local', nama: 'Apoteker MYITARU', roleId: 'apoteker', passwordEnv: 'LOCAL_AUTH_APOTEKER_PASSWORD' },
-  { username: 'kasir', email: 'kasir@myitaru.local', nama: 'Kasir MYITARU', roleId: 'kasir', passwordEnv: 'LOCAL_AUTH_KASIR_PASSWORD' }
+  { username: 'kasir', email: 'kasir@myitaru.local', nama: 'Kasir MYITARU', roleId: 'kasir', passwordEnv: 'LOCAL_AUTH_KASIR_PASSWORD' },
+  // Opsional: deployment lama tetap bisa start sebelum LOCAL_AUTH_LAB_PASSWORD diisi.
+  { username: 'lab', email: 'lab@myitaru.local', nama: 'Analis Laboratorium MYITARU', roleId: 'laboran', passwordEnv: 'LOCAL_AUTH_LAB_PASSWORD', optional: true }
 ] as const;
 
 function derivePassword(password: string, salt: string): Promise<Buffer> {
@@ -107,13 +109,13 @@ function isValidPasswordHash(value: string): boolean {
 }
 
 function getBootstrapUsers(): LocalAuthBootstrapUser[] {
-  return ROLE_SEEDS.flatMap(({ passwordEnv, ...account }) => {
+  return ROLE_SEEDS.flatMap(({ username, email, nama, roleId, passwordEnv }) => {
     const password = process.env[passwordEnv];
     if (!password) return [];
     if (password.length < 12 || password.length > 128) {
       throw new Error(`${passwordEnv} must contain between 12 and 128 characters.`);
     }
-    return [{ ...account, password }];
+    return [{ username, email, nama, roleId, password }];
   });
 }
 
@@ -163,7 +165,7 @@ export class LocalAuthService implements LocalAuthProvider {
       if (seenUsernames.has(normalizedUsername) || seenEmails.has(email)) {
         throw new Error('Local staff bootstrap usernames and emails must be unique.');
       }
-      if (!['admin', 'dokter', 'perawat', 'rekam_medis', 'apoteker', 'kasir'].includes(account.roleId)) {
+      if (!ROLE_SEEDS.some(({ roleId }) => roleId === account.roleId)) {
         throw new Error(`Unsupported local staff role: ${account.roleId}.`);
       }
       seenUsernames.add(normalizedUsername);
@@ -201,7 +203,7 @@ export class LocalAuthService implements LocalAuthProvider {
     const persistedUsers = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
     const provisionedRoles = new Set(persistedUsers.filter(({ data }) => data.aktif).map(({ data }) => data.roleId));
     const missingRoles = ROLE_SEEDS
-      .filter(({ roleId }) => !provisionedRoles.has(roleId))
+      .filter((seed) => !('optional' in seed) && !provisionedRoles.has(seed.roleId))
       .map(({ roleId, passwordEnv }) => ({ roleId, passwordEnv }));
 
     if (process.env.NODE_ENV === 'production' && missingRoles.length) {

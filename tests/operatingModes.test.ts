@@ -6,6 +6,7 @@ describe('mode operasional', () => {
   test('mode SIMK menampilkan alur klinik dasar dan menyembunyikan modul rawat inap', () => {
     assert.equal(isModuleAvailableInMode('patient-flow', 'SIMK'), true);
     assert.equal(isModuleAvailableInMode('rekam-medis', 'SIMK'), true);
+    assert.equal(isModuleAvailableInMode('laboratorium', 'SIMK'), true);
     assert.equal(isModuleAvailableInMode('rawat-inap', 'SIMK'), false);
     assert.equal(isModuleAvailableInMode('icu', 'SIMK'), false);
   });

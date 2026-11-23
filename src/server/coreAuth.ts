@@ -2,7 +2,7 @@ import type express from 'express';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
-import { COMMON_MODULES, MODULE_ALIASES, ROLES } from '../data/roles';
+import { COMMON_MODULES, MODULE_ALIASES, PATIENT_DATA_MODULES, ROLES } from '../data/roles';
 import { getDocumentQrScope, readSecurePatientQrToken } from './securePatientQr';
 
 const SESSION_COOKIE = 'myitaru_core_session';
@@ -169,8 +169,8 @@ function scopeForPath(path: string, req?: express.Request): string | null {
   }
   if (path === '/api/v1/health' || path === '/api/v1/system/stats' || path.startsWith('/api/v1/health-updates')) return 'dashboard';
   if (path.startsWith('/api/v1/system-data')) return 'dashboard';
-  if (path.startsWith('/api/v1/patients')) return 'pendaftaran';
-  if (path.startsWith('/api/v1/appointments')) return 'pendaftaran';
+  const isRead = req?.method === 'GET' || req?.method === 'HEAD';
+  if (path.startsWith('/api/v1/patients') || path.startsWith('/api/v1/appointments')) return isRead ? 'data-pasien' : 'pendaftaran';
   if (path.startsWith('/api/v1/patient-qr')) return 'rekam-medis';
   if (path.startsWith('/api/v1/bed-management')) return 'rawat-inap';
   if (path.startsWith('/api/v1/inventory')) return 'inventory';
@@ -191,6 +191,7 @@ function hasScope(roleId: string, scope: string): boolean {
   if (roleId === 'super_admin' || COMMON_MODULES.includes(scope)) return true;
   const role = ROLES.find((item) => item.id === roleId);
   if (!role) return false;
+  if (scope === 'data-pasien') return role.moduleAccess.some((module) => PATIENT_DATA_MODULES.includes(module));
   const aliases = MODULE_ALIASES[scope] || [];
   return role.moduleAccess.includes(scope) || aliases.some((alias) => role.moduleAccess.includes(alias));
 }
