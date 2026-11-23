@@ -140,13 +140,6 @@ function errorText(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
 }
 
-function persistentReady(mode: StorageMode, mysqlConnected: boolean, firebaseConnected: boolean): boolean {
-  if (mode === 'mysql') return mysqlConnected;
-  if (mode === 'firebase') return firebaseConnected;
-  if (mode === 'hybrid') return mysqlConnected;
-  return false;
-}
-
 function projectCloudChange(change: PersistenceChange): PersistenceChange | null {
   if (!['registrations', 'queues', 'bookings'].includes(change.entity)) return null;
   if (change.data === null) return change;
@@ -182,7 +175,9 @@ export class MemoryPersistenceRepository implements PersistenceRepository {
   }
 
   async get<T>(entity: PersistenceEntity, id: string): Promise<T | null> {
-    return (this.records.get(entity)?.get(id) as T | undefined) ?? null;
+    // Kembalikan salinan (seperti list()): pemanggil tidak boleh mengubah data tersimpan tanpa commit().
+    const record = this.records.get(entity)?.get(id);
+    return record === undefined ? null : structuredClone(record) as T;
   }
 
   async list<T>(entity: PersistenceEntity): Promise<Array<StoredRecord<T>>> {
