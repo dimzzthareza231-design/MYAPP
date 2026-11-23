@@ -238,7 +238,7 @@ export function GenericModuleContent() {
   const customActions = getCustomActions(moduleId, activeTab);
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="h-full flex flex-col p-4 sm:p-6 min-w-0">
       <SpecialAction moduleId={moduleId} activeTab={activeTab} />
       <SmartTable
         storageKey={storageKey}

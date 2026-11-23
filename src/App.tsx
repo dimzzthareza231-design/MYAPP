@@ -101,12 +101,16 @@ function AppContent() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-50 font-sans transition-colors duration-300 flex flex-col">
+    <div className="min-h-screen bg-canvas text-ink font-sans transition-colors duration-300 flex flex-col">
+      {currentUser && (
+        <a href="#main-content" className="skip-link">Lewati ke konten utama</a>
+      )}
       <Toaster position="top-right" />
       <OfflineIndicator />
       {currentUser && <CommandPalette />}
 
-      <main className="flex-1 flex flex-col min-w-0 relative w-full scroll-smooth">
+      {/* Wrapper rute (bukan <main>): tiap halaman merender <main id="main-content"> sendiri. */}
+      <div className="flex-1 flex flex-col min-w-0 relative w-full">
         <ErrorBoundary>
           <Routes>
             {/* 1. Portal Publik Pasien & App Mobile Pasien dipisah ke aplikasi web publik (PublicApp.tsx / public.html) */}
@@ -125,8 +129,8 @@ function AppContent() {
               path="/staff/login"
               element={
                 loading ? (
-                  <div className="min-h-screen bg-[#07265C] flex flex-col items-center justify-center p-4">
-                    <div className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin mb-4" />
+                  <div role="status" aria-live="polite" className="min-h-screen bg-[#07265C] flex flex-col items-center justify-center p-4">
+                    <div aria-hidden="true" className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin mb-4" />
                     <p className="text-white font-semibold text-sm">Memverifikasi Sesi Keamanan SIMK...</p>
                   </div>
                 ) : currentUser ? (
@@ -150,8 +154,8 @@ function AppContent() {
               path="/dashboard"
               element={
                 loading ? (
-                  <div className="min-h-screen bg-[#07265C] flex flex-col items-center justify-center p-4">
-                    <div className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin mb-4" />
+                  <div role="status" aria-live="polite" className="min-h-screen bg-[#07265C] flex flex-col items-center justify-center p-4">
+                    <div aria-hidden="true" className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin mb-4" />
                     <p className="text-white font-semibold text-sm">Memuat Dasbor SIMK...</p>
                   </div>
                 ) : currentUser ? (
@@ -166,8 +170,8 @@ function AppContent() {
               element={
                 // Tunggu sesi selesai dimuat; tanpa ini refresh/tautan langsung ke modul terlempar ke login lalu dasbor.
                 loading ? (
-                  <div className="min-h-screen bg-[#07265C] flex flex-col items-center justify-center p-4">
-                    <div className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin mb-4" />
+                  <div role="status" aria-live="polite" className="min-h-screen bg-[#07265C] flex flex-col items-center justify-center p-4">
+                    <div aria-hidden="true" className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin mb-4" />
                     <p className="text-white font-semibold text-sm">Memuat Modul SIMK...</p>
                   </div>
                 ) : currentUser ? (
@@ -246,7 +250,7 @@ function AppContent() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </ErrorBoundary>
-      </main>
+      </div>
     </div>
   );
 }

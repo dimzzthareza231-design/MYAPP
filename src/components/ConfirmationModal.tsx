@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
-import { AlertCircle, CheckCircle2, X } from 'lucide-react';
+import React, { useId, useRef } from 'react';
+import { AlertCircle, X } from 'lucide-react';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface ConfirmationModalProps {
   isOpen: boolean;
@@ -22,36 +23,27 @@ export function ConfirmationModal({
   onConfirm,
   onCancel,
 }: ConfirmationModalProps) {
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
-    };
-    if (isOpen) {
-      document.addEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.removeEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'unset';
-    };
-  }, [isOpen, onCancel]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const messageId = useId();
+  // Fokus awal pada tombol "Batal" agar Enter tidak langsung mengeksekusi aksi berisiko.
+  useDialogA11y(isOpen, onCancel, dialogRef, { initialFocusRef: cancelRef });
 
   if (!isOpen) return null;
 
   const colorScheme = {
     danger: {
       bg: 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400',
-      btn: 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30',
+      btn: 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/30',
     },
     warning: {
       bg: 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400',
-      btn: 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/30',
+      btn: 'bg-amber-700 hover:bg-amber-800 text-white shadow-amber-700/30',
     },
     info: {
       bg: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400',
-      btn: 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30',
+      btn: 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/30',
     },
   }[variant];
 
@@ -61,45 +53,52 @@ export function ConfirmationModal({
       onClick={onCancel}
     >
       <div 
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
-        aria-labelledby="confirm-modal-title"
+        aria-labelledby={titleId}
+        aria-describedby={messageId}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200"
+        className="bg-surface text-ink border border-line rounded-card max-w-md w-full max-h-[90dvh] overflow-y-auto p-5 sm:p-6 shadow-overlay space-y-5 animate-in zoom-in-95 duration-200"
       >
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl border ${colorScheme.bg}`}>
-              <AlertCircle className="w-6 h-6" />
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`p-2.5 rounded-xl border shrink-0 ${colorScheme.bg}`}>
+              <AlertCircle className="w-6 h-6" aria-hidden="true" />
             </div>
             <div>
-              <h3 id="confirm-modal-title" className="text-lg font-bold text-slate-900 dark:text-white">{title}</h3>
+              <h3 id={titleId} className="text-lg font-bold text-ink break-words">{title}</h3>
             </div>
           </div>
           <button
+            type="button"
             onClick={onCancel}
-            className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="icon-btn -mr-2 -mt-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
             title="Tutup (Esc)"
+            aria-label="Tutup dialog konfirmasi"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
-        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{message}</p>
+        <p id={messageId} className="text-sm text-ink-muted leading-relaxed">{message}</p>
 
-        <div className="flex items-center justify-end gap-3 pt-2">
+        <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 pt-2">
           <button
+            ref={cancelRef}
+            type="button"
             onClick={onCancel}
-            className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-semibold transition-colors"
+            className="min-h-touch px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-semibold transition-colors"
           >
             {cancelLabel}
           </button>
           <button
+            type="button"
             onClick={() => {
               onConfirm();
               onCancel();
             }}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-md hover:scale-[1.02] active:scale-[0.98] ${colorScheme.btn}`}
+            className={`min-h-touch px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-md hover:scale-[1.02] active:scale-[0.98] ${colorScheme.btn}`}
           >
             {confirmLabel}
           </button>

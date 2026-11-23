@@ -1,5 +1,6 @@
-import React, { useEffect, ReactNode } from 'react';
+import React, { ReactNode, useId, useRef } from 'react';
 import { X } from 'lucide-react';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface ModalProps {
   isOpen: boolean;
@@ -28,21 +29,10 @@ export function Modal({
   variant = 'default',
   badgeText
 }: ModalProps) {
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (isOpen) {
-      document.addEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.removeEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'unset';
-    };
-  }, [isOpen, onClose]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const subtitleId = useId();
+  useDialogA11y(isOpen, onClose, dialogRef);
 
   if (!isOpen) return null;
 
@@ -88,18 +78,20 @@ export function Modal({
 
   return (
     <div 
-      className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-md transition-all animate-in fade-in duration-200"
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-md transition-all animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div 
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
+        aria-describedby={subtitle ? subtitleId : undefined}
         onClick={(e) => e.stopPropagation()}
-        className={`relative bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl shadow-2xl w-full max-w-[calc(100vw-1.5rem)] ${widthClass} flex flex-col max-h-[92vh] overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200`}
+        className={`relative bg-surface text-ink border border-line rounded-t-panel sm:rounded-card shadow-overlay w-full sm:max-w-[calc(100vw-2rem)] ${widthClass} flex flex-col max-h-[92dvh] sm:max-h-[90dvh] overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200 outline-none`}
       >
         {/* MODAL HEADER */}
-        <div className={`flex items-center justify-between px-5 py-4 border-b border-slate-200/80 dark:border-slate-700/80 ${currentVariant.headerBg} backdrop-blur-sm shrink-0`}>
+        <div className={`flex items-center justify-between gap-2 px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-200/80 dark:border-slate-700/80 ${currentVariant.headerBg} backdrop-blur-sm shrink-0`}>
           <div className="flex items-center gap-3 min-w-0">
             {icon && (
               <div className={`p-2 rounded-xl border flex items-center justify-center shrink-0 ${currentVariant.iconBox}`}>
@@ -108,7 +100,7 @@ export function Modal({
             )}
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 id="modal-title" className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight truncate">
+                <h3 id={titleId} className="text-base sm:text-lg font-bold text-ink leading-tight break-words">
                   {title}
                 </h3>
                 {badgeText && (
@@ -118,29 +110,31 @@ export function Modal({
                 )}
               </div>
               {subtitle && (
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                <p id={subtitleId} className="text-xs text-ink-subtle mt-0.5 line-clamp-2">
                   {subtitle}
                 </p>
               )}
             </div>
           </div>
           <button 
+            type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors rounded-xl hover:bg-slate-200/60 dark:hover:bg-slate-700/60 shrink-0 ml-2"
+            className="icon-btn text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
             title="Tutup (Esc)"
+            aria-label="Tutup dialog"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
         {/* MODAL BODY */}
-        <div className="p-5 sm:p-6 overflow-y-auto custom-scrollbar flex-1 text-slate-800 dark:text-slate-200">
+        <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain custom-scrollbar flex-1 min-h-0 text-slate-800 dark:text-slate-200">
           {children}
         </div>
 
         {/* MODAL FOOTER */}
         {footer && (
-          <div className="border-t border-slate-200/80 dark:border-slate-700/80 px-5 py-3.5 bg-slate-50/90 dark:bg-slate-800/90 backdrop-blur-sm flex items-center justify-end gap-2.5 shrink-0">
+          <div className="border-t border-slate-200/80 dark:border-slate-700/80 px-4 sm:px-5 py-3 sm:py-3.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-3.5 bg-slate-50/90 dark:bg-slate-800/90 backdrop-blur-sm flex flex-wrap items-center justify-end gap-2.5 shrink-0">
             {footer}
           </div>
         )}

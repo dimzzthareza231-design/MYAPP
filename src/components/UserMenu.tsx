@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useHospital } from '../contexts/HospitalContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getRoleById } from '../data/roles';
@@ -9,6 +9,30 @@ export default function UserMenu() {
   const { isDarkMode, toggleDarkMode, isFirestoreSyncing } = useHospital();
   const { currentUser, logout, firebaseUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Tutup saat klik di luar / Escape. (Overlay fixed inset-0 tidak bisa dipakai di sini:
+  // header ber-backdrop-filter membatasi elemen fixed setinggi header.)
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePointer = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setIsOpen(false);
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', handlePointer);
+    document.addEventListener('keydown', handleKey, true);
+    return () => {
+      document.removeEventListener('mousedown', handlePointer);
+      document.removeEventListener('keydown', handleKey, true);
+    };
+  }, [isOpen]);
 
   const currentRole = currentUser ? getRoleById(currentUser.roleId) : null;
   const displayName = currentUser?.nama || 'Admin ITARU';
@@ -21,15 +45,20 @@ export default function UserMenu() {
   };
 
   return (
-    <div className="relative">
-      <button 
+    <div className="relative" ref={containerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 hover:border-[#C9A94E]/40 rounded-full pl-1.5 pr-3 py-1.5 transition-all focus:outline-none focus:ring-2 focus:ring-[#C9A94E]/40 shadow-sm group"
+        aria-haspopup="true"
+        aria-expanded={isOpen}
+        aria-label={`Menu akun: ${displayName}, ${roleName}`}
+        className="flex items-center gap-2 sm:gap-2.5 min-h-touch bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 hover:border-[#C9A94E]/40 rounded-full pl-1.5 pr-3 py-1.5 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A94E]/60 shadow-sm group"
       >
         {photoURL ? (
-          <img 
-            src={photoURL} 
-            alt={displayName} 
+          <img
+            src={photoURL}
+            alt={displayName}
             referrerPolicy="no-referrer"
             className="w-7 h-7 rounded-full object-cover border border-[#C9A94E]/60 shadow-xs"
           />
@@ -38,7 +67,7 @@ export default function UserMenu() {
             {displayName.charAt(0)}
           </div>
         )}
-        
+
         <div className="hidden sm:block text-left">
           <div className="text-xs font-bold text-white leading-tight flex items-center gap-1.5">
             <span className="truncate max-w-[90px]">{displayName.split(' ')[0]}</span>
@@ -51,24 +80,23 @@ export default function UserMenu() {
           </div>
         </div>
 
-        <ChevronDown className={`w-3 h-3 text-slate-400 group-hover:text-white transition-transform ${isOpen ? 'rotate-180 text-[#E8D49E]' : ''}`} />
+        <ChevronDown aria-hidden="true" className={`w-3 h-3 text-slate-400 group-hover:text-white transition-transform ${isOpen ? 'rotate-180 text-[#E8D49E]' : ''}`} />
       </button>
 
       {isOpen && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
-          <div className="absolute right-0 mt-2.5 w-68 bg-[#0A1627]/98 border border-[#C9A94E]/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 overflow-hidden backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
+          <div className="absolute right-0 mt-2.5 w-68 max-w-[calc(100vw-1rem)] bg-[#0A1627]/98 border border-[#C9A94E]/30 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 overflow-hidden backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200 origin-top-right">
             {/* Top gold accent line */}
             <div className="h-[1.5px] w-full bg-gradient-to-r from-transparent via-[#E8D49E]/70 to-transparent"></div>
 
             <div className="p-4 border-b border-white/10 bg-white/[0.02]">
               <div className="flex items-center gap-3">
                 {photoURL ? (
-                  <img 
-                    src={photoURL} 
-                    alt={displayName} 
+                  <img
+                    src={photoURL}
+                    alt={displayName}
                     referrerPolicy="no-referrer"
-                    className="w-10 h-10 rounded-full object-cover border-2 border-[#C9A94E]/60 shadow-md" 
+                    className="w-10 h-10 rounded-full object-cover border-2 border-[#C9A94E]/60 shadow-md"
                   />
                 ) : (
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#1A4577] to-[#C9A94E] flex items-center justify-center text-white font-bold text-base shadow-md border border-[#C9A94E]/40">
@@ -84,7 +112,7 @@ export default function UserMenu() {
                 </div>
               </div>
             </div>
-            
+
             <div className="p-2 space-y-1">
               <div className="px-3 py-2 text-[11px] text-slate-400 flex items-center justify-between rounded-xl bg-white/[0.02] border border-white/5">
                 <span>Database Sync:</span>
@@ -93,13 +121,16 @@ export default function UserMenu() {
                 </span>
               </div>
 
-              <button 
-                onClick={toggleDarkMode} 
-                className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-200 hover:text-white hover:bg-white/[0.06] rounded-xl transition-colors"
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isDarkMode}
+                onClick={toggleDarkMode}
+                className="w-full min-h-touch flex items-center justify-between px-3 py-2 text-xs text-slate-200 hover:text-white hover:bg-white/[0.06] rounded-xl transition-colors"
               >
                 <div className="flex items-center gap-2.5">
-                  {isDarkMode ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} className="text-slate-400" />}
-                  <span>Mode Tampilan</span>
+                  {isDarkMode ? <Sun size={15} className="text-amber-400" aria-hidden="true" /> : <Moon size={15} className="text-slate-400" aria-hidden="true" />}
+                  <span>Mode Gelap</span>
                 </div>
                 <span className="text-[10px] text-slate-400 font-medium">
                   {isDarkMode ? 'Gelap' : 'Terang'}
@@ -108,11 +139,12 @@ export default function UserMenu() {
             </div>
 
             <div className="p-2 border-t border-white/10 bg-black/20">
-              <button 
+              <button
+                type="button"
                 onClick={handleLogout}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/15 hover:text-rose-300 rounded-xl transition-colors font-semibold"
+                className="w-full min-h-touch flex items-center gap-2.5 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/15 hover:text-rose-300 rounded-xl transition-colors font-semibold"
               >
-                <LogOut size={15} />
+                <LogOut size={15} aria-hidden="true" />
                 <span>Logout Keluar SIMK</span>
               </button>
             </div>
