@@ -1040,7 +1040,10 @@ export function registerPatientPortalRoutes(
       if (!Number.isFinite(targetDateEnd) || targetDateEnd > Date.now() + bookingWindowMs) {
         return res.status(400).json({ success: false, message: 'Pendaftaran hanya dapat dibuat hingga 1 tahun ke depan.' });
       }
-      const served = (doctor.pasien_terlayani || 0) + (doctorServedBoost.get(doctor.id) || 0);
+      // Kuota dihitung per dokter per tanggal; jumlah terlayani hari ini hanya berlaku untuk hari ini.
+      const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+      const boostKey = `${doctor.id}:${targetDate}`;
+      const served = (targetDate === today ? doctor.pasien_terlayani || 0 : 0) + (doctorServedBoost.get(boostKey) || 0);
       if (served >= (doctor.kuota || 30)) {
         return res.status(409).json({ success: false, message: 'Kuota dokter untuk jadwal tersebut telah penuh.' });
       }
@@ -1062,10 +1065,8 @@ export function registerPatientPortalRoutes(
       if (normalizedRm) {
         const { core, rich } = findRichPatientByRm(normalizedRm);
         const expectedDob = core?.tanggal_lahir || rich?.tanggal_lahir;
-        if (!expectedDob) {
-          return res.status(404).json({ success: false, message: 'No. RM tidak ditemukan; pasien baru tidak boleh memilih No. RM sendiri.' });
-        }
-        if (!isValidIsoDate(normalizedDob) || !matchDob(expectedDob, normalizedDob)) {
+        // Satu respons untuk "RM tidak ada" dan "tanggal lahir salah" agar keberadaan RM tidak bisa ditebak.
+        if (!expectedDob || !isValidIsoDate(normalizedDob) || !matchDob(expectedDob, normalizedDob)) {
           return res.status(401).json({ success: false, message: 'No. RM dan tanggal lahir tidak cocok.' });
         }
         patientName = core?.nama || rich?.nama || 'Pasien Terdaftar';
@@ -1099,7 +1100,7 @@ export function registerPatientPortalRoutes(
 
       const poliKode = poliObj.kode;
       const existingForPoli = appointmentsStore.filter((a) =>
-        a.nomor_antrian.startsWith(`${poliKode}-`)
+        a.tanggal === targetDate && a.nomor_antrian.startsWith(`${poliKode}-`)
       ).length;
       const nomorAntrian = `${poliKode}-${String(existingForPoli + 2).padStart(3, '0')}`;
 
@@ -1117,10 +1118,20 @@ export function registerPatientPortalRoutes(
         tipe: 'Rawat Jalan',
         created_at: new Date().toISOString()
       };
-      const qrValue = createSecurePatientQrToken(newApt.id, {
-        kind: 'reservation',
-        ttlMs: Math.max(60_000, targetDateEnd + 24 * 60 * 60 * 1000 - Date.now())
-      });
+      let qrValue: string;
+      try {
+        qrValue = createSecurePatientQrToken(newApt.id, {
+          kind: 'reservation',
+          ttlMs: Math.max(60_000, targetDateEnd + 24 * 60 * 60 * 1000 - Date.now())
+        });
+      } catch (error) {
+        // Jangan tinggalkan pasien baru tanpa janji temu bila token QR gagal dibuat.
+        if (!normalizedRm) {
+          const idx = patientsStore.findIndex((p) => p.no_rm === resolvedRm);
+          if (idx >= 0) patientsStore.splice(idx, 1);
+        }
+        throw error;
+      }
       deps.qrTokensStore?.unshift({
         id: hashQrToken(qrValue),
         tokenHash: hashQrToken(qrValue),
@@ -1132,7 +1143,7 @@ export function registerPatientPortalRoutes(
       });
       appointmentsStore.unshift(newApt);
 
-      doctorServedBoost.set(dokter_id, (doctorServedBoost.get(dokter_id) || 0) + 1);
+      doctorServedBoost.set(boostKey, (doctorServedBoost.get(boostKey) || 0) + 1);
 
       createAuditLog?.({
         user: resolvedName,

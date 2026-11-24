@@ -1990,6 +1990,9 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   app.post('/api/gateway/admin/users', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
+    if (!session.isAdminCapable && session.divisionId !== 'direktur') {
+      return res.status(403).json({ success: false, message: 'Hanya admin portal yang boleh melakukan aksi ini.' });
+    }
 
     const { action, userId, name, nip, divisionId } = req.body || {};
     if (action === 'HRIS_SYNC') {
@@ -2057,6 +2060,9 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   app.post('/api/gateway/admin/propose-change', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
+    if (!session.isAdminCapable && session.divisionId !== 'direktur') {
+      return res.status(403).json({ success: false, message: 'Hanya admin portal yang boleh melakukan aksi ini.' });
+    }
 
     const { category, title, targetKey, proposedValue, justification } = req.body || {};
     const proposal: ConfigChangeProposal = {
@@ -2089,10 +2095,16 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   app.post('/api/gateway/admin/review-change', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
+    if (!session.isAdminCapable && session.divisionId !== 'direktur') {
+      return res.status(403).json({ success: false, message: 'Hanya admin portal yang boleh melakukan aksi ini.' });
+    }
 
     const { proposalId, decision, reviewNote } = req.body || {};
     const proposal = configChangeProposals.find((p) => p.id === proposalId);
     if (!proposal) return res.status(404).json({ success: false, message: 'Usulan perubahan tidak ditemukan.' });
+    if (proposal.proposedBy === `${session.name} (${session.divisionName})`) {
+      return res.status(403).json({ success: false, message: 'Pengusul tidak boleh menyetujui usulannya sendiri.' });
+    }
 
     proposal.reviewedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
     proposal.reviewedBy = `${session.name} (Reviewer Keamanan/Kepatuhan)`;
@@ -2167,6 +2179,9 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   app.post('/api/gateway/admin/integrations/test', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
+    if (!session.isAdminCapable && session.divisionId !== 'direktur') {
+      return res.status(403).json({ success: false, message: 'Hanya admin portal yang boleh melakukan aksi ini.' });
+    }
 
     const { integrationId } = req.body || {};
     const target = integrationHealthStore.find((i) => i.id === integrationId);

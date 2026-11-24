@@ -211,7 +211,9 @@ export async function createApps(
     };
     // Express tidak peka huruf besar dan abaikan "/" akhir; normalisasi agar batas tidak bisa dilewati.
     const normPath = req.path.toLowerCase().replace(/\/+$/, '');
-    const limit = req.method === 'POST' ? limits[normPath] : undefined;
+    const limit = req.method === 'POST'
+      ? limits[normPath] ?? (normPath.startsWith('/ai/') ? { max: 30, windowMs: 60 * 1000 } : undefined)
+      : undefined;
     if (!limit) return next();
 
     const now = Date.now();
@@ -2320,7 +2322,9 @@ export function addErrorHandler(target: express.Application) {
   target.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('Global Server Error:', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: err?.message || 'Terjadi kesalahan pada server.' });
+      // Kesalahan klien (JSON rusak 400, body besar 413) dilaporkan apa adanya; selain itu pesan internal tidak dibocorkan.
+      const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+      res.status(status).json({ error: status === 500 ? 'Terjadi kesalahan pada server.' : (err?.message || 'Permintaan tidak valid.') });
     }
   });
 }
