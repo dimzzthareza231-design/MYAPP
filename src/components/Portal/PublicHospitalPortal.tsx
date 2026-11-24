@@ -236,6 +236,8 @@ export const PublicHospitalPortal: React.FC = () => {
   const [insuranceFilter, setInsuranceFilter] = useState<
     'Semua' | 'JKN / Pemerintah' | 'Asuransi Swasta' | 'Korporasi & TPA'
   >('Semua');
+  // Grid panjang dipotong ke 6 kartu agar halaman tidak terlalu tinggi.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   // Catalog & Live Poli Queues
   const [doctors, setDoctors] = useState<LiveDoctor[]>(fallbackDoctors);
@@ -1683,7 +1685,7 @@ export const PublicHospitalPortal: React.FC = () => {
             </motion.div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredServices.map((srv, idx) => (
+              {(expanded.layanan ? filteredServices : filteredServices.slice(0, 6)).map((srv, idx) => (
                 <motion.div
                   key={srv.id}
                   initial={{ opacity: 0, y: 16 }}
@@ -1727,6 +1729,18 @@ export const PublicHospitalPortal: React.FC = () => {
                 </motion.div>
               ))}
             </div>
+            {filteredServices.length > 6 && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  aria-expanded={!!expanded.layanan}
+                  onClick={() => setExpanded((e) => ({ ...e, layanan: !e.layanan }))}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer min-h-[46px] text-sm whitespace-nowrap shrink-0"
+                >
+                  {expanded.layanan ? 'Tampilkan lebih sedikit' : `Lihat semua (${filteredServices.length})`}
+                </button>
+              </div>
+            )}
           </div>
         </section>
 
@@ -1792,7 +1806,7 @@ export const PublicHospitalPortal: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-              {CENTERS_OF_EXCELLENCE.map((center, idx) => (
+              {(expanded.unggulan ? CENTERS_OF_EXCELLENCE : CENTERS_OF_EXCELLENCE.slice(0, 6)).map((center, idx) => (
                 <motion.div
                   key={center.id}
                   initial={{ opacity: 0, y: 20 }}
@@ -1836,6 +1850,18 @@ export const PublicHospitalPortal: React.FC = () => {
                 </motion.div>
               ))}
             </div>
+            {CENTERS_OF_EXCELLENCE.length > 6 && (
+              <div className="flex justify-center mt-8">
+                <button
+                  type="button"
+                  aria-expanded={!!expanded.unggulan}
+                  onClick={() => setExpanded((e) => ({ ...e, unggulan: !e.unggulan }))}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer min-h-[46px] text-sm whitespace-nowrap shrink-0"
+                >
+                  {expanded.unggulan ? 'Tampilkan lebih sedikit' : `Lihat semua (${CENTERS_OF_EXCELLENCE.length})`}
+                </button>
+              </div>
+            )}
           </div>
         </section>
 
@@ -2305,7 +2331,7 @@ export const PublicHospitalPortal: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filteredInsurances.map((partner) => (
+              {(expanded.mitra ? filteredInsurances : filteredInsurances.slice(0, 6)).map((partner) => (
                 <div
                   key={partner.id}
                   className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col justify-between gap-2 hover:border-[#0B3D91]/40 transition"
@@ -2322,6 +2348,18 @@ export const PublicHospitalPortal: React.FC = () => {
                 </div>
               ))}
             </div>
+            {filteredInsurances.length > 6 && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  aria-expanded={!!expanded.mitra}
+                  onClick={() => setExpanded((e) => ({ ...e, mitra: !e.mitra }))}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer min-h-[46px] text-sm whitespace-nowrap shrink-0"
+                >
+                  {expanded.mitra ? 'Tampilkan lebih sedikit' : `Lihat semua (${filteredInsurances.length})`}
+                </button>
+              </div>
+            )}
           </div>
         </section>
 
