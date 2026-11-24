@@ -254,6 +254,7 @@ describe('web publik pasien', () => {
     });
     assert.equal(r.status, 201);
     assert.ok(r.body?.booking?.nomor_antrian);
+    assert.match(r.body?.booking?.kode_booking, /^BK-[0-9A-F]{8}$/);
     assert.match(r.body?.booking?.qr_value, /^MYITARU1\./);
     assert.equal(r.body.booking.qr_value.includes(r.body.booking.no_rm), false);
     assert.equal(r.body?.token, undefined);

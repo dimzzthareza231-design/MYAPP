@@ -273,6 +273,7 @@ export const PublicHospitalPortal: React.FC = () => {
   });
   const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState<{
+    kode_booking: string;
     no_rm: string;
     tanggal_lahir: string;
     nama: string;
@@ -488,7 +489,7 @@ export const PublicHospitalPortal: React.FC = () => {
       }
 
       setBookingSuccess(data.booking);
-      toast.success(`Nomor Antrean ${data.booking.nomor_antrian} berhasil diterbitkan!`);
+      toast.success(`Booking ${data.booking.kode_booking} berhasil dibuat.`);
       fetchCatalogAndQueues();
     } catch {
       toast.error('Koneksi ke server terganggu. Silakan coba beberapa saat lagi.');
@@ -1201,14 +1202,13 @@ export const PublicHospitalPortal: React.FC = () => {
                             <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-5 text-center space-y-1.5">
                               <CheckCircle2 className="w-9 h-9 text-emerald-600 mx-auto" />
                               <p className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
-                                Nomor Antrean Anda
+                                Kode Booking Anda
                               </p>
-                              <p className="text-4xl font-extrabold font-mono tabular-nums text-[#0B3D91]">
-                                {bookingSuccess.nomor_antrian}
+                              <p className="text-3xl font-extrabold font-mono tabular-nums text-[#0B3D91]">
+                                {bookingSuccess.kode_booking}
                               </p>
                               <p className="text-xs text-slate-600">
-                                No. Rekam Medis:{' '}
-                                <strong className="font-mono text-slate-900">{bookingSuccess.no_rm}</strong>
+                                No. RM dan nomor antrean dikonfirmasi petugas saat check-in.
                               </p>
                             </div>
 

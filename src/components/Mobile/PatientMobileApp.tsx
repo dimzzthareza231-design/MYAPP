@@ -730,7 +730,7 @@ export const PatientMobileApp: React.FC = () => {
       setBookingDoc(null);
       setBookingKeluhan('');
       switchTab('beranda');
-      toast.success(`Antrean baru ${data.booking.nomor_antrian} diterbitkan!`);
+      toast.success(`Booking ${data.booking.kode_booking} berhasil dibuat. Antrean dikonfirmasi saat check-in.`);
     } catch {
       toast.error('Koneksi bermasalah saat membuat janji temu.');
     } finally {

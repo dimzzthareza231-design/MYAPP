@@ -12,3 +12,4 @@ dev-dist
 .dev.vars*
 .secrets.cloudflare.*.json
 .10x/
+.claude/worktrees/

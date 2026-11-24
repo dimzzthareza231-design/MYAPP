@@ -1146,6 +1146,7 @@ export function registerPatientPortalRoutes(
         success: true,
         message: 'Janji temu berhasil dibuat dan nomor antrean telah diterbitkan.',
         booking: {
+          kode_booking: `BK-${newApt.id.slice(4, 12).toUpperCase()}`,
           no_rm: resolvedRm,
           nama: patientName,
           nomor_antrian: nomorAntrian,
