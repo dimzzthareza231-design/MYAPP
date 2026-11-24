@@ -33,6 +33,8 @@ import {
 } from './src/server/coreAuth';
 import { LocalAuthService } from './src/server/localAuth';
 import { clientIp } from './src/server/clientIp';
+import { nextRmNumber } from './src/server/rmNumber';
+import { scrubPhi } from './src/server/scrubPhi';
 import {
   createSecurePatientQrToken,
   getDocumentQrScope,
@@ -751,7 +753,9 @@ export async function createApps(
       return res.status(404).json({ success: false, code: 'PATIENT_NOT_FOUND' });
     }
     auditQrAccess(req, 'PATIENT_QR_ACCESSED', patient.id);
-    return res.json({ success: true, patient });
+    // Hanya identitas yang dibutuhkan untuk mengenali pasien; NIK dan alamat tidak ikut.
+    const { id, no_rm, nama, tanggal_lahir, jenis_kelamin, golongan_darah, alergi, penjamin, status } = patient;
+    return res.json({ success: true, patient: { id, no_rm, nama, tanggal_lahir, jenis_kelamin, golongan_darah, alergi, penjamin, status } });
   });
 
   app.post('/api/v1/patient-qr/redeem', (req, res) => {
@@ -1003,9 +1007,7 @@ export async function createApps(
     }
 
     // Auto-generate No RM: RM-YYMMDD-XXXX
-    const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-    const counter = String(patientsStore.length + 1).padStart(4, '0');
-    const no_rm = `RM-${dateStr}-${counter}`;
+    const no_rm = nextRmNumber(patientsStore);
 
     const newPatient: PatientRecord = {
       id: `p-${randomUUID()}`,
@@ -1226,8 +1228,21 @@ export async function createApps(
     });
   });
 
-  app.post('/api/v1/inventory/dispense', (req, res) => {
+  app.post('/api/v1/inventory/dispense', async (req, res) => {
     const { items, recipeId, no_rm } = req.body;
+
+    // Isolate lain mungkin sudah memotong stok; segarkan angka stok dari database sebelum memeriksa.
+    if (persistence.mode !== 'memory') {
+      try {
+        for (const { data } of await persistence.list<{ id: string; stok: number }>('inventory')) {
+          const local = inventoryStore.find((i) => i.id === data.id);
+          if (local && Number.isFinite(data.stok)) local.stok = data.stok;
+        }
+      } catch (error) {
+        console.error('[Persistence] Could not refresh inventory stock.', error);
+        return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
+      }
+    }
 
     if (!Array.isArray(items) || items.length === 0 || items.length > 100) {
       return res.status(400).json({ success: false, error: 'Daftar item obat yang akan dikeluarkan diperlukan.' });
@@ -1498,11 +1513,11 @@ IMPORTANT: You are an assistant, NOT a doctor. Ensure you state that this is for
 
       // High-Detail Deterministic Fallback
       const fallback = analyzeClinicalNoteDeterministic(clinicalNote);
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
       console.warn('AI Analysis Warning/Fallback triggered:', error?.message || error);
       const fallback = analyzeClinicalNoteDeterministic(req.body?.clinicalNote || '');
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     }
   });
 
@@ -1673,18 +1688,19 @@ Task:
       }
 
       const fallbackResult = generateClinicalDecisionSupportDeterministic(req.body);
-      return res.json(fallbackResult);
+      return res.json({ ...fallbackResult, fallback: true });
     } catch (error: any) {
       console.warn('Clinical Decision Support Fallback triggered:', error?.message || error);
       const fallbackResult = generateClinicalDecisionSupportDeterministic(req.body || {});
-      return res.json(fallbackResult);
+      return res.json({ ...fallbackResult, fallback: true });
     }
   });
 
   // ⭐ ENDPOINT BARU: AI Medical Intelligence & Clinical Search Grounding
   app.post('/api/ai/grounded-search', async (req, res) => {
     try {
-      const { query, context } = req.body;
+      const query = scrubPhi(req.body?.query, 500);
+      const context = scrubPhi(req.body?.context);
 
       if (!query) {
         return res.status(400).json({ error: 'Query is required.' });
@@ -1764,14 +1780,15 @@ Instructions:
       });
     } catch (error: any) {
       console.warn('AI Grounded Search Warning/Fallback triggered:', error?.message || error);
-      return res.json(generateMedicalSearchEvidenceDeterministic(req.body?.query || '', req.body?.context));
+      return res.json({ ...generateMedicalSearchEvidenceDeterministic(req.body?.query || "", req.body?.context), fallback: true });
     }
   });
 
   // ⭐ ENDPOINT BARU: Google Maps Grounding & Geospatial Health Locator
   app.post('/api/ai/maps-grounding', async (req, res) => {
     try {
-      const { query, latitude, longitude, category } = req.body;
+      const { latitude, longitude, category } = req.body;
+      const query = scrubPhi(req.body?.query, 500);
 
       if (!query) {
         return res.status(400).json({ error: 'Query is required for Google Maps search.' });
@@ -2058,11 +2075,11 @@ Tugas Anda:
       }
 
       const fallback = auditBpjsClaimDeterministic({ billingId, patientName, diagnosis, items, totalBill, sepNo });
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
       console.warn('AI BPJS Audit Warning/Fallback triggered:', error?.message || error);
       const fallback = auditBpjsClaimDeterministic(req.body);
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     }
   });
 
@@ -2109,11 +2126,11 @@ Berikan:
       }
 
       const fallback = analyzeRadiologyDeterministic({ examinationName, modality, clinicalDiagnosis, patientAge, gender });
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
       console.warn('AI Radiology Analysis Warning/Fallback triggered:', error?.message || error);
       const fallback = analyzeRadiologyDeterministic(req.body);
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     }
   });
 
@@ -2175,11 +2192,11 @@ Evaluasi:
       }
 
       const fallback = checkDrugInteractionsDeterministic(medications, patientContext);
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
       console.warn('AI Drug Interaction Warning/Fallback triggered:', error?.message || error);
       const fallback = checkDrugInteractionsDeterministic(req.body?.medications || [], req.body?.patientContext);
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     }
   });
 
@@ -2228,11 +2245,11 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
       }
 
       const fallback = auditDocumentCompletenessDeterministic({ documentType, patientName, patientData: effectivePatientData, medicalNotes: effectiveNotes, signatures });
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
       console.warn('AI Document Completeness Warning/Fallback triggered:', error?.message || error);
       const fallback = auditDocumentCompletenessDeterministic(req.body || {});
-      return res.json(fallback);
+      return res.json({ ...fallback, fallback: true });
     }
   });
 

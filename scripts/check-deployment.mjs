@@ -131,6 +131,17 @@ if (!process.env.GEMINI_API_KEY) {
   logSuccess(`GEMINI_API_KEY detected in environment.`);
 }
 
+if (nodeEnv === 'production') {
+  if (process.env.ALLOW_INSECURE_DEMO_AUTH === 'true') {
+    logError('ALLOW_INSECURE_DEMO_AUTH=true tidak boleh aktif di produksi.');
+    hasErrors = true;
+  }
+  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
+    logWarn('SESSION_SECRET (>= 32 karakter) belum terbaca; server produksi menolak start tanpa itu.');
+    hasWarnings = true;
+  }
+}
+
 // 5. Verify Build Output Directory Write Permissions
 logInfo('Verifying build output directory accessibility...');
 const distDir = path.join(rootDir, 'dist');

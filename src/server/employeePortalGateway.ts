@@ -847,6 +847,13 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const history = (rateLimitMap.get(ip) || []).filter((ts) => now - ts < 60_000);
     history.push(now);
     rateLimitMap.set(ip, history);
+    // Buang catatan lama agar dua map ini tidak tumbuh tanpa batas.
+    if (rateLimitMap.size > 5000) {
+      for (const [key, stamps] of rateLimitMap) if (!stamps.some((ts) => now - ts < 60_000)) rateLimitMap.delete(key);
+    }
+    if (idempotencyCache.size > 2000) {
+      for (const [key, entry] of idempotencyCache) if (now - entry.createdAt > 10 * 60_000) idempotencyCache.delete(key);
+    }
 
     res.setHeader('X-Gateway-Version', 'MYITARU-GW-2026.1');
     res.setHeader('X-RateLimit-Remaining', String(Math.max(0, 180 - history.length)));
@@ -861,7 +868,8 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
     const idemKey = req.headers['idempotency-key'];
     if (req.method !== 'GET' && typeof idemKey === 'string' && idemKey.trim()) {
-      const cacheKey = `${req.path}::${idemKey.trim()}`;
+      // Kunci menyertakan IP dan token agar klien lain dengan key sama tidak menerima respons orang lain.
+      const cacheKey = `${ip}::${req.headers.authorization || ''}::${req.path}::${idemKey.trim()}`;
       const existing = idempotencyCache.get(cacheKey);
       if (existing) {
         res.setHeader('X-Idempotent-Replay', 'true');
@@ -2128,7 +2136,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     proposal.status = 'APPROVED';
 
     // Apply atomically to live policy / flag / announcement
-    if (proposal.category === 'FEATURE_FLAG' && featureFlags[proposal.targetKey]) {
+    if (proposal.category === 'FEATURE_FLAG' && Object.hasOwn(featureFlags, proposal.targetKey)) {
       featureFlags[proposal.targetKey].enabled = Boolean(proposal.proposedValue);
     } else if (proposal.category === 'ABAC_POLICY' && proposal.targetKey in abacPolicies) {
       (abacPolicies as unknown as Record<string, boolean>)[proposal.targetKey] = Boolean(proposal.proposedValue);

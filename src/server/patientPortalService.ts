@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { clientIp } from './clientIp';
+import { nextRmNumber } from './rmNumber';
 import type express from 'express';
 import { createSignedStore } from './signedStore';
 import { createSecurePatientQrToken, isSecurePatientQrConfigured } from './securePatientQr';
@@ -134,7 +135,7 @@ export interface PatientDossierPayload {
   billing: {
     invoiceNumber: string;
     penjamin: string;
-    status: 'Ditanggung BPJS' | 'Lunas' | 'Menunggu Pembayaran';
+    status: 'Ditanggung BPJS' | 'Lunas' | 'Menunggu Pembayaran' | 'Belum Tersedia';
     totalBiaya: number;
     ditanggungPenjamin: number;
     sisaTagihan: number;
@@ -582,7 +583,8 @@ export function registerPatientPortalRoutes(
       basePenjamin.toLowerCase().includes('asuransi') ||
       basePenjamin.toLowerCase().includes('pertamina');
 
-    const billItems = [
+    // Tarif ini contoh demo; di luar mode demo tagihan nyata belum terhubung, jadi jangan tampilkan angka karangan.
+    const billItems = !useDemoData ? [] : [
       { nama: 'Administrasi & Pendaftaran Rekam Medis', kategori: 'Administrasi', nominal: 35000 },
       { nama: `Konsultasi ${activeQueues[0]?.dokter || 'Dokter Spesialis'}`, kategori: 'Jasa Medis', nominal: 250000 },
       { nama: 'Pemeriksaan Laboratorium & Penunjang', kategori: 'Penunjang', nominal: 325000 },
@@ -595,7 +597,9 @@ export function registerPatientPortalRoutes(
       ? Math.round(totalBiaya * 0.85)
       : 0;
     const sisaTagihan = Math.max(0, totalBiaya - ditanggungPenjamin);
-    const billingStatus: 'Ditanggung BPJS' | 'Lunas' | 'Menunggu Pembayaran' = basePenjamin
+    const billingStatus: 'Ditanggung BPJS' | 'Lunas' | 'Menunggu Pembayaran' | 'Belum Tersedia' = !useDemoData
+      ? 'Belum Tersedia'
+      : basePenjamin
       .toLowerCase()
       .includes('bpjs')
       ? 'Ditanggung BPJS'
@@ -1074,12 +1078,7 @@ export function registerPatientPortalRoutes(
         if (resolvedName.length < 2 || !isValidIsoDate(normalizedDob) || !phone) {
           return res.status(400).json({ success: false, message: 'Nama, tanggal lahir valid, dan nomor telepon wajib untuk pasien baru.' });
         }
-        const now = new Date();
-        const yy = String(now.getFullYear()).slice(-2);
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const dd = String(now.getDate()).padStart(2, '0');
-        const seq = String(patientsStore.length + 101).padStart(4, '0');
-        resolvedRm = `RM-${yy}${mm}${dd}-${seq}`;
+        resolvedRm = nextRmNumber(patientsStore);
         patientsStore.unshift({
           id: `p-${crypto.randomUUID()}`,
           no_rm: resolvedRm,

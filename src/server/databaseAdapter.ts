@@ -410,7 +410,7 @@ export class MySQLAdapter implements PrimaryPersistenceRepository {
     const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
     const [rows] = await this.pool.query(
       `SELECT id, entity, record_id, operation, payload
-       FROM sync_outbox WHERE status = 'pending' ORDER BY id LIMIT ${safeLimit}`,
+       FROM sync_outbox WHERE status = 'pending' AND attempts < 10 ORDER BY id LIMIT ${safeLimit}`,
       []
     );
     return (rows as Array<{
@@ -439,6 +439,8 @@ export class MySQLAdapter implements PrimaryPersistenceRepository {
        WHERE id IN (${placeholders})`,
       ids
     );
+    // Baris yang sudah terkirim tidak dibutuhkan lagi setelah seminggu.
+    await this.pool.query("DELETE FROM sync_outbox WHERE status = 'synced' AND synced_at < (NOW() - INTERVAL 7 DAY)");
   }
 
   async markOutboxFailed(ids: number[], error: string): Promise<void> {
@@ -459,7 +461,7 @@ export class MySQLAdapter implements PrimaryPersistenceRepository {
   async pendingCount(): Promise<number> {
     await this.ensureReady();
     const [rows] = await this.pool.query(
-      "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending'",
+      "SELECT COUNT(*) AS count FROM sync_outbox WHERE status = 'pending' AND attempts < 10",
       []
     );
     return Number((rows as Array<{ count: number | string }>)[0]?.count || 0);
@@ -725,10 +727,21 @@ export class HybridAdapter implements PersistenceRepository {
         await this.mysql.markOutboxSynced(pending.map((item) => item.outboxId));
         this.lastSyncError = undefined;
       } catch (error) {
+        // Satu baris rusak tidak boleh menahan seluruh batch: coba satu per satu, baris gagal dihitung percobaannya
+        // dan berhenti diulang setelah 10 kali (dead-letter).
         const message = errorText(error);
-        await this.mysql.markOutboxFailed(pending.map((item) => item.outboxId), message);
-        this.lastSyncError = message;
-        console.warn(`[Persistence:hybrid] Cloud sync failed; ${pending.length} change(s) remain queued.`);
+        let failed = 0;
+        for (const item of pending) {
+          try {
+            await this.firebase.commit([{ entity: item.entity, id: item.id, data: item.data }]);
+            await this.mysql.markOutboxSynced([item.outboxId]);
+          } catch (itemError) {
+            failed += 1;
+            await this.mysql.markOutboxFailed([item.outboxId], errorText(itemError));
+          }
+        }
+        this.lastSyncError = failed ? message : undefined;
+        if (failed) console.warn(`[Persistence:hybrid] Cloud sync failed for ${failed}/${pending.length} change(s); they remain queued.`);
       }
       return pending.length;
     } finally {
