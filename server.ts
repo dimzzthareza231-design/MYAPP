@@ -27,6 +27,8 @@ import {
   assertProductionAuthConfiguration,
   getCoreAuthMode,
   registerCoreAuthentication,
+  hasScope,
+  type CoreAuthRequest,
   type CoreAuthOptions
 } from './src/server/coreAuth';
 import { LocalAuthService } from './src/server/localAuth';
@@ -933,7 +935,7 @@ export async function createApps(
     }
 
     const pageNum = Math.max(1, parseInt(page as string, 10));
-    const limitNum = Math.max(1, parseInt(limit as string, 10));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
     const startIndex = (pageNum - 1) * limitNum;
     const paginated = results.slice(startIndex, startIndex + limitNum);
 
@@ -964,7 +966,8 @@ export async function createApps(
       data: {
         ...patient,
         appointments,
-        documents: dossiers
+        // Dokumen klinis hanya untuk peran dengan akses rekam medis.
+        ...(hasScope((req as CoreAuthRequest).corePrincipal?.roleId || '', 'rekam-medis') ? { documents: dossiers } : {})
       }
     });
   });
@@ -2648,6 +2651,7 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
     appointmentsStore: appointmentsStore as any,
     bedsStore: bedsStore as any,
     qrTokensStore,
+    staffApp: app,
     useDemoData: persistence.mode === 'memory',
     createAuditLog: (entry) => {
       auditLogsStore.unshift({

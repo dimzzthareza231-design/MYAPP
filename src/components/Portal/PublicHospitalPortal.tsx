@@ -75,7 +75,6 @@ interface PoliQueueSnapshot {
 interface QueueLookupMatch {
   id: string;
   nomor_antrian: string;
-  no_rm: string;
   pasien_nama_masked: string;
   poli: string;
   dokter: string;
@@ -304,10 +303,10 @@ export const PublicHospitalPortal: React.FC = () => {
   const [queueSearchedQuery, setQueueSearchedQuery] = useState('');
   const [queueMatches, setQueueMatches] = useState<QueueLookupMatch[]>([]);
   const [sampleTickets, setSampleTickets] = useState<
-    Array<{ nomor_antrian: string; no_rm: string; poli: string }>
+    Array<{ nomor_antrian: string; poli: string }>
   >([
-    { nomor_antrian: 'PD-001', no_rm: 'RM-260101-0001', poli: 'Poli Penyakit Dalam' },
-    { nomor_antrian: 'IGD-004', no_rm: 'RM-260103-0003', poli: 'Instalasi Gawat Darurat (IGD)' }
+    { nomor_antrian: 'PD-001', poli: 'Poli Penyakit Dalam' },
+    { nomor_antrian: 'IGD-004', poli: 'Instalasi Gawat Darurat (IGD)' }
   ]);
 
   // Auto-advance hero showcase slides softly every 7 seconds
@@ -1497,7 +1496,7 @@ export const PublicHospitalPortal: React.FC = () => {
                           onClick={() => handleQueueLookup(s.nomor_antrian)}
                           className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 font-mono font-semibold hover:bg-slate-200 cursor-pointer"
                         >
-                          {s.nomor_antrian} ({s.no_rm})
+                          {s.nomor_antrian}
                         </button>
                       ))}
                     </div>
@@ -1538,8 +1537,6 @@ export const PublicHospitalPortal: React.FC = () => {
                                     <p className="text-xs text-slate-600 mt-0.5 flex items-center gap-1.5">
                                       <UserCheck className="w-3.5 h-3.5 text-slate-400" />
                                       <span>{m.pasien_nama_masked}</span>
-                                      <span className="text-slate-400">·</span>
-                                      <span className="font-mono">{m.no_rm}</span>
                                     </p>
                                   </div>
                                   <span

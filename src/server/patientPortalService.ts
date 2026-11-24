@@ -213,6 +213,8 @@ export function registerPatientPortalRoutes(
     bedsStore: ServerBedRecord[];
     qrTokensStore?: ServerQrTokenRecord[];
     useDemoData?: boolean;
+    /** App staf (berauth). Route dispatch notifikasi hanya didaftarkan di sini, tidak di web publik. */
+    staffApp?: express.Express;
     createAuditLog?: (entry: {
       user: string;
       role: string;
@@ -730,11 +732,13 @@ export function registerPatientPortalRoutes(
       };
     });
 
-    const sampleTickets = appointmentsStore.slice(0, 4).map((apt) => ({
-      nomor_antrian: apt.nomor_antrian,
-      no_rm: apt.no_rm,
-      poli: apt.poli
-    }));
+    // Contoh tiket hanya untuk demo; tanpa no. RM.
+    const sampleTickets = deps.useDemoData === false
+      ? []
+      : appointmentsStore.slice(0, 4).map((apt) => ({
+          nomor_antrian: apt.nomor_antrian,
+          poli: apt.poli
+        }));
 
     if (!rawQuery) {
       return res.json({
@@ -748,11 +752,7 @@ export function registerPatientPortalRoutes(
     }
 
     const matches = appointmentsStore
-      .filter(
-        (a) =>
-          a.nomor_antrian.toUpperCase().includes(rawQuery) ||
-          normalizeRm(a.no_rm).includes(rawQuery)
-      )
+      .filter((a) => a.nomor_antrian.toUpperCase() === rawQuery)
       .map((apt) => {
         const poliItem = MASTER_POLIKLINIK.find(
           (m) =>
@@ -779,7 +779,6 @@ export function registerPatientPortalRoutes(
         return {
           id: apt.id,
           nomor_antrian: apt.nomor_antrian,
-          no_rm: apt.no_rm,
           pasien_nama_masked: maskPatientName(apt.pasien_nama),
           poli: apt.poli,
           dokter: apt.dokter,
@@ -1390,6 +1389,9 @@ export function registerPatientPortalRoutes(
 
   // 11. Patient-Triggered Live Simulation Test for FCM & Real-Time Alerts
   app.post('/api/patient/notifications/test', async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ success: false, message: 'Tidak tersedia.' });
+    }
     const session = resolveSessionFromReq(req);
     if (!session) {
       return res.status(401).json({ success: false, message: 'Sesi pasien tidak valid.' });
@@ -1425,7 +1427,7 @@ export function registerPatientPortalRoutes(
   });
 
   // 12. SIMK Staff Dispatch Endpoint (Called from Outpatient Queue Call & Lab Sp.PK Validation)
-  app.post('/api/v1/patient-notifications/dispatch', async (req, res) => {
+  deps.staffApp?.post('/api/v1/patient-notifications/dispatch', async (req, res) => {
     try {
       const {
         no_rm,

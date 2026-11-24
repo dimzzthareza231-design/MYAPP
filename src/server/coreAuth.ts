@@ -159,7 +159,7 @@ function isSameOrigin(req: express.Request): boolean {
   }
 }
 
-function scopeForPath(path: string, req?: express.Request): string | null {
+export function scopeForPath(path: string, req?: express.Request): string | null {
   if (path === '/api/v1/dossier/document-qr/issue') {
     return getDocumentQrScope(req?.body?.documentType);
   }
@@ -168,10 +168,10 @@ function scopeForPath(path: string, req?: express.Request): string | null {
     if (claims?.kind === 'document') return claims.scope || 'rekam-medis';
   }
   if (path === '/api/v1/health' || path === '/api/v1/system/stats' || path.startsWith('/api/v1/health-updates')) return 'dashboard';
-  if (path.startsWith('/api/v1/system-data')) return 'dashboard';
+  if (path.startsWith('/api/v1/system-data')) return 'data-pasien';
   const isRead = req?.method === 'GET' || req?.method === 'HEAD';
   if (path.startsWith('/api/v1/patients') || path.startsWith('/api/v1/appointments')) return isRead ? 'data-pasien' : 'pendaftaran';
-  if (path.startsWith('/api/v1/patient-qr')) return 'rekam-medis';
+  if (path.startsWith('/api/v1/patient-qr') || path.startsWith('/api/v1/patient-notifications')) return 'rekam-medis';
   if (path.startsWith('/api/v1/bed-management')) return 'rawat-inap';
   if (path.startsWith('/api/v1/inventory')) return 'inventory';
   if (path.startsWith('/api/v1/bpjs')) return 'vclaim';
@@ -187,7 +187,7 @@ function scopeForPath(path: string, req?: express.Request): string | null {
   return null;
 }
 
-function hasScope(roleId: string, scope: string): boolean {
+export function hasScope(roleId: string, scope: string): boolean {
   if (roleId === 'super_admin' || COMMON_MODULES.includes(scope)) return true;
   const role = ROLES.find((item) => item.id === roleId);
   if (!role) return false;
