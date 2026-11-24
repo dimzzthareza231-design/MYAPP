@@ -13,6 +13,10 @@ Jangan memakai 10x-Team (skill `10x-Team:*`) untuk proyek ini.
 
 Kedua mode tetap aktif sampai pengguna bilang "stop caveman", "stop ponytail", atau "normal mode".
 
+## Plugin Cloudflare
+
+Plugin `cloudflare@cloudflare` (skill + MCP `https://mcp.cloudflare.com/mcp`) aktif otomatis lewat `.claude/settings.json`. Login MCP lewat OAuth saat tool Cloudflare pertama dipakai.
+
 ## Proyek
 
 MYITARU: web publik pasien + aplikasi inti SIMK/RME. Jalan di Cloudflare Workers + D1 (`wrangler.jsonc`, `worker/`, `migrations/`).
