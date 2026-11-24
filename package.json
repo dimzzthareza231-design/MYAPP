@@ -34,7 +34,7 @@
   "dependencies": {
     "@google/genai": "^3.3.0",
     "dotenv": "^17.2.3",
-    "express": "^4.22.3",
+    "express": "^5.3.0",
     "firebase": "^12.18.0",
     "firebase-admin": "^14.5.1",
     "html2canvas-pro": "^2.3.7",
@@ -56,7 +56,7 @@
     "@cloudflare/workers-types": "^5.20261121.1",
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@tailwindcss/vite": "^4.1.14",
-    "@types/express": "^4.17.21",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
