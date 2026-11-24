@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { clientIp } from './clientIp';
 import type express from 'express';
 import { createSignedStore } from './signedStore';
 import { createSecurePatientQrToken, isSecurePatientQrConfigured } from './securePatientQr';
@@ -481,7 +482,7 @@ export function registerPatientPortalRoutes(
             bb: rich.vitals[0].bb,
             tb: rich.vitals[0].tb
           }
-        : core
+        : core && useDemoData
         ? {
             date: 'Kunjungan Terakhir',
             bp: '120/80',
@@ -505,7 +506,7 @@ export function registerPatientPortalRoutes(
           }))
         : (core?.riwayat_penyakit || []).map((dx, i) => ({
             nama: dx,
-            kode_icd10: i === 0 ? 'I10' : 'K30',
+            kode_icd10: useDemoData ? (i === 0 ? 'I10' : 'K30') : '',
             severity: 'Moderate',
             status: 'Active'
           }));
@@ -519,6 +520,8 @@ export function registerPatientPortalRoutes(
             frequency: m.frequency,
             status: m.status
           }))
+        : !useDemoData
+        ? []
         : core?.no_rm === 'RM-260101-0001'
         ? [
             { name: 'Amlodipine 10 mg Tablet', dose: '10 mg', frequency: '1x1 Malam', status: 'Active' },
@@ -542,7 +545,7 @@ export function registerPatientPortalRoutes(
         loinc: item.loinc
       }));
 
-    if (labRadResults.length === 0) {
+    if (labRadResults.length === 0 && useDemoData) {
       labRadResults = [
         {
           id: `LAB-${targetRm.slice(-4)}`,
@@ -843,7 +846,7 @@ export function registerPatientPortalRoutes(
           role: 'Pasien Mobile',
           action: 'PATIENT_VERIFY_FAILED',
           module: 'Aplikasi Pasien',
-          ip: req.ip || '127.0.0.1',
+          ip: clientIp(req),
           status: 'WARNING',
           details: `Percobaan verifikasi No. RM ${targetRm} dengan tanggal lahir tidak cocok.`
         });
@@ -863,7 +866,7 @@ export function registerPatientPortalRoutes(
         role: 'Pasien Mobile',
         action: 'PATIENT_VERIFY_RM_DOB',
         module: 'Aplikasi Pasien',
-        ip: req.ip || '127.0.0.1',
+        ip: clientIp(req),
         status: 'SUCCESS',
         details: `Verifikasi pasien berhasil untuk No. RM ${targetRm}.`
       });
@@ -1077,7 +1080,7 @@ export function registerPatientPortalRoutes(
         const seq = String(patientsStore.length + 101).padStart(4, '0');
         resolvedRm = `RM-${yy}${mm}${dd}-${seq}`;
         patientsStore.unshift({
-          id: `p-${Date.now()}`,
+          id: `p-${crypto.randomUUID()}`,
           no_rm: resolvedRm,
           nik: suppliedNik,
           nama: resolvedName,
@@ -1136,7 +1139,7 @@ export function registerPatientPortalRoutes(
         role: 'Pasien Portal',
         action: 'ONLINE_APPOINTMENT_BOOKING',
         module: 'Portal & App Pasien',
-        ip: req.ip || '127.0.0.1',
+        ip: clientIp(req),
         status: 'SUCCESS',
         details: `Booking online ${nomorAntrian} (${poliObj.nama} · ${doctor.nama}) untuk No. RM ${resolvedRm}.`
       });
@@ -1337,7 +1340,7 @@ export function registerPatientPortalRoutes(
         if (params.dokter) targetApt.dokter = params.dokter;
       } else {
         appointmentsStore.unshift({
-          id: `apt-call-${Date.now()}`,
+          id: `apt-call-${crypto.randomUUID()}`,
           pasien_id: dossier?.patient.id || targetRm,
           pasien_nama: dossier?.patient.nama || 'Pasien MYITARU',
           no_rm: targetRm,
@@ -1475,7 +1478,7 @@ export function registerPatientPortalRoutes(
         role: 'Klinis SIMK',
         action: type === 'queue_call' ? 'FCM_QUEUE_CALL_DISPATCH' : 'FCM_LAB_READY_DISPATCH',
         module: 'FCM Notifikasi Pasien',
-        ip: req.ip || '127.0.0.1',
+        ip: clientIp(req),
         status: 'SUCCESS',
         details: `Notifikasi real-time (${type}) dikirim ke No. RM ${normalizeRm(no_rm)}.`
       });

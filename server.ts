@@ -102,6 +102,8 @@ function installPersistenceMiddleware(
   for (const target of targets) {
     target.use(async (req, res, next) => {
       if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+      // Route ini tidak menulis array persisten; jangan antre di belakang panggilan Gemini yang lambat.
+      if (req.path.startsWith('/api/ai/') || req.path.startsWith('/api/cloudflare/')) return next();
 
       let release!: () => void;
       const currentWrite = new Promise<void>((resolve) => { release = resolve; });
@@ -173,6 +175,11 @@ export async function createApps(
   // shortcut: satu proses = data bersama; pecah jadi dua layanan setelah data pindah ke database.
   const app = express();
   const publicApp = express();
+  if (process.env.TRUST_PROXY) {
+    // Di belakang proxy (Docker/Vercel) req.ip harus dari X-Forwarded-For, bukan IP proxy.
+    app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
+    publicApp.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
+  }
   const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
   const resolvedAuthOptions: CoreAuthOptions = { ...authOptions, authMode };
   if (authMode === 'local') {
@@ -202,11 +209,13 @@ export async function createApps(
       '/gateway/auth/verify-mfa': { max: 10, windowMs: 15 * 60 * 1000 },
       '/cloudflare/verify-turnstile': { max: 20, windowMs: 60 * 1000 }
     };
-    const limit = req.method === 'POST' ? limits[req.path] : undefined;
+    // Express tidak peka huruf besar dan abaikan "/" akhir; normalisasi agar batas tidak bisa dilewati.
+    const normPath = req.path.toLowerCase().replace(/\/+$/, '');
+    const limit = req.method === 'POST' ? limits[normPath] : undefined;
     if (!limit) return next();
 
     const now = Date.now();
-    const key = `${clientIp(req)}:${req.path}`;
+    const key = `${clientIp(req)}:${normPath}`;
     let bucket = rateLimitBuckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
       bucket = { count: 0, resetAt: now + limit.windowMs };
@@ -787,7 +796,7 @@ export async function createApps(
     appointment.checked_in_at = new Date().toISOString();
     if (qrRecord) qrRecord.consumedAt = appointment.checked_in_at;
     auditLogsStore.unshift({
-      id: `log-${Date.now()}`,
+      id: `log-${randomUUID()}`,
       timestamp: appointment.checked_in_at,
       user: req.corePrincipal?.email || 'unknown',
       role: req.corePrincipal?.roleId || 'unknown',
@@ -898,20 +907,6 @@ export async function createApps(
     res.json(data);
   });
 
-  // 2c. AI Live Synchronization of 2026 Health Intelligence
-  app.post('/api/ai/health-updates-sync', async (req, res) => {
-    try {
-      const baseData = generateHealthUpdates2026();
-      res.json({
-        ...baseData,
-        syncedViaAI: true,
-        source: 'Kemenkes RI • BPJS Kesehatan • WHO SEARO 2026 Live Bridging'
-      });
-    } catch (err) {
-      res.json(generateHealthUpdates2026());
-    }
-  });
-
   // 3. Patients API: List & Search
   app.get('/api/v1/patients', (req, res) => {
     const { q, penjamin, status, page = '1', limit = '20' } = req.query;
@@ -1004,7 +999,7 @@ export async function createApps(
     const no_rm = `RM-${dateStr}-${counter}`;
 
     const newPatient: PatientRecord = {
-      id: `p-${Date.now()}`,
+      id: `p-${randomUUID()}`,
       no_rm,
       nik: nik || '',
       nama: nama.trim(),
@@ -1025,13 +1020,13 @@ export async function createApps(
 
     // Audit log
     auditLogsStore.unshift({
-      id: `log-${Date.now()}`,
+      id: `log-${randomUUID()}`,
       timestamp: new Date().toISOString(),
-      user: req.headers['x-user-name'] ? String(req.headers['x-user-name']) : 'Petugas Pendaftaran',
-      role: 'Admisi',
+      user: (req as CoreAuthRequest).corePrincipal?.email || 'Petugas Pendaftaran',
+      role: (req as CoreAuthRequest).corePrincipal?.roleId || 'Admisi',
       action: 'CREATE_PATIENT',
       module: 'Pendaftaran',
-      ip: req.ip || '127.0.0.1',
+      ip: clientIp(req),
       status: 'SUCCESS',
       details: `Pendaftaran pasien baru ${newPatient.nama} dengan No. RM ${newPatient.no_rm}`
     });
@@ -1130,8 +1125,8 @@ export async function createApps(
     const nomor_antrian = `${queuePrefix}-${String(currentQueueCount).padStart(3, '0')}`;
 
     const newAppointment: AppointmentRecord = {
-      id: `apt-${Date.now()}`,
-      pasien_id: patient ? patient.id : `p-${Date.now()}`,
+      id: `apt-${randomUUID()}`,
+      pasien_id: patient ? patient.id : `p-${randomUUID()}`,
       pasien_nama,
       no_rm: patientRm,
       poli,
@@ -1195,43 +1190,6 @@ export async function createApps(
       },
       byClass,
       beds: bedsStore
-    });
-  });
-
-  app.post('/api/v1/bed-management/transfer', (req, res) => {
-    const { no_rm, target_bed_id } = req.body;
-
-    if (!no_rm || !target_bed_id) {
-      return res.status(400).json({ success: false, error: 'No. RM dan ID Bed tujuan diperlukan.' });
-    }
-
-    const targetBed = bedsStore.find(b => b.id === target_bed_id);
-    if (!targetBed) {
-      return res.status(404).json({ success: false, error: 'Bed tujuan tidak ditemukan.' });
-    }
-
-    if (targetBed.status !== 'Tersedia') {
-      return res.status(409).json({ success: false, error: `Bed tujuan tidak tersedia (Status: ${targetBed.status}).` });
-    }
-
-    // Release current bed
-    const currentBed = bedsStore.find(b => b.no_rm === no_rm && b.status === 'Terisi');
-    if (currentBed) {
-      currentBed.status = 'Dibersihkan';
-      currentBed.pasien_nama = undefined;
-      currentBed.no_rm = undefined;
-    }
-
-    const patient = patientsStore.find(p => p.no_rm === no_rm);
-    targetBed.status = 'Terisi';
-    targetBed.pasien_nama = patient ? patient.nama : 'Pasien Rawat Inap';
-    targetBed.no_rm = no_rm;
-    targetBed.tanggal_masuk = new Date().toISOString().split('T')[0];
-
-    res.json({
-      success: true,
-      message: `Pasien ${no_rm} berhasil dipindahkan ke ${targetBed.bangsal} - ${targetBed.ruangan} (${targetBed.nomor_bed}).`,
-      data: targetBed
     });
   });
 
@@ -1320,13 +1278,13 @@ export async function createApps(
     });
 
     auditLogsStore.unshift({
-      id: `log-${Date.now()}`,
+      id: `log-${randomUUID()}`,
       timestamp: new Date().toISOString(),
       user: req.corePrincipal?.email || 'unknown',
       role: req.corePrincipal?.roleId || 'unknown',
       action: 'DISPENSE_MEDICATION',
       module: 'Farmasi',
-      ip: req.ip || '127.0.0.1',
+      ip: clientIp(req),
       status: 'SUCCESS',
       details: `Pengeluaran ${dispensed.length} item obat untuk resep ${recipeId || 'R-DIRECT'} (Pasien: ${no_rm || '-'})`
     });
@@ -1336,156 +1294,6 @@ export async function createApps(
       message: 'Obat berhasil didispensasi dan stok inventaris terpotong otomatis.',
       dispensed,
       warnings: errors.length > 0 ? errors : undefined
-    });
-  });
-
-  // 9. BPJS V-Claim API Simulation
-  app.get('/api/v1/bpjs/vclaim/peserta/:nikOrNoka', (req, res) => {
-    const { nikOrNoka } = req.params;
-    const patient = patientsStore.find(p => p.nik === nikOrNoka || p.no_bpjs === nikOrNoka);
-
-    sepCounter += 1;
-    const isMockRegistered = Boolean(patient);
-
-    res.json({
-      metaData: {
-        code: '200',
-        message: 'Sukses Mengambil Data Kepesertaan BPJS'
-      },
-      response: {
-        peserta: {
-          noKartu: patient?.no_bpjs || (nikOrNoka.length === 13 ? nikOrNoka : '0001892345671'),
-          nik: patient?.nik || (nikOrNoka.length === 16 ? nikOrNoka : '3171012304850001'),
-          nama: patient?.nama || 'Peserta Terdaftar BPJS',
-          pisa: '1 (Peserta)',
-          sex: patient?.jenis_kelamin || 'L',
-          tglLahir: patient?.tanggal_lahir || '1985-04-23',
-          tglCetakKartu: '2019-01-01',
-          statusPeserta: {
-            kode: '0',
-            keterangan: 'AKTIF'
-          },
-          jenisPeserta: {
-            kode: '1',
-            keterangan: 'Pekerja Penerima Upah (PPU) / JKN'
-          },
-          hakKelas: {
-            kode: '1',
-            keterangan: 'Kelas 1'
-          },
-          provUmum: {
-            kdProvider: '0112U001',
-            nmProvider: 'Puskesmas Kecamatan Senen (FKTP)'
-          },
-          umur: {
-            umurSekarang: '39 tahun',
-            umurSaatPelayanan: '39 tahun'
-          },
-          dinsos: null,
-          prolanisPRB: patient?.riwayat_penyakit?.some(r => r.includes('Hipertensi') || r.includes('Diabetes')) ? 'PRB Aktif' : null
-        }
-      }
-    });
-  });
-
-  app.post('/api/v1/bpjs/vclaim/sep/generate', (req, res) => {
-    const { noKartu, poliTujuan, diagnosaAwal, noRujukan, faskesPerujuk } = req.body;
-
-    if (!noKartu) {
-      return res.status(400).json({
-        metaData: { code: '400', message: 'Nomor Kartu BPJS wajib diisi.' }
-      });
-    }
-
-    sepCounter += 1;
-    const dateFormatted = new Date().toISOString().slice(2, 6);
-    const noSep = `0301R001${dateFormatted}V${String(sepCounter).slice(-6)}`;
-
-    res.status(201).json({
-      metaData: {
-        code: '200',
-        message: 'Surat Eligibilitas Peserta (SEP) Berhasil Diterbitkan'
-      },
-      response: {
-        sep: {
-          noSep,
-          tglSep: new Date().toISOString().split('T')[0],
-          noKartu,
-          namaPeserta: req.body.namaPeserta || 'Peserta BPJS Terverifikasi',
-          jnsPelayanan: req.body.jnsPelayanan || 'Rawat Jalan',
-          poli: poliTujuan || 'Poli Penyakit Dalam',
-          diagnosa: diagnosaAwal || 'I10 - Essential (primary) hypertension',
-          noRujukan: noRujukan || '0112U0010326P000012',
-          faskesPerujuk: faskesPerujuk || 'Puskesmas Kecamatan Menteng',
-          catatan: 'SEP Elektronik Terverifikasi Sistem INA-CBGs',
-          penjamin: 'BPJS Kesehatan'
-        }
-      }
-    });
-  });
-
-  app.get('/api/v1/bpjs/vclaim/rujukan/:noRujukan', (req, res) => {
-    const { noRujukan } = req.params;
-    res.json({
-      metaData: { code: '200', message: 'Data Rujukan Ditemukan' },
-      response: {
-        rujukan: {
-          noRujukan,
-          tglKunjungan: new Date().toISOString().split('T')[0],
-          provKunjungan: { kdProvider: '0112U001', nmProvider: 'Puskesmas Kecamatan Senen' },
-          peserta: {
-            noKartu: '0001234567891',
-            nama: 'Ny. Siti Rahmawati',
-            statusPeserta: { keterangan: 'AKTIF' }
-          },
-          poliRujukan: { kode: 'INT', nama: 'Penyakit Dalam' },
-          diagnosa: { kode: 'I10', nama: 'Essential (primary) hypertension' },
-          keluhan: 'Tekanan darah tinggi refrakter kontrol rutin'
-        }
-      }
-    });
-  });
-
-  // 10. Kemenkes SatuSehat FHIR API Bridge
-  app.post('/api/v1/satusehat/encounter/sync', (req, res) => {
-    const { patientId, encounterType, practitionerNpi, periodStart } = req.body;
-
-    const fhirEncounterId = `urn:uuid:${Math.random().toString(36).substring(2, 10)}-${Math.random().toString(36).substring(2, 6)}-49e2-8ef1-satusehat${Date.now()}`;
-
-    res.json({
-      resourceType: 'Encounter',
-      id: fhirEncounterId,
-      status: 'finished',
-      class: {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
-        code: encounterType === 'inpatient' ? 'IMP' : encounterType === 'emergency' ? 'EMER' : 'AMB',
-        display: encounterType === 'inpatient' ? 'inpatient encounter' : encounterType === 'emergency' ? 'emergency' : 'ambulatory'
-      },
-      subject: {
-        reference: `Patient/${patientId || 'P-3171012304850001'}`,
-        display: 'Pasien Terdaftar SatuSehat'
-      },
-      participant: [
-        {
-          individual: {
-            reference: `Practitioner/${practitionerNpi || 'N20261109'}`,
-            display: 'DPJP Terakreditasi Kemenkes'
-          }
-        }
-      ],
-      period: {
-        start: periodStart || new Date().toISOString(),
-        end: new Date().toISOString()
-      },
-      serviceProvider: {
-        reference: 'Organization/10000004',
-        display: 'MYITARU SIMK'
-      },
-      syncMetadata: {
-        syncedAt: new Date().toISOString(),
-        kemenkesEndpoint: 'https://api-satusehat-stg.kemkes.go.id/fhir-r4/v1/Encounter',
-        status: 'SYNCED_SUCCESSFULLY'
-      }
     });
   });
 
@@ -1512,7 +1320,7 @@ export async function createApps(
   });
 
   app.post('/api/v1/dossier/documents', (req, res) => {
-    const { no_rm, pasien_nama, doc_type, title, data, created_by } = req.body;
+    const { no_rm, pasien_nama, doc_type, title, data } = req.body;
 
     if (!no_rm || !doc_type || !title) {
       return res.status(400).json({
@@ -1522,14 +1330,15 @@ export async function createApps(
     }
 
     const newDoc: DossierDocument = {
-      id: `doc-${Date.now()}`,
+      id: `doc-${randomUUID()}`,
       no_rm,
       pasien_nama: pasien_nama || 'Pasien',
       doc_type,
       title,
       created_at: new Date().toISOString(),
-      created_by: created_by || 'Tenaga Medis',
-      status: 'Terverifikasi',
+      created_by: (req as CoreAuthRequest).corePrincipal?.email || 'Tenaga Medis',
+      // Verifikasi dokter dilakukan terpisah; dokumen baru selalu draft.
+      status: 'Draft',
       data: data || {}
     };
 
@@ -1565,13 +1374,13 @@ export async function createApps(
   app.post('/api/v1/audit/logs', (req, res) => {
     const { action, module, details, status = 'SUCCESS' } = req.body;
     const entry: AuditLogEntry = {
-      id: `log-${Date.now()}`,
+      id: `log-${randomUUID()}`,
       timestamp: new Date().toISOString(),
-      user: req.body.user || 'Staf SIMK',
-      role: req.body.role || 'Tenaga Medis',
+      user: (req as CoreAuthRequest).corePrincipal?.email || 'Staf SIMK',
+      role: (req as CoreAuthRequest).corePrincipal?.roleId || 'Tenaga Medis',
       action: action || 'DATA_ACCESS',
       module: module || 'Umum',
-      ip: req.ip || '127.0.0.1',
+      ip: clientIp(req),
       status: status as any,
       details: details || 'Aktivitas terekam'
     };
@@ -2196,110 +2005,6 @@ Berdasarkan pencarian: **"${q}"** (Area sekitar koordinat ${userLat.toFixed(4)},
     }
   });
 
-  // ⭐ ENDPOINT: Transkripsi Suara via Gemini
-  app.post('/api/ai/transcribe', async (req, res) => {
-    try {
-      const { audioBase64, mimeType } = req.body;
-
-      if (!audioBase64) {
-        return res.status(400).json({ error: 'Audio data is required.' });
-      }
-
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error('GEMINI_API_KEY is not configured.');
-      }
-
-      const ai = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build'
-          }
-        }
-      });
-
-      const response = await ai.models.generateContent({
-        model: getGeminiModelFallbackChain()[0],
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: (mimeType || 'audio/webm').split(';')[0].replace('audio/mp4', 'audio/x-m4a'),
-                  data: audioBase64
-                }
-              },
-              {
-                text: 'Transcribe this audio recording into text. It is an Indonesian medical consultation or patient complaint. Return ONLY the exact transcribed text, nothing else, without extra formatting. If no speech is detected or it is purely noise, return exactly: TIDAK_ADA_SUARA'
-              }
-            ]
-          }
-        ]
-      });
-
-      if (!response.text) {
-        throw new Error('Failed to transcribe audio');
-      }
-
-      res.json({ transcript: response.text.trim() });
-    } catch (error: any) {
-      console.warn('Transcription Warning/Fallback triggered:', error?.message || error);
-      return res.json({ 
-        transcript: "Pasien mengeluhkan demam sejak 3 hari yang lalu disertai batuk kering, sakit kepala ringan, dan badan terasa lemas. Nafsu makan menurun, mual (-), muntah (-). Tekanan darah 120/80 mmHg, nadi 84x/menit, respirasi 18x/menit, suhu 37.8 C." 
-      });
-    }
-  });
-
-  // ⭐ ENDPOINT: AI Clinical Copilot & Conversational CDS
-  app.post('/api/ai/copilot', async (req, res) => {
-    try {
-      const { message, conversationHistory, context } = req.body;
-
-      if (!message) {
-        return res.status(400).json({ error: 'Message is required.' });
-      }
-
-      const historyFormatted = Array.isArray(conversationHistory)
-        ? conversationHistory.map((m: any) => `${m.role === 'ai' ? 'MYITARU AI' : 'Pengguna'}: ${m.content}`).join('\n')
-        : '';
-
-      const prompt = `
-Anda adalah MY ITARU AI, Asisten Kecerdasan Medis Klinis (Clinical Decision Support System) terintegrasi pada sistem MYITARU SIMK.
-Bantu dokter, perawat, atau staf klinik dengan jawaban klinis presisi, empati profesional, dan berbasis bukti medis dalam Bahasa Indonesia.
-
-${context ? `Konteks Klinis Saat Ini:\n${JSON.stringify(context, null, 2)}\n` : ''}
-${historyFormatted ? `Riwayat Percakapan Sebelumnya:\n${historyFormatted}\n` : ''}
-
-Pesan Pengguna:
-"${message}"
-
-Panduan:
-1. Berikan analisis klinis terstruktur (Kemungkinan Diagnosis/Differensial, Rekomendasi Pemeriksaan Penunjang, Terapi Sesuai Fornas/Panduan Medis Indonesia).
-2. Jika ditanyakan tentang obat, berikan dosis umum, peringatan kontraindikasi, dan potensi interaksi.
-3. Jika ditanyakan tentang administrasi/BPJS, berikan saran kode ICD-10 dan INA-CBGs yang tepat.
-4. Gunakan bullet points atau penomoran yang rapi agar cepat dibaca oleh tenaga medis.
-5. Sertakan selalu catatan bahwa saran ini adalah pendukung keputusan klinis (Clinical Decision Support) bagi tenaga kesehatan, bukan pengganti penilaian dokter DPJP.
-`;
-
-      const aiResult = await executeResilientGemini({ prompt });
-
-      if (aiResult?.text) {
-        return res.json({
-          reply: aiResult.text.trim(),
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      const fallback = generateClinicalCopilotReplyDeterministic(message, context);
-      return res.json(fallback);
-    } catch (error: any) {
-      console.warn('AI Copilot Warning/Fallback triggered:', error?.message || error);
-      const fallback = generateClinicalCopilotReplyDeterministic(req.body?.message || '', req.body?.context);
-      return res.json(fallback);
-    }
-  });
-
   // ⭐ ENDPOINT: AI BPJS Claim Pre-Check & Dispute Predictor
   app.post('/api/ai/bpjs-audit', async (req, res) => {
     try {
@@ -2522,65 +2227,6 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
     }
   });
 
-  // ⭐ ENDPOINT: AI Patient Clinical Summary & Discharge Resume
-  app.post('/api/ai/clinical-summary', async (req, res) => {
-    try {
-      const { patientName, noRm, diagnosis, vitalSigns, treatments, labs, stayDuration } = req.body;
-
-      const prompt = `
-Anda adalah AI Clinical Scribe dan Asisten DPJP MYITARU SIMK.
-Susun draf Resume Medis Pulang (Discharge Summary) resmi yang komprehensif dalam Bahasa Indonesia medis:
-
-Nama Pasien: ${patientName || 'Pasien Anonim'} (No. RM: ${noRm || '-'})
-Lama Rawat: ${stayDuration || '3 Hari'}
-Diagnosis Utama & Sekunder: ${JSON.stringify(diagnosis || 'Hipertensi Primer')}
-Tanda Vital Terakhir: ${JSON.stringify(vitalSigns || {})}
-Hasil Pemeriksaan Penunjang (Lab/Rad): ${JSON.stringify(labs || [])}
-Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
-`;
-
-      const aiResult = await executeResilientGemini({
-        prompt: prompt,
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            resumeTitle: { type: Type.STRING },
-            ringkasanPerjalananPenyakit: { type: Type.STRING },
-            pemeriksaanFisikDanPenunjangPenting: { type: Type.STRING },
-            diagnosisAkhir: {
-              type: Type.OBJECT,
-              properties: {
-                primer: { type: Type.STRING },
-                sekunder: { type: Type.ARRAY, items: { type: Type.STRING } }
-              },
-              required: ['primer', 'sekunder']
-            },
-            tindakanProsedurMedis: { type: Type.ARRAY, items: { type: Type.STRING } },
-            obatPulangDanEdukasi: { type: Type.ARRAY, items: { type: Type.STRING } },
-            kondisiSaatPulang: { type: Type.STRING },
-            anjuranKontrolUlang: { type: Type.STRING }
-          },
-          required: [
-            'resumeTitle', 'ringkasanPerjalananPenyakit', 'pemeriksaanFisikDanPenunjangPenting',
-            'diagnosisAkhir', 'tindakanProsedurMedis', 'obatPulangDanEdukasi', 'kondisiSaatPulang', 'anjuranKontrolUlang'
-          ]
-        }
-      });
-
-      if (aiResult?.text) {
-        const parsedSummary = parseSafeJson(aiResult.text);
-        if (parsedSummary) return res.json(parsedSummary);
-      }
-
-      const fallback = generateDischargeSummaryDeterministic({ patientName, noRm, diagnosis, vitalSigns, treatments, labs, stayDuration });
-      return res.json(fallback);
-    } catch (error: any) {
-      console.warn('AI Clinical Summary Warning/Fallback triggered:', error?.message || error);
-      const fallback = generateDischargeSummaryDeterministic(req.body);
-      return res.json(fallback);
-    }
-  });
-
   // Cloudflare Turnstile Verification API
   app.post('/api/cloudflare/verify-turnstile', async (req, res) => {
     const secret = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
@@ -2626,25 +2272,6 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
     }
   });
 
-  // Cloudflare Status & Edge Info
-  app.get('/api/cloudflare/status', (req, res) => {
-    const cfRay = req.headers['cf-ray'] || 'LOCAL-DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase();
-    const cfCountry = req.headers['cf-ipcountry'] || 'ID';
-    const cfIp = req.headers['cf-connecting-ip'] || req.ip || '127.0.0.1';
-
-    res.json({
-      status: 'ONLINE',
-      edge: 'Cloudflare Enterprise Network',
-      pop: 'CGK (Jakarta, Indonesia)',
-      rayId: cfRay,
-      country: cfCountry,
-      clientIp: cfIp,
-      ssl: req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'FULL_STRICT' : 'DEVELOPMENT',
-      turnstileEnabled: true,
-      timestamp: new Date().toISOString()
-    });
-  });
-
   // Register Public Hospital Portal & Patient Mobile App Routes (hanya di web publik)
   registerPatientPortalRoutes(publicApp, {
     patientsStore: patientsStore as any,
@@ -2655,7 +2282,7 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
     useDemoData: persistence.mode === 'memory',
     createAuditLog: (entry) => {
       auditLogsStore.unshift({
-        id: 'log-' + Date.now(),
+        id: `log-${randomUUID()}`,
         timestamp: new Date().toISOString(),
         ...entry
       });
@@ -2666,7 +2293,7 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
   registerEmployeePortalGateway(app, {
     createAuditLog: (entry) => {
       auditLogsStore.unshift({
-        id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 99),
+        id: `log-${randomUUID()}`,
         timestamp: new Date().toISOString(),
         user: entry.user_name || entry.user_id,
         role: entry.user_id,

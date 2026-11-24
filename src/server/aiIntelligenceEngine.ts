@@ -233,16 +233,27 @@ export function generateClinicalDecisionSupportDeterministic(input: {
   const { patient, vitals, symptoms, clinicalNotes } = input;
   const complaint = `${symptoms?.chiefComplaint || ''} ${symptoms?.additionalSymptoms || ''} ${clinicalNotes || ''}`.toLowerCase();
 
-  const systolic = Number(vitals?.systolic) || 120;
-  const diastolic = Number(vitals?.diastolic) || 80;
-  const hr = Number(vitals?.heartRate) || 80;
-  const temp = Number(vitals?.temperature) || 36.5;
-  const rr = Number(vitals?.respiratoryRate) || 18;
-  const spo2 = Number(vitals?.spO2) || 98;
+  // Vital kosong atau 0 bukan "normal": pakai nilai netral untuk hitungan, tapi catat sebagai data tidak lengkap.
+  const missingVitals: string[] = [];
+  const vital = (key: string, label: string, fallback: number): number => {
+    const n = Number(vitals?.[key]);
+    if (Number.isFinite(n) && n > 0) return n;
+    missingVitals.push(label);
+    return fallback;
+  };
+  const systolic = vital('systolic', 'Sistolik', 120);
+  const diastolic = vital('diastolic', 'Diastolik', 80);
+  const hr = vital('heartRate', 'Nadi', 80);
+  const temp = vital('temperature', 'Suhu', 36.5);
+  const rr = vital('respiratoryRate', 'Laju napas', 18);
+  const spo2 = vital('spO2', 'SpO2', 98);
   const pain = Number(vitals?.painScale) || 0;
 
   const flags: Array<{ parameter: string; value: string; severity: 'warning' | 'critical' | 'info'; message: string }> = [];
   let newsScore = 0;
+  if (missingVitals.length > 0) {
+    flags.push({ parameter: 'Kelengkapan Data', value: missingVitals.join(', '), severity: 'warning', message: 'Data vital tidak lengkap; skor belum bisa diandalkan.' });
+  }
 
   // Systolic BP
   if (systolic >= 180 || diastolic >= 120) {

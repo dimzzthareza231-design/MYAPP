@@ -14,7 +14,7 @@ const AUTH_PATHS = new Set([
 
 export async function checkAuthRateLimit(request: Request, limiter?: RateLimiterLike): Promise<Response | undefined> {
   if (!limiter || request.method !== 'POST') return undefined;
-  const path = new URL(request.url).pathname;
+  const path = new URL(request.url).pathname.toLowerCase().replace(/\/+$/, '');
   if (!AUTH_PATHS.has(path)) return undefined;
   const ip = request.headers.get('cf-connecting-ip') || 'unknown';
   try {
