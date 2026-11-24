@@ -214,7 +214,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
     if (usesServerPersistence) return [];
     const saved = storage.get('hospital_pasien', null);
     if (Array.isArray(saved) && saved.length > 0) return saved;
-    return PASIEN as any;
+    return import.meta.env.DEV ? (PASIEN as any) : [];
   });
 
   // 2. DOKTER STATE
@@ -433,7 +433,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
         });
         setPasien(list);
         storage.set('hospital_pasien', list);
-      } else if (!seededPasien) {
+      } else if (!seededPasien && import.meta.env.DEV) {
         // If Firestore is fresh/empty, automatically seed the 100+ master patients to Firestore
         seededPasien = true;
         batchSeedPasienCloud(PASIEN as any);

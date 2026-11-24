@@ -23,7 +23,7 @@ export function createSignedStore<T extends object>(prefix: string, tokenField: 
     if (!token.startsWith(prefix)) return undefined;
     const [body, sig] = token.slice(prefix.length).split('.');
     if (!body || !sig) return undefined;
-    const expected = sign(body);
+    const expected = sign(prefix + body);
     if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return undefined;
     try {
       const { exp, data } = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8'));
@@ -39,7 +39,7 @@ export function createSignedStore<T extends object>(prefix: string, tokenField: 
     issue(data: T): string {
       const payload = { ...data, [tokenField]: null };
       const body = Buffer.from(JSON.stringify({ exp: Date.now() + ttlMs, data: payload })).toString('base64url');
-      const token = `${prefix}${body}.${sign(body)}`;
+      const token = `${prefix}${body}.${sign(prefix + body)}`;
       (data as any)[tokenField] = token;
       if (cache.size > 5000) for (const key of cache.keys()) if (!verify(key)) cache.delete(key);
       cache.set(token, data);

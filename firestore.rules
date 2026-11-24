@@ -247,7 +247,7 @@ service cloud.firestore {
 
       allow update: if isValidId(userId) && isVerifiedUser() && isValidUser(incoming()) && (
         isSuperAdmin() ||
-        (isAdmin() && incoming().roleId == existing().roleId) ||
+        (isAdmin() && incoming().roleId == existing().roleId && existing().roleId != 'super_admin') ||
         (
           isOwner(userId) &&
           incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'photoURL', 'username', 'updatedAt']) &&
@@ -275,15 +275,15 @@ service cloud.firestore {
 
     // --- 4. DOKTER & PERAWAT MASTER DATA ---
     match /dokter/{dokterId} {
-      allow get: if isValidId(dokterId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.nama is string;
+      allow get: if isValidId(dokterId) && isClinicalOrAdmin();
+      allow list: if isClinicalOrAdmin() && resource.data.nama is string;
       allow create, update: if isValidId(dokterId) && isClinicalOrAdmin() && isValidDokter(incoming());
       allow delete: if isValidId(dokterId) && isAdmin();
     }
 
     match /perawat/{perawatId} {
-      allow get: if isValidId(perawatId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.nama is string;
+      allow get: if isValidId(perawatId) && isClinicalOrAdmin();
+      allow list: if isClinicalOrAdmin() && resource.data.nama is string;
       allow create, update: if isValidId(perawatId) && isClinicalOrAdmin() && isValidPerawat(incoming());
       allow delete: if isValidId(perawatId) && isAdmin();
     }

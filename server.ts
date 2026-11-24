@@ -715,6 +715,12 @@ export async function createApps(
       return res.status(500).json({ success: false, code: 'PATIENT_IDENTIFIER_INVALID' });
     }
 
+    // QR pasien berlaku 24 jam; buang QR kedaluwarsa agar store tidak tumbuh tanpa batas.
+    const now = Date.now();
+    for (let i = qrTokensStore.length - 1; i >= 0; i--) {
+      const exp = qrTokensStore[i].expiresAt;
+      if (exp && Date.parse(exp) <= now) qrTokensStore.splice(i, 1);
+    }
     const qrValue = createSecurePatientQrToken(patient.id);
     const tokenHash = hashQrToken(qrValue);
     qrTokensStore.unshift({
@@ -722,7 +728,8 @@ export async function createApps(
       tokenHash,
       subject: patient.id,
       kind: 'patient',
-      issuedAt: new Date().toISOString(),
+      issuedAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
       issuedBy: req.corePrincipal?.email || 'unknown'
     });
     auditQrAccess(req, 'PATIENT_QR_ISSUED', patient.id);
@@ -781,7 +788,7 @@ export async function createApps(
     if (!appointment || appointment.status === 'Dibatalkan') {
       return res.status(404).json({ success: false, code: 'RESERVATION_NOT_FOUND' });
     }
-    if (appointment.tanggal !== new Date().toISOString().slice(0, 10)) {
+    if (appointment.tanggal !== new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })) {
       return res.status(409).json({ success: false, code: 'CHECKIN_DATE_MISMATCH' });
     }
     if (appointment.checked_in_at) {

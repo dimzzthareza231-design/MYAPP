@@ -578,6 +578,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Revoke the server session before clearing the Firebase client session.
   const logout = async () => {
+    // Hapus salinan data pasien di browser agar tidak terbaca pengguna berikutnya di komputer yang sama.
+    try {
+      for (const key of Object.keys(localStorage)) {
+        if (/^(hospital_|simrs_|klinik_|bpjs_)/.test(key) && key !== 'simrs_theme') localStorage.removeItem(key);
+      }
+    } catch { /* storage tidak tersedia */ }
     if (currentUser) {
       logAuthAttempt({
         action: 'LOGOUT',

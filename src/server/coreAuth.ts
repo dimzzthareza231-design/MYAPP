@@ -411,12 +411,11 @@ export function assertProductionAuthConfiguration(authMode = getCoreAuthMode()):
   if (process.env.ALLOW_INSECURE_DEMO_AUTH === 'true') {
     throw new Error('ALLOW_INSECURE_DEMO_AUTH must not be enabled in production.');
   }
-  if (authMode === 'local') {
-    if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
-      throw new Error('SESSION_SECRET must contain at least 32 characters for production local authentication.');
-    }
-    return;
+  // Token sesi pasien dan tantangan MFA ditandatangani SESSION_SECRET di semua mode; tanpa itu tiap instance punya kunci acak sendiri.
+  if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
+    throw new Error('SESSION_SECRET must contain at least 32 characters in production.');
   }
+  if (authMode === 'local') return;
   if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON || !process.env.FIREBASE_PROJECT_ID) {
     throw new Error('Firebase Admin credentials are required before production can start.');
   }

@@ -1032,7 +1032,7 @@ export function registerPatientPortalRoutes(
       }
 
       const targetDate = tanggal;
-      if (targetDate < new Date().toISOString().slice(0, 10)) {
+      if (targetDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })) {
         return res.status(400).json({ success: false, message: 'Tanggal kunjungan tidak boleh berada di masa lalu.' });
       }
       const targetDateEnd = Date.parse(`${targetDate}T23:59:59.999Z`);

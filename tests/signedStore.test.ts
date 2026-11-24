@@ -29,3 +29,12 @@ describe('clientIp', () => {
     assert.equal(clientIp(req), '127.0.0.1');
   });
 });
+
+describe('signedStore prefix', () => {
+  test('token tidak bisa dipindah ke store dengan prefix lain', () => {
+    const a = createSignedStore<{ token: string | null }>('a_', 'token', 60000);
+    const b = createSignedStore<{ token: string | null }>('b_', 'token', 60000);
+    const token = a.issue({ token: null });
+    assert.equal(b.get('b_' + token.slice(2)), undefined);
+  });
+});

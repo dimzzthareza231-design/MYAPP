@@ -124,6 +124,7 @@ export class LocalAuthService implements LocalAuthProvider {
   private readonly sessionTtlMs: number;
   private readonly bootstrapUsers: LocalAuthBootstrapUser[];
   private dummySalt = '';
+  private failedLogins = new Map<string, { fails: number; until: number }>();
   private dummyHash: Uint8Array = new Uint8Array(SCRYPT_KEY_LENGTH);
 
   constructor(
@@ -227,6 +228,9 @@ export class LocalAuthService implements LocalAuthProvider {
     }
 
     const normalizedIdentifier = identifier.trim().toLowerCase();
+    // shortcut: kunci per akun disimpan di memori isolate ini; batas lintas isolate dipegang rate limit Cloudflare.
+    const lock = this.failedLogins.get(normalizedIdentifier);
+    if (lock && lock.until > Date.now()) return null;
     const users = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
     const user = users
       .map(({ data }) => data)
@@ -241,7 +245,14 @@ export class LocalAuthService implements LocalAuthProvider {
     const actualHash = await derivePassword(password, salt);
     const passwordMatches = expectedHash.length === actualHash.length && timingSafeEqual(expectedHash, actualHash);
 
-    if (!user || !user.aktif || !passwordMatches) return null;
+    if (!user || !user.aktif || !passwordMatches) {
+      const entry = this.failedLogins.get(normalizedIdentifier);
+      const fails = (entry && entry.until === 0 ? entry.fails : 0) + 1;
+      this.failedLogins.set(normalizedIdentifier, { fails, until: fails >= 5 ? Date.now() + 15 * 60 * 1000 : 0 });
+      if (this.failedLogins.size > 5000) this.failedLogins.clear();
+      return null;
+    }
+    this.failedLogins.delete(normalizedIdentifier);
 
     const token = randomBytes(32).toString('base64url');
     const sessionId = this.sessionId(token);

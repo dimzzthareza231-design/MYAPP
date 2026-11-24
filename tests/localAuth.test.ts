@@ -141,3 +141,10 @@ describe('akun bawaan per role', () => {
     });
   });
 });
+
+describe('lockout per akun', () => {
+  test('5 password salah mengunci akun, password benar pun ditolak', async () => {
+    for (let i = 0; i < 5; i++) assert.equal(await localAuth.login('admin', 'salah-' + i), null);
+    assert.equal(await localAuth.login('admin', 'LocalTestPassword!2026'), null);
+  });
+});

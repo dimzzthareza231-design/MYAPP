@@ -285,16 +285,7 @@ export const hasModuleAccess = (roleId: string, moduleId: string): boolean => {
   if (roleId === 'super_admin') return true;
   if (COMMON_MODULES.includes(moduleId)) return true;
 
-  const custom = getCustomPermissions();
-  if (custom[roleId] && Array.isArray(custom[roleId])) {
-    const list = custom[roleId];
-    if (list.includes(moduleId)) return true;
-    for (const [canonical, aliases] of Object.entries(MODULE_ALIASES)) {
-      if (canonical === moduleId && aliases.some(a => list.includes(a))) return true;
-      if (aliases.includes(moduleId) && (list.includes(canonical) || aliases.some(a => list.includes(a)))) return true;
-    }
-  }
-
+  // Akses hanya dari ROLES (sama dengan server); override localStorage bisa dipalsukan pengguna.
   const role = getRoleById(roleId);
   if (!role) return false;
   if (role.moduleAccess.includes(moduleId)) return true;
