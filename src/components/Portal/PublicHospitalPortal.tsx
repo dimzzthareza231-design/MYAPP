@@ -1806,7 +1806,7 @@ export const PublicHospitalPortal: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-              {(expanded.unggulan ? CENTERS_OF_EXCELLENCE : CENTERS_OF_EXCELLENCE.slice(0, 6)).map((center, idx) => (
+              {(expanded.unggulan ? CENTERS_OF_EXCELLENCE : CENTERS_OF_EXCELLENCE.slice(0, 4)).map((center, idx) => (
                 <motion.div
                   key={center.id}
                   initial={{ opacity: 0, y: 20 }}
@@ -1850,7 +1850,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 </motion.div>
               ))}
             </div>
-            {CENTERS_OF_EXCELLENCE.length > 6 && (
+            {CENTERS_OF_EXCELLENCE.length > 4 && (
               <div className="flex justify-center mt-8">
                 <button
                   type="button"
