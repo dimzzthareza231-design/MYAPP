@@ -763,7 +763,7 @@ export const PublicHospitalPortal: React.FC = () => {
 
         {/* Section 1: Multi-Slide Hospital Hero Showcase + Floating Quick Search & Queue Dock */}
         <section className="relative overflow-hidden bg-[#061A3D]">
-          <div className="relative min-h-[500px] lg:min-h-[570px] flex items-center overflow-hidden">
+          <div className="relative min-h-[420px] sm:min-h-[500px] lg:min-h-[570px] flex items-center overflow-hidden">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentSlide.id}
@@ -782,8 +782,8 @@ export const PublicHospitalPortal: React.FC = () => {
               </motion.div>
             </AnimatePresence>
 
-            <div className="relative z-10 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-14 sm:py-16 pb-28 sm:pb-32">
-              <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8">
+            <div className="relative z-10 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-8 sm:pt-16 pb-24 sm:pb-32">
+              <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 sm:gap-8">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={currentSlide.id}
@@ -791,13 +791,13 @@ export const PublicHospitalPortal: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -12 }}
                     transition={{ duration: 0.45, ease: EASE_OUT_EXPO }}
-                    className="max-w-2xl space-y-5"
+                    className="max-w-2xl lg:flex-1 space-y-4 sm:space-y-5"
                   >
                     <p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-300">
                       {currentSlide.eyebrow}
                     </p>
 
-                    <h1 className="text-3xl sm:text-5xl font-extrabold text-white leading-[1.12] tracking-tight text-balance">
+                    <h1 className="text-[1.75rem] sm:text-5xl font-extrabold text-white leading-[1.12] tracking-tight text-balance">
                       {currentSlide.titlePrefix}{' '}
                       <span className="relative inline-block text-sky-200">
                         {currentSlide.titleHighlight}
@@ -808,11 +808,11 @@ export const PublicHospitalPortal: React.FC = () => {
                       </span>
                     </h1>
 
-                    <p className="text-base sm:text-lg text-slate-100 leading-relaxed max-w-xl">
+                    <p className="text-[15px] sm:text-lg text-slate-100 leading-relaxed max-w-xl">
                       {currentSlide.description}
                     </p>
 
-                    <div className="flex flex-wrap items-center gap-3 pt-2">
+                    <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3 pt-1 sm:pt-2">
                       <motion.button
                         type="button"
                         whileHover={{ y: -2 }}
@@ -824,9 +824,9 @@ export const PublicHospitalPortal: React.FC = () => {
                             scrollToWorkspace(currentSlide.primaryActionMode, currentSlide.primaryAnchor);
                           }
                         }}
-                        className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-100 text-[#0B3D91] font-bold px-6 py-3.5 rounded-xl shadow-lg transition cursor-pointer min-h-[48px] text-sm sm:text-base whitespace-nowrap shrink-0"
+                        className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-100 text-[#0B3D91] font-bold px-3 sm:px-6 py-3 sm:py-3.5 rounded-2xl shadow-lg transition cursor-pointer min-h-[48px] text-sm sm:text-base leading-tight text-center sm:whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
                       >
-                        <CalendarCheck className="w-5 h-5 shrink-0" />
+                        <CalendarCheck className="hidden sm:block w-5 h-5 shrink-0" />
                         <span>{currentSlide.primaryActionLabel}</span>
                       </motion.button>
 
@@ -835,9 +835,9 @@ export const PublicHospitalPortal: React.FC = () => {
                         whileHover={{ y: -2 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={() => scrollToWorkspace('antrean', 'portal-workspace')}
-                        className="inline-flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 border border-white/35 text-white font-semibold px-6 py-3.5 rounded-xl backdrop-blur-xs transition cursor-pointer min-h-[48px] text-sm sm:text-base whitespace-nowrap shrink-0"
+                        className="inline-flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 border border-white/35 text-white font-semibold px-3 sm:px-6 py-3 sm:py-3.5 rounded-2xl backdrop-blur-xs transition cursor-pointer min-h-[48px] text-sm sm:text-base leading-tight text-center sm:whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
                       >
-                        <Ticket className="w-5 h-5 shrink-0" />
+                        <Ticket className="hidden sm:block w-5 h-5 shrink-0" />
                         <span>Cek Nomor Antrean</span>
                       </motion.button>
                     </div>
@@ -845,15 +845,15 @@ export const PublicHospitalPortal: React.FC = () => {
                 </AnimatePresence>
 
                 {/* Hero Carousel Controls & Slide Selector */}
-                <div className="flex flex-col items-start lg:items-end gap-3 shrink-0">
-                  <div className="flex items-center gap-2">
+                <div className="flex sm:flex-col items-center sm:items-start lg:items-end gap-2 sm:gap-3 min-w-0 lg:max-w-md">
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() =>
                         setActiveSlideIdx((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length)
                       }
                       aria-label="Slide sebelumnya"
-                      className="w-10 h-10 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white flex items-center justify-center transition cursor-pointer"
+                      className="w-11 h-11 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/25 text-white flex items-center justify-center transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
                     >
                       <ChevronLeft className="w-5 h-5" />
                     </button>
@@ -861,22 +861,24 @@ export const PublicHospitalPortal: React.FC = () => {
                       type="button"
                       onClick={() => setActiveSlideIdx((prev) => (prev + 1) % HERO_SLIDES.length)}
                       aria-label="Slide berikutnya"
-                      className="w-10 h-10 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white flex items-center justify-center transition cursor-pointer"
+                      className="w-11 h-11 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/25 text-white flex items-center justify-center transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
                     >
                       <ChevronRight className="w-5 h-5" />
                     </button>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-nowrap sm:flex-wrap lg:justify-end gap-2 min-w-0 overflow-x-auto sm:overflow-visible -mr-4 pr-4 sm:mr-0 sm:pr-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {HERO_SLIDES.map((slide, idx) => (
                       <button
                         key={slide.id}
                         type="button"
                         onClick={() => setActiveSlideIdx(idx)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 ${
+                        aria-label={`Tampilkan slide ${slide.tabLabel}`}
+                        aria-current={idx === activeSlideIdx ? 'true' : undefined}
+                        className={`px-3.5 min-h-11 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91] ${
                           idx === activeSlideIdx
                             ? 'bg-white text-[#0B3D91] shadow-xs'
-                            : 'bg-white/10 text-blue-100 hover:bg-white/20 border border-white/20'
+                            : 'bg-[#061A3D]/50 text-white hover:bg-[#061A3D]/70 border border-white/25 backdrop-blur-xs'
                         }`}
                       >
                         {slide.tabLabel}
@@ -893,7 +895,7 @@ export const PublicHospitalPortal: React.FC = () => {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.65, delay: 0.25, ease: EASE_OUT_EXPO }}
-            className="relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-16 pb-10"
+            className="relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-16 pb-8 sm:pb-10"
           >
             <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-4 sm:p-6">
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
