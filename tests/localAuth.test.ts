@@ -145,6 +145,20 @@ describe('akun bawaan per role', () => {
       assert.equal((await service.login('lab', 'Uji-LAB-Sandi-2026'))?.principal.roleId, 'laboran');
     });
   });
+
+  test('sandi pendek hanya ditolak bila akunnya perlu dibuat', async () => {
+    const store = new MemoryPersistenceRepository();
+    await withEnv({ ...passwords, NODE_ENV: 'production' }, async () => {
+      await new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) }).initialize();
+    });
+    await withEnv({ ...passwords, NODE_ENV: 'production', LOCAL_AUTH_KASIR_PASSWORD: 'pendek' }, async () => {
+      await new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) }).initialize();
+      await assert.rejects(
+        new LocalAuthService(new MemoryPersistenceRepository(), { sessionSecret: 'x'.repeat(32) }).initialize(),
+        /LOCAL_AUTH_KASIR_PASSWORD/
+      );
+    });
+  });
 });
 
 describe('lockout per akun', () => {

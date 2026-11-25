@@ -59,6 +59,7 @@ interface LocalAuthBootstrapUser {
   nama: string;
   roleId: string;
   password: string;
+  passwordEnv?: string;
 }
 
 interface LocalAuthOptions {
@@ -112,11 +113,8 @@ function isValidPasswordHash(value: string): boolean {
 function getBootstrapUsers(): LocalAuthBootstrapUser[] {
   return ROLE_SEEDS.flatMap(({ username, email, nama, roleId, passwordEnv }) => {
     const password = process.env[passwordEnv];
-    if (!password) return [];
-    if (password.length < 12 || password.length > 128) {
-      throw new Error(`${passwordEnv} must contain between 12 and 128 characters.`);
-    }
-    return [{ username, email, nama, roleId, password }];
+    // Panjang dicek di initialize(), hanya saat akun benar-benar dibuat; akun yang sudah ada tidak memakai secret ini.
+    return password ? [{ username, email, nama, roleId, password, passwordEnv }] : [];
   });
 }
 
@@ -161,9 +159,6 @@ export class LocalAuthService implements LocalAuthProvider {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         throw new Error(`Invalid local staff email for role ${account.roleId}.`);
       }
-      if (account.password.length < 12 || account.password.length > 128) {
-        throw new Error(`Local staff passwords must contain between 12 and 128 characters.`);
-      }
       if (seenUsernames.has(normalizedUsername) || seenEmails.has(email)) {
         throw new Error('Local staff bootstrap usernames and emails must be unique.');
       }
@@ -180,6 +175,9 @@ export class LocalAuthService implements LocalAuthProvider {
           throw new Error(`Existing local staff account ${username} conflicts with its configured role.`);
         }
         continue;
+      }
+      if (account.password.length < 12 || account.password.length > 128) {
+        throw new Error(`${account.passwordEnv || 'Local staff password'} must contain between 12 and 128 characters.`);
       }
 
       const salt = randomBytes(16).toString('hex');
