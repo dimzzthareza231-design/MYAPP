@@ -61,7 +61,7 @@ export class FirestoreRestAdapter implements PersistenceRepository {
       body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${head}.${body}.${b64url(sig)}` })
     });
     const json = await res.json() as { access_token?: string; expires_in?: number };
-    if (!json.access_token) throw new Error('Gagal mengambil token Google untuk Firestore.');
+    if (!json.access_token) throw new Error('Gagal mengambil token Google untuk Firestore: ' + JSON.stringify(json).slice(0, 200));
     this.token = { value: json.access_token, exp: now + (json.expires_in ?? 3600) };
     return this.token.value;
   }
