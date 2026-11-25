@@ -38,7 +38,7 @@ export class FirestoreRestAdapter implements PersistenceRepository {
   private readonly sa: ServiceAccount;
   private readonly base: string;
 
-  constructor(serviceAccountJson: string, databaseId = '(default)', private readonly fetcher: typeof fetch = fetch) {
+  constructor(serviceAccountJson: string, databaseId = '(default)', private readonly fetcher: typeof fetch = (...args) => fetch(...args)) {
     this.sa = JSON.parse(serviceAccountJson) as ServiceAccount;
     if (!this.sa.client_email || !this.sa.private_key || !this.sa.project_id) throw new Error('Service account Firestore tidak valid.');
     this.base = `projects/${this.sa.project_id}/databases/${databaseId}/documents`;

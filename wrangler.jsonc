@@ -23,7 +23,8 @@
         "CLOUDFLARE_WORKER": "1",
         "NODE_ENV": "production",
         "AUTH_MODE": "local",
-        "STORAGE_MODE": "d1"
+        "STORAGE_MODE": "firestore",
+        "FIRESTORE_DATABASE_ID": "(default)"
       },
       "assets": {
         "directory": "./dist/public",
@@ -46,7 +47,8 @@
         "CLOUDFLARE_WORKER": "1",
         "NODE_ENV": "production",
         "AUTH_MODE": "local",
-        "STORAGE_MODE": "d1"
+        "STORAGE_MODE": "firestore",
+        "FIRESTORE_DATABASE_ID": "(default)"
       },
       "assets": {
         "directory": "./dist/core",
