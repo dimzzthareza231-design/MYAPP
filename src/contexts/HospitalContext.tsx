@@ -6,6 +6,7 @@ import { PASIEN, MASTER_POLIKLINIK, SEMUA_DOKTER, SEMUA_PERAWAT } from "../data/
 import { Pasien, Kunjungan, MasterDokter, MasterPoli, MasterPenjamin, MasterPerawat, BantuanArtikel, User } from '../types';
 import { HospitalInfo, DEFAULT_HOSPITAL_INFO } from '../types/document';
 import { storage } from '../utils/storage';
+import { useAuth } from './AuthContext';
 import { 
   CloudStatus, 
   subscribeCloudStatus, 
@@ -286,6 +287,8 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('simrs-interline-sync', handleInterlineSync);
   }, []);
 
+  // Data server hanya diambil setelah staf login; sebelum itu API pasti menjawab 401.
+  const sessionUserId = useAuth().currentUser?.id;
   // Track Firebase Auth UID so Firestore listeners only attach when authenticated
   const [firebaseUid, setFirebaseUid] = useState<string | null>(() => auth?.currentUser?.uid || null);
 
@@ -300,6 +303,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
   // Real-time Firestore listeners for core hospital collections (authenticated Firebase sessions only)
   useEffect(() => {
     if (usesServerPersistence) {
+      if (!sessionUserId) return;
       let active = true;
       const refreshFromServer = async () => {
         try {
@@ -526,7 +530,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
       unsubPerawat();
       unsubSettings();
     };
-  }, [firebaseUid]);
+  }, [firebaseUid, sessionUserId]);
 
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 
