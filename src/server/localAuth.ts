@@ -48,6 +48,7 @@ export interface LocalAuthSession {
 export interface LocalAuthProvider {
   initialize(): Promise<void>;
   login(identifier: string, password: string): Promise<LocalAuthLoginResult | null>;
+  loginWithEmail?(email: string): Promise<LocalAuthLoginResult | null>;
   resolveSession(token: string): Promise<LocalAuthSession | null>;
   logout(token: string): Promise<void>;
 }
@@ -253,7 +254,18 @@ export class LocalAuthService implements LocalAuthProvider {
       return null;
     }
     this.failedLogins.delete(normalizedIdentifier);
+    return this.createSession(user);
+  }
 
+  /** Login Google: hanya untuk akun staf aktif yang sudah ada; email wajib sudah diverifikasi Google. */
+  async loginWithEmail(email: string): Promise<LocalAuthLoginResult | null> {
+    const wanted = email.trim().toLowerCase();
+    const users = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
+    const user = users.map(({ data }) => data).find((record) => record.aktif && record.email.toLowerCase() === wanted);
+    return user ? this.createSession(user) : null;
+  }
+
+  private async createSession(user: LocalStaffUserRecord): Promise<LocalAuthLoginResult> {
     const token = randomBytes(32).toString('base64url');
     const sessionId = this.sessionId(token);
     const now = Date.now();

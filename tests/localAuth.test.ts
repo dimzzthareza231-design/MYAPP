@@ -110,6 +110,11 @@ describe('autentikasi staf lokal', () => {
     await restartedService.initialize();
     assert.equal((await restartedService.resolveSession(session.token))?.principal.roleId, 'admin');
   });
+
+  test('loginWithEmail hanya untuk email staf aktif yang terdaftar', async () => {
+    assert.equal(await localAuth.loginWithEmail('orang-asing@gmail.com'), null);
+    assert.equal((await localAuth.loginWithEmail('ADMIN@myitaru.local'))?.principal.roleId, 'admin');
+  });
 });
 
 describe('akun bawaan per role', () => {

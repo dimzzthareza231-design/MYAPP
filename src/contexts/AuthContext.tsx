@@ -304,7 +304,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Google Sign-In with Firebase Auth persistence
   const signInWithGoogle = async (): Promise<{ success: boolean; message: string; isCancelled?: boolean }> => {
     if (isLocalAuthMode) {
-      return { success: false, message: 'Login Google tidak tersedia dalam mode autentikasi lokal.' };
+      window.location.assign('/api/auth/google');
+      return { success: false, isCancelled: true, message: 'Mengalihkan ke Google...' };
     }
     if (!isFirebaseConfigured) {
       return { success: false, message: 'Firebase belum dikonfigurasi. Silakan tambahkan konfigurasi Firebase Anda.' };

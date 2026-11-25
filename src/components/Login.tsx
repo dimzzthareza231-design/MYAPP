@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
@@ -144,6 +144,13 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    const g = new URLSearchParams(window.location.search).get('google');
+    if (!g) return;
+    toast.error(g === 'tidak-terdaftar' ? 'Email Google belum terdaftar sebagai staf.' : 'Login Google gagal atau belum diaktifkan.');
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
 
   const handleGoogleSignIn = async () => {
     setErrorMessage('');

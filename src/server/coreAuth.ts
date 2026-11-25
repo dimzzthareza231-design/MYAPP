@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type express from 'express';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -7,6 +8,7 @@ import { getDocumentQrScope, readSecurePatientQrToken } from './securePatientQr'
 
 const SESSION_COOKIE = 'myitaru_core_session';
 const LOCAL_SESSION_COOKIE = 'myitaru_local_session';
+const GOOGLE_STATE_COOKIE = 'myitaru_google_state';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 export type CoreAuthMode = 'firebase' | 'local';
@@ -35,6 +37,11 @@ export interface CoreAuthOptions {
   revokeRefreshTokens?: (uid: string) => Promise<void>;
   localAuth?: {
     initialize(): Promise<void>;
+    loginWithEmail?(email: string): Promise<{
+      token: string;
+      user: { id: string; username: string; email: string; nama: string; roleId: string; aktif: true; dibuatPada: string };
+      principal: CorePrincipal;
+    } | null>;
     login(identifier: string, password: string): Promise<{
       token: string;
       user: {
@@ -267,6 +274,50 @@ export function registerCoreAuthentication(
       }
     });
 
+
+    // Login Google (OAuth code flow). Client ID/secret dari env GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET; tanpa itu rute mati.
+    const googleOn = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && localAuth!.loginWithEmail);
+    const googleRedirect = (req: express.Request) => `https://${req.get('host')}/api/auth/google/callback`;
+    app.get('/api/auth/google', (req, res) => {
+      if (!googleOn) return res.redirect('/?google=off');
+      const state = randomBytes(24).toString('base64url');
+      // Lax: cookie state harus ikut saat Google mengarahkan balik (navigasi lintas situs).
+      const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+      res.setHeader('Set-Cookie', `${GOOGLE_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/api/auth/google; Max-Age=600${secure}`);
+      const q = new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID!, redirect_uri: googleRedirect(req), response_type: 'code',
+        scope: 'openid email', state, prompt: 'select_account',
+      });
+      return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${q}`);
+    });
+    app.get('/api/auth/google/callback', async (req, res, next) => {
+      try {
+        const state = getCookie(req, GOOGLE_STATE_COOKIE);
+        if (!googleOn || !state || state !== req.query.state || typeof req.query.code !== 'string') {
+          return res.redirect('/?google=gagal');
+        }
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          body: new URLSearchParams({
+            code: req.query.code, client_id: process.env.GOOGLE_CLIENT_ID!, client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+            redirect_uri: googleRedirect(req), grant_type: 'authorization_code',
+          }),
+        });
+        const { id_token } = (await tokenRes.json()) as { id_token?: string };
+        // id_token diterima langsung dari Google lewat TLS dengan client secret, jadi payload boleh dipercaya (tanpa cek tanda tangan).
+        const claims = id_token ? JSON.parse(Buffer.from(id_token.split('.')[1], 'base64url').toString()) : null;
+        if (!claims || claims.aud !== process.env.GOOGLE_CLIENT_ID || claims.email_verified !== true || typeof claims.email !== 'string') {
+          return res.redirect('/?google=gagal');
+        }
+        const result = await localAuth!.loginWithEmail!(claims.email);
+        if (!result) return res.redirect('/?google=tidak-terdaftar');
+        setSessionCookie(res, result.token, SESSION_TTL_MS / 1000, LOCAL_SESSION_COOKIE);
+        return res.redirect('/');
+      } catch (error) {
+        return next(error);
+      }
+    });
+
     app.get('/api/auth/me', async (req, res, next) => {
       const token = getCookie(req, LOCAL_SESSION_COOKIE);
       if (!token) return res.status(401).json({ success: false, code: 'UNAUTHENTICATED' });
@@ -354,7 +405,7 @@ export function registerCoreAuthentication(
   app.use('/api', async (req: CoreAuthRequest, res, next) => {
     const apiPath = `${req.baseUrl}${req.path}`;
     const publicAuthEndpoint = authMode === 'local'
-      ? ['/api/auth/login', '/api/auth/me', '/api/auth/logout'].includes(apiPath)
+      ? ['/api/auth/login', '/api/auth/me', '/api/auth/logout', '/api/auth/google', '/api/auth/google/callback'].includes(apiPath)
       : apiPath === '/api/auth/session';
     if (publicAuthEndpoint || apiPath === '/api/v1/health') return next();
 
