@@ -543,7 +543,7 @@ export function ActivityLogsTab() {
           <div className="flex items-center gap-2">
             <Server className="w-3.5 h-3.5 text-emerald-500" />
             <span>
-              Firestore Backend: <strong className="text-slate-700 dark:text-slate-300">collective-district-db34d</strong> (Project ID)
+              Firestore Backend: <strong className="text-slate-700 dark:text-slate-300">myitaru</strong> (Project ID)
             </span>
           </div>
           <span className="font-mono text-[11px] text-slate-400">
