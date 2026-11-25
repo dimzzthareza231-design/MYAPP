@@ -3,7 +3,7 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore, type DocumentData, type Firestore } from 'firebase-admin/firestore';
 import { createPool, type Pool, type PoolConnection } from 'mysql2/promise';
 
-export const STORAGE_MODES = ['mysql', 'firebase', 'hybrid', 'memory', 'd1'] as const;
+export const STORAGE_MODES = ['mysql', 'firebase', 'hybrid', 'memory', 'd1', 'firestore'] as const;
 export type StorageMode = typeof STORAGE_MODES[number];
 
 export const PERSISTENCE_ENTITIES = [
@@ -43,7 +43,7 @@ const MYSQL_TABLES: Record<PersistenceEntity, string> = {
   local_auth_sessions: 'local_auth_sessions'
 };
 
-const FIRESTORE_COLLECTIONS: Record<PersistenceEntity, string> = {
+export const FIRESTORE_COLLECTIONS: Record<PersistenceEntity, string> = {
   patients: 'pasien',
   registrations: 'kunjungan',
   queues: 'antrean',
@@ -113,13 +113,13 @@ export function getStorageMode(value = process.env.STORAGE_MODE): StorageMode {
   throw new Error(`STORAGE_MODE must be one of: ${STORAGE_MODES.join(', ')}.`);
 }
 
-function assertEntity(entity: string): asserts entity is PersistenceEntity {
+export function assertEntity(entity: string): asserts entity is PersistenceEntity {
   if (!(PERSISTENCE_ENTITIES as readonly string[]).includes(entity)) {
     throw new Error(`Unsupported persistence entity: ${entity}.`);
   }
 }
 
-function assertRecordId(id: string): void {
+export function assertRecordId(id: string): void {
   if (!id.trim() || id.length > 128) {
     throw new Error('Persistence record id must contain 1 to 128 characters.');
   }
@@ -142,7 +142,7 @@ function errorText(error: unknown): string {
 
 function persistentReady(mode: StorageMode, mysqlConnected: boolean, firebaseConnected: boolean): boolean {
   if (mode === 'mysql') return mysqlConnected;
-  if (mode === 'firebase') return firebaseConnected;
+  if (mode === 'firebase' || mode === 'firestore') return firebaseConnected;
   if (mode === 'hybrid') return mysqlConnected;
   return false;
 }
@@ -828,6 +828,8 @@ export interface PersistenceFactoryOptions {
   mysql?: PrimaryPersistenceRepository;
   firebase?: CloudPersistenceRepository;
   d1?: D1DatabaseLike;
+  /** Firestore lewat REST (untuk Workers); wajib bila mode 'firestore'. */
+  firestore?: PersistenceRepository;
 }
 
 export async function createPersistenceRepository(
@@ -842,6 +844,11 @@ export async function createPersistenceRepository(
   if (mode === 'd1') {
     if (!options.d1) throw new Error('STORAGE_MODE=d1 requires a D1 binding (runs only on Cloudflare Workers).');
     return new D1Adapter(options.d1);
+  }
+
+  if (mode === 'firestore') {
+    if (!options.firestore) throw new Error('STORAGE_MODE=firestore requires a Firestore REST adapter (Cloudflare Workers).');
+    return options.firestore;
   }
 
   if (mode === 'mysql') {

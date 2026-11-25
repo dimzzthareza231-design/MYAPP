@@ -5,13 +5,18 @@ import { env } from 'cloudflare:workers';
 import { handleAsNodeRequest } from 'cloudflare:node';
 import { createApps, addErrorHandler } from '../server';
 import type { D1DatabaseLike } from '../src/server/databaseAdapter';
+import { FirestoreRestAdapter } from '../src/server/firestoreRest';
 import { checkAuthRateLimit, type RateLimiterLike } from './authRateLimit';
 
 const PORT = 8080;
 let ready: Promise<void> | undefined;
 
 async function start(): Promise<void> {
-  const { app, publicApp } = await createApps({}, { mode: 'd1', d1: env.DB as D1DatabaseLike });
+  // STORAGE_MODE=firestore (var) memindahkan semua data ke Firestore; selain itu tetap D1.
+  const persistence = process.env.STORAGE_MODE === 'firestore'
+    ? { mode: 'firestore' as const, firestore: new FirestoreRestAdapter(process.env.FIRESTORE_SERVICE_ACCOUNT_JSON ?? '', process.env.FIRESTORE_DATABASE_ID) }
+    : { mode: 'd1' as const, d1: env.DB as D1DatabaseLike };
+  const { app, publicApp } = await createApps({}, persistence);
   const target = process.env.APP_TARGET === 'public' ? publicApp : app;
   addErrorHandler(target);
   await new Promise<void>((resolve) => http.createServer(target).listen(PORT, resolve));
