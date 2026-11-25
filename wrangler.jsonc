@@ -1,5 +1,5 @@
 // Dua Worker dari satu kode: `--env public` (web publik pasien) dan `--env core` (aplikasi inti SIMK/RME).
-// Keduanya berbagi satu database: Firestore project myitaru (secret FIRESTORE_SERVICE_ACCOUNT_JSON). D1 tetap terikat sebagai cadangan. Secret diisi dengan `wrangler secret put <NAMA> --env <public|core>`.
+// Keduanya berbagi satu database D1. Secret diisi dengan `wrangler secret put <NAMA> --env <public|core>`.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "myitaru",
@@ -23,8 +23,7 @@
         "CLOUDFLARE_WORKER": "1",
         "NODE_ENV": "production",
         "AUTH_MODE": "local",
-        "STORAGE_MODE": "firestore",
-        "FIRESTORE_DATABASE_ID": "(default)"
+        "STORAGE_MODE": "d1"
       },
       "assets": {
         "directory": "./dist/public",
@@ -47,8 +46,7 @@
         "CLOUDFLARE_WORKER": "1",
         "NODE_ENV": "production",
         "AUTH_MODE": "local",
-        "STORAGE_MODE": "firestore",
-        "FIRESTORE_DATABASE_ID": "(default)"
+        "STORAGE_MODE": "d1"
       },
       "assets": {
         "directory": "./dist/core",
