@@ -33,6 +33,7 @@ export interface LocalAuthPublicUser {
   roleId: string;
   aktif: true;
   dibuatPada: string;
+  /** true jika pengguna masih menggunakan sandi bawaan dan wajib menggantinya. */
   mustChangePassword?: boolean;
 }
 
@@ -107,7 +108,13 @@ function accountId(username: string): string {
     .digest('hex');
 }
 
+/**
+ * Konversi record internal ke bentuk publik yang aman dikirim ke client.
+ * mustChangePassword = true jika passwordSeed masih bernilai PASSWORD_SEED
+ * (artinya pengguna belum pernah mengganti sandi dari nilai bawaan).
+ */
 function asPublicUser(user: LocalStaffUserRecord): LocalAuthPublicUser {
+  const mustChangePassword = user.passwordSeed === PASSWORD_SEED || undefined;
   return {
     id: user.id,
     username: user.username,
@@ -116,7 +123,7 @@ function asPublicUser(user: LocalStaffUserRecord): LocalAuthPublicUser {
     roleId: user.roleId,
     aktif: true,
     dibuatPada: user.dibuatPada,
-    mustChangePassword: user.passwordSeed === PASSWORD_SEED
+    ...(mustChangePassword ? { mustChangePassword: true } : {})
   };
 }
 
@@ -323,6 +330,7 @@ export class LocalAuthService implements LocalAuthProvider {
         newPassword.toLowerCase() === `${user.username.toLowerCase()}123`) return 'WEAK_PASSWORD';
     const passwordSalt = randomBytes(16).toString('hex');
     const passwordHash = (await derivePassword(newPassword, passwordSalt)).toString('hex');
+    // Set passwordSeed ke 'changed' agar mustChangePassword menjadi false setelah penggantian sandi.
     await this.persistence.commit([{
       entity: 'local_auth_users',
       id: user.id,
