@@ -32,7 +32,7 @@ export const PATIENT_DATA_MODULES = [
 // Alias mapping agar backward compatibility dengan route lama / nama alternatif tetap bekerja sempurna
 export const MODULE_ALIASES: Record<string, string[]> = {
   'rekam-medis': ['master-data', 'rme', 'rekammedis'],
-  'pendaftaran': ['registrasi', 'admisi', 'pasien-baru'],
+  'pendaftaran': ['registrasi', 'admisi', 'pasien-baru', 'crm', 'patient-portal', 'display-antrian'],
   'rawat-jalan': ['poli', 'poliklinik', 'rawatjalan'],
   'patient-flow': ['rawat-jalan', 'poli'],
   'rawat-inap': ['bangsal', 'ranap', 'rawatinap', 'bed'],
@@ -48,7 +48,7 @@ export const MODULE_ALIASES: Record<string, string[]> = {
   'sdm': ['pegawai', 'hrd', 'staff'],
   'inventory': ['gudang', 'logistik'],
   'mutu': ['patient-safety', 'safety', 'komite-mutu'],
-  'pengaturan-klinik': ['settings', 'pengaturan'],
+  'pengaturan-klinik': ['settings', 'pengaturan', 'multi-branch'],
   'apotek-ralan': ['farmasi-ralan'],
   'apotek-ranap': ['farmasi-ranap'],
   'stok-obat': ['farmasi-stok', 'obat'],
@@ -290,9 +290,12 @@ export const hasModuleAccess = (roleId: string, moduleId: string): boolean => {
   if (!role) return false;
   if (role.moduleAccess.includes(moduleId)) return true;
 
+  // Arah balik (alias -> modul induk) hanya untuk nama URL yang bukan modul sungguhan, mis. user-management -> security.
+  // Tanpa syarat ini 'patient-flow' memberi akses 'rawat-jalan', padahal server (hasScope) menolak API-nya.
+  const isRealModule = ROLES.some((item) => item.moduleAccess.includes(moduleId));
   for (const [canonical, aliases] of Object.entries(MODULE_ALIASES)) {
     if (canonical === moduleId && aliases.some(a => role.moduleAccess.includes(a))) return true;
-    if (aliases.includes(moduleId) && (role.moduleAccess.includes(canonical) || aliases.some(a => role.moduleAccess.includes(a)))) return true;
+    if (!isRealModule && aliases.includes(moduleId) && (role.moduleAccess.includes(canonical) || aliases.some(a => role.moduleAccess.includes(a)))) return true;
   }
 
   return false;

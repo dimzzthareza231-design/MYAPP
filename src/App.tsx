@@ -203,7 +203,7 @@ function AppContent() {
               <Route path="rekam-medis" element={<ErrorBoundary><ProtectedRoute moduleId="rekam-medis"><MedicalRecords /></ProtectedRoute></ErrorBoundary>} />
               <Route path="igd" element={<ErrorBoundary><ProtectedRoute moduleId="igd"><Emergency /></ProtectedRoute></ErrorBoundary>} />
               <Route path="rawat-jalan" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-jalan"><Outpatient /></ProtectedRoute></ErrorBoundary>} />
-              <Route path="patient-flow" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-jalan"><PatientFlowDashboard /></ProtectedRoute></ErrorBoundary>} />
+              <Route path="patient-flow" element={<ErrorBoundary><ProtectedRoute moduleId="patient-flow"><PatientFlowDashboard /></ProtectedRoute></ErrorBoundary>} />
               <Route path="rawat-inap" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-inap"><BedManagement /></ProtectedRoute></ErrorBoundary>} />
               <Route path="operasi" element={<ErrorBoundary><ProtectedRoute moduleId="operasi"><KamarOperasi /></ProtectedRoute></ErrorBoundary>} />
               <Route path="laboratorium" element={<ErrorBoundary><ProtectedRoute moduleId="laboratorium"><Laboratorium /></ProtectedRoute></ErrorBoundary>} />
