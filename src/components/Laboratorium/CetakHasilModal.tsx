@@ -225,7 +225,7 @@ export function CetakHasilModal({ isOpen, onClose, order }: CetakHasilModalProps
                     <span className="font-mono block text-slate-700 font-bold">
                       {order.qr_verifikasi_code || `MYITARU-LAB-${order.id}`}
                     </span>
-                    <span>Tervalidasi secara elektronik (BSrE BSSN)</span>
+                    <span>Divalidasi internal (belum TTE tersertifikasi)</span>
                     <span className="block text-[9px] text-slate-400">Hasil ini sah tanpa tanda tangan basah</span>
                   </div>
                 </div>

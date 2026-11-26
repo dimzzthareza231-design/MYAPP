@@ -92,12 +92,12 @@ export function ValidasiSpPKTab({
   // HANDLE FINAL VALIDATION
   const handleValidateAndSign = () => {
     setIsDigitalSigning(true);
-    toast.info('Menghubungi Certificate Authority (BSrE BSSN) untuk penerbitan Digital Signature...');
+    toast.info('Menyimpan validasi Sp.PK...');
 
     setTimeout(() => {
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')} WIB`;
-      const qrCode = `MYITARU-BSRE-LAB-${activeOrder.id}-${Math.floor(100000 + Math.random() * 900000)}`;
+      const qrCode = `MYITARU-LAB-${activeOrder.id}-${Math.floor(100000 + Math.random() * 900000)}`;
 
       const updated = orders.map(o => {
         if (o.id === activeOrder.id) {
@@ -146,7 +146,7 @@ export function ValidasiSpPKTab({
         }).catch(() => {});
       }
 
-      toast.success(`Hasil Laboratorium ${activeOrder.id} resmi Tervalidasi & Ditandatangani Elektronik! Terhubung ke Rekam Medis & Billing.`);
+      toast.success(`Hasil Laboratorium ${activeOrder.id} divalidasi Sp.PK (konfirmasi internal, belum tanda tangan elektronik tersertifikasi).`);
     }, 1200);
   };
 
