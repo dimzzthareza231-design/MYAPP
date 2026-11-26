@@ -75,6 +75,16 @@ jobs:
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Normalisasi account ID Cloudflare
+        if: steps.secret.outputs.ok == 'true'
+        run: |
+          account_id="$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '[:space:]')"
+          if [ -z "$account_id" ]; then
+            echo "::error::Variable CLOUDFLARE_ACCOUNT_ID kosong setelah whitespace dibuang."
+            exit 1
+          fi
+          echo "CLOUDFLARE_ACCOUNT_ID=$account_id" >> "$GITHUB_ENV"
+
       - name: Install
         if: steps.secret.outputs.ok == 'true'
         run: npm ci
