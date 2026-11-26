@@ -30,10 +30,10 @@ interface HospitalContextType {
   activeUser: User;
   setActiveUser: (user: User) => void;
   pasien: Pasien[];
-  addPasien: (p: Pasien) => Promise<void>;
+  addPasien: (p: Pasien) => Promise<Pasien>;
   updatePasien: (id: string, p: Partial<Pasien>) => Promise<void>;
   kunjungan: Kunjungan[];
-  addKunjungan: (k: Kunjungan) => Promise<void>;
+  addKunjungan: (k: Kunjungan) => Promise<Kunjungan>;
   updateKunjunganStatus: (id: string, status: Kunjungan['status']) => Promise<void>;
   dokter: MasterDokter[];
   addDokter: (d: MasterDokter) => Promise<void>;
@@ -540,14 +540,13 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
     const newPasien = { ...p, id: docId };
     if (usesServerPersistence) {
       const saved = await savePasienCloud(newPasien);
-      if (saved) {
-        setPasien(prev => {
-          const next = [saved, ...prev.filter(item => item.id !== saved.id)];
-          storage.set('hospital_pasien', next);
-          return next;
-        });
-      }
-      return;
+      if (!saved) throw new Error('Server tidak mengembalikan data pasien.');
+      setPasien(prev => {
+        const next = [saved, ...prev.filter(item => item.id !== saved.id)];
+        storage.set('hospital_pasien', next);
+        return next;
+      });
+      return saved;
     }
     setPasien(prev => {
       const next = [newPasien, ...prev];
@@ -555,6 +554,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
       return next;
     });
     await savePasienCloud(newPasien);
+    return newPasien;
   };
 
   const updatePasien = async (id: string, updated: Partial<Pasien>) => {
@@ -602,14 +602,13 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
     const newKunjungan = { ...k, id: docId };
     if (usesServerPersistence) {
       const saved = await saveKunjunganCloud(newKunjungan);
-      if (saved) {
-        setKunjungan(prev => {
-          const next = [saved, ...prev.filter(item => item.id !== saved.id)];
-          storage.set('hospital_kunjungan', next);
-          return next;
-        });
-      }
-      return;
+      if (!saved) throw new Error('Server tidak mengembalikan data kunjungan.');
+      setKunjungan(prev => {
+        const next = [saved, ...prev.filter(item => item.id !== saved.id)];
+        storage.set('hospital_kunjungan', next);
+        return next;
+      });
+      return saved;
     }
     setKunjungan(prev => {
       const next = [newKunjungan, ...prev];
@@ -617,6 +616,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
       return next;
     });
     await saveKunjunganCloud(newKunjungan);
+    return newKunjungan;
   };
 
   const updateKunjunganStatus = async (id: string, status: Kunjungan['status']) => {

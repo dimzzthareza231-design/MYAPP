@@ -193,7 +193,12 @@ export function Registration() {
     };
 
     // Save to HospitalContext (Master Visit)
-    await addKunjunganHospital(newKunjunganData);
+    try {
+      await addKunjunganHospital(newKunjunganData);
+    } catch (error) {
+      toast.error(`Kunjungan gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
+      return;
+    }
 
     // Save to PatientFlowContext
     addKunjunganFlow({

@@ -849,9 +849,6 @@ export async function createApps(
   });
 
   app.get('/api/v1/system-data/:key', async (req, res) => {
-    if (req.get('x-storage-mode') && req.get('x-storage-mode') !== persistence.mode) {
-      return res.status(503).json({ success: false, code: 'STORAGE_MODE_MISMATCH' });
-    }
     const key = req.params.key;
     if (!/^[A-Za-z0-9._:-]{1,128}$/.test(key)) {
       return res.status(400).json({ success: false, code: 'INVALID_SYSTEM_DATA_KEY' });
@@ -867,9 +864,6 @@ export async function createApps(
   });
 
   app.put('/api/v1/system-data/:key', async (req, res) => {
-    if (req.get('x-storage-mode') && req.get('x-storage-mode') !== persistence.mode) {
-      return res.status(503).json({ success: false, code: 'STORAGE_MODE_MISMATCH' });
-    }
     const key = req.params.key;
     const data = req.body?.data;
     if (!/^[A-Za-z0-9._:-]{1,128}$/.test(key)) {

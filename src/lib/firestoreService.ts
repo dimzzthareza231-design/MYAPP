@@ -224,7 +224,6 @@ async function callSystemDataApi(key: string, method: 'GET' | 'PUT', data?: stri
 export async function saveSystemDataCloud(key: string, data: any): Promise<void> {
   if (!key) return;
   if (useServerPersistence) {
-    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to save system data.');
     const serialized = typeof data === 'string' ? data : JSON.stringify(data);
     if (typeof serialized !== 'string' || new TextEncoder().encode(serialized).length > 900000) {
       throw new Error('System data payload exceeds the 900 KB limit.');
@@ -279,7 +278,7 @@ export async function saveSystemDataCloud(key: string, data: any): Promise<void>
 }
 
 export async function getSystemDataCloud(key: string): Promise<any | null> {
-  if (!key || !auth?.currentUser) return null;
+  if (!key) return null;
   if (useServerPersistence) {
     const record = await callSystemDataApi(key, 'GET');
     if (!record || typeof record.data !== 'string') return null;
@@ -289,7 +288,7 @@ export async function getSystemDataCloud(key: string): Promise<any | null> {
       return record.data;
     }
   }
-  if (!isFirebaseConfigured || !db) return null;
+  if (!isFirebaseConfigured || !db || !auth?.currentUser) return null;
   const path = `system_data/${key}`;
   try {
     const snap = await getDoc(doc(db, 'system_data', key));
@@ -354,7 +353,6 @@ export function subscribeSystemData(key: string, onData: (data: any) => void): (
 // PASIEN
 export async function savePasienCloud(p: Pasien): Promise<Pasien | null> {
   if (useServerPersistence) {
-    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to register a patient.');
     const result = await callCoreApi<{ data: any }>('/api/v1/patients', 'POST', {
       nik: p.nik,
       nama: p.nama,
@@ -385,7 +383,6 @@ export async function savePasienCloud(p: Pasien): Promise<Pasien | null> {
 
 export async function updatePasienCloud(id: string, updates: Partial<Pasien>): Promise<Pasien | null> {
   if (useServerPersistence) {
-    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to update a patient.');
     const result = await callCoreApi<{ data: any }>(`/api/v1/patients/${encodeURIComponent(id)}`, 'PATCH', updates);
     setCloudStatus({ lastSync: new Date() });
     return mapApiPatient(result.data);
@@ -431,7 +428,6 @@ export async function batchSeedPasienCloud(patients: Pasien[]): Promise<void> {
 // KUNJUNGAN
 export async function saveKunjunganCloud(k: Kunjungan): Promise<Kunjungan | null> {
   if (useServerPersistence) {
-    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to register an appointment.');
     const result = await callCoreApi<{ data: any }>('/api/v1/appointments', 'POST', {
       pasien_id: k.pasien_id,
       poli: k.poli_id,
@@ -467,7 +463,6 @@ export async function saveKunjunganCloud(k: Kunjungan): Promise<Kunjungan | null
 
 export async function updateKunjunganCloud(id: string, updates: Partial<Kunjungan>): Promise<void> {
   if (useServerPersistence) {
-    if (!auth?.currentUser) throw new Error('Authenticated staff session is required to update an appointment.');
     await callCoreApi<{ data: unknown }>(`/api/v1/appointments/${encodeURIComponent(id)}`, 'PATCH', {
       status: updates.status
     });

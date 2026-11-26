@@ -671,7 +671,7 @@ export function Outpatient() {
   };
 
   // Add new patient to queue (Quick / Complete Registration)
-  const handleAddNewQueue = () => {
+  const handleAddNewQueue = async () => {
     const targetPoli = allPoliList.find(p => p.id === newQueueForm.poliId) || currentPoli || allPoliList[0];
     let chosenPatient = pasien.find(p => String(p.id) === String(newQueueForm.pasienId));
     
@@ -699,8 +699,12 @@ export function Outpatient() {
         alamat: newQueueForm.alamat.trim() || 'Kota Bandung, Jawa Barat'
       };
 
-      chosenPatient = newP;
-      addPasien(newP);
+      try {
+        chosenPatient = await addPasien(newP);
+      } catch (error) {
+        toast.error(`Pasien gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
+        return;
+      }
     }
 
     if (!chosenPatient) {
@@ -730,8 +734,14 @@ export function Outpatient() {
       keluhan_utama: newQueueForm.keluhan.trim() || `Pemeriksaan klinis di ${targetPoli.nama}`
     };
 
-    // 1. Simpan Kunjungan di HospitalContext
-    addKunjungan(newVisit);
+    // 1. Simpan Kunjungan di HospitalContext (server memberi id dan nomor antrean final)
+    let savedVisit: Kunjungan;
+    try {
+      savedVisit = await addKunjungan(newVisit);
+    } catch (error) {
+      toast.error(`Kunjungan gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
+      return;
+    }
 
     // 2. Sinkronkan ke PatientFlowContext
     try {
@@ -768,7 +778,7 @@ export function Outpatient() {
     // Interline integration for billing, EMR and visit
     integrateRegistration({
       patient: chosenPatient,
-      visit: newVisit,
+      visit: savedVisit,
       isBPJS: newQueueForm.penjamin.includes('BPJS'),
       poliNama: targetPoli.nama,
       dokterNama: assignedDoc.nama,
@@ -777,10 +787,10 @@ export function Outpatient() {
 
     // 4. Update Filter & Focus
     setSelectedPoliFilter(targetPoli.id);
-    setActiveQueue(newVisit.id);
+    setActiveQueue(savedVisit.id);
     setShowAddPatientModal(false);
 
-    toast.success(`🎫 Pasien ${chosenPatient.nama} berhasil didaftarkan ke ${targetPoli.nama}! (No. Antrean: ${nomorAntrian})`);
+    toast.success(`🎫 Pasien ${chosenPatient.nama} berhasil didaftarkan ke ${targetPoli.nama}! (No. Antrean: ${savedVisit.nomor_antrian || nomorAntrian})`);
 
     // Reset Form State
     setNewQueueForm({
@@ -851,7 +861,7 @@ export function Outpatient() {
     const countCheckedIn = bookingList.filter(b => b.status_booking === 'Check-In').length;
     const countDone = bookingList.filter(b => b.status_booking === 'Selesai').length;
 
-    const handleCheckInBooking = (b: any) => {
+    const handleCheckInBooking = async (b: any) => {
       // Find patient or create
       let p = pasien.find(px => px.no_rm === b.no_rm || String(px.id) === String(b.pasien_id));
       if (!p) {
@@ -869,8 +879,12 @@ export function Outpatient() {
           status: 'Aktif',
           alamat: 'Kota Bandung'
         };
-        addPasien(newP);
-        p = newP;
+        try {
+          p = await addPasien(newP);
+        } catch (error) {
+          toast.error(`Pasien gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
+          return;
+        }
       }
 
       const targetPoli = allPoliList.find(x => x.id === b.poli_id || x.nama === b.poli_tujuan) || allPoliList[0];
@@ -892,11 +906,17 @@ export function Outpatient() {
         keluhan_utama: b.keluhan || `Booking Registrasi di ${targetPoli.nama}`
       };
 
-      addKunjungan(newVisit);
+      let savedVisit: Kunjungan;
+      try {
+        savedVisit = await addKunjungan(newVisit);
+      } catch (error) {
+        toast.error(`Check-in gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
+        return;
+      }
 
       // Update booking status
       setBookingList(prev => prev.map(item => item.id === b.id ? { ...item, status_booking: 'Check-In' } : item));
-      toast.success(`Pasien ${b.nama_pasien} berhasil Check-In ke Antrian ${targetPoli.nama} (${newVisit.nomor_antrian})`);
+      toast.success(`Pasien ${b.nama_pasien} berhasil Check-In ke Antrian ${targetPoli.nama} (${savedVisit.nomor_antrian || newVisit.nomor_antrian})`);
     };
 
     return (

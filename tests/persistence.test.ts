@@ -350,10 +350,11 @@ describe('integrasi Express dengan persistence', () => {
       });
       assert.equal(systemDataRead.status, 200);
       assert.equal((await systemDataRead.json() as { data: string }).data, systemDataValue);
+      // Header X-Storage-Mode dari browser hanya label build (Cloudflare: d1, server: firestore); server mengabaikannya.
       const mismatchedMode = await fetch(`${restartedUrl}/api/v1/system-data/hospital_poli_master`, {
         headers: { Authorization: `Bearer ${token}`, 'X-Storage-Mode': 'hybrid' }
       });
-      assert.equal(mismatchedMode.status, 503);
+      assert.equal(mismatchedMode.status, 200);
 
       const offline = await createApps(auth, {
         mode: 'mysql',
