@@ -271,6 +271,17 @@ Laporkan celah keamanan secara pribadi sesuai [SECURITY.md](SECURITY.md), bukan 
 
 Kontribusi terbuka. Baca [CONTRIBUTING.md](CONTRIBUTING.md) dan [Kode Etik](CODE_OF_CONDUCT.md) untuk penyiapan, konvensi branch/commit, dan pemeriksaan sebelum pull request. Riwayat perubahan dicatat di [CHANGELOG.md](CHANGELOG.md).
 
+### Kontributor AI & Kolaborasi Multi-Agent
+
+Repositori ini dikembangkan bersama agen AI berikut secara terkoordinasi (lihat detail di [AUTHORS.md](AUTHORS.md) dan [AGENTS.md](AGENTS.md)):
+
+| Agent | Peran Utama | Konfigurasi |
+|---|---|---|
+| **Google Antigravity** | Rekonsiliasi branch, perbaikan bug, multi-agent dispatcher & CI/CD gate | [`.agent/rules/`](.agent/rules/), [`.agent/skills/jobdesk-router/`](.agent/skills/jobdesk-router/) |
+| **Claude (Anthropic)** | Lead arsitektur & kasus berat, auto-delegasi subagent | [`CLAUDE.md`](CLAUDE.md), [`.claude/agents/`](.claude/agents/) |
+| **GitHub Copilot** | Penulisan/perbaikan unit test, review lint/typecheck, tugas ringan | [`.github/copilot-instructions.md`](.github/copilot-instructions.md), [`.github/prompts/`](.github/prompts/) |
+| **Gemini CLI** | Riset codebase, audit, tugas ringan & verifikasi | [`GEMINI.md`](GEMINI.md), [`.gemini/commands/`](.gemini/commands/) |
+
 ## Lisensi dan kredit
 
 Dirilis di bawah [Apache License 2.0](LICENSE). Dirancang dan dikembangkan pertama kali oleh **Dimas Pangestu Putra Alifia** (RMIK, Institut Tarumanagara, 2026). Setiap penggunaan, modifikasi, atau distribusi ulang wajib mempertahankan [LICENSE](LICENSE), [NOTICE](NOTICE), dan kredit di [AUTHORS.md](AUTHORS.md).
