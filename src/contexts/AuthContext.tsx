@@ -127,6 +127,15 @@ async function loadAuthorizedProfile(firebaseUser: FirebaseUser, issueServerSess
   };
 }
 
+// Hapus salinan data pasien di browser agar tidak terbaca pengguna berikutnya di komputer yang sama.
+function clearPatientCache() {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (/^(hospital_|simrs_|klinik_|bpjs_|db_|myitaru_igd_)/.test(key) && key !== 'simrs_theme') localStorage.removeItem(key);
+    }
+  } catch { /* storage tidak tersedia */ }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -163,12 +172,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Sesi habis di tengah kerja: satu titik untuk semua fetch('/api/...') di 100+ komponen.
+  useEffect(() => {
+    if (!isLocalAuthMode) return;
+    const originalFetch = window.fetch;
+    window.fetch = async (...args: Parameters<typeof fetch>) => {
+      const response = await originalFetch(...args);
+      const url = typeof args[0] === 'string' ? args[0] : args[0] instanceof URL ? args[0].href : args[0].url;
+      const path = new URL(url, window.location.origin);
+      if (response.status === 401 && path.origin === window.location.origin &&
+          path.pathname.startsWith('/api/') && !/^\/api\/(auth|gateway|patient|public)\//.test(path.pathname)) {
+        clearPatientCache();
+        setCurrentUser(null);
+      }
+      return response;
+    };
+    return () => { window.fetch = originalFetch; };
+  }, []);
+
   useEffect(() => {
     if (!isLocalAuthMode) return;
 
     let isMounted = true;
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 1000);
+    // Cold start Worker bisa >1 detik; batas pendek membuat sesi valid dianggap logout.
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
 
     const restoreLocalSession = async () => {
       try {
@@ -583,12 +611,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Revoke the server session before clearing the Firebase client session.
   const logout = async () => {
-    // Hapus salinan data pasien di browser agar tidak terbaca pengguna berikutnya di komputer yang sama.
-    try {
-      for (const key of Object.keys(localStorage)) {
-        if (/^(hospital_|simrs_|klinik_|bpjs_)/.test(key) && key !== 'simrs_theme') localStorage.removeItem(key);
-      }
-    } catch { /* storage tidak tersedia */ }
+    clearPatientCache();
     if (currentUser) {
       logAuthAttempt({
         action: 'LOGOUT',
