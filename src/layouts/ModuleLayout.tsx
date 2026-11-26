@@ -674,7 +674,8 @@ export default function ModuleLayout() {
           )}
 
           {/* CONTENT AREA (OUTLET) */}
-          <div className="flex-1 min-w-0 w-full bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-2xl relative min-h-[calc(100vh-160px)] flex flex-col">
+          {/* [&>*]:max-w-full: root halaman ber-mx-auto tidak di-stretch flex-col, jadi lebarnya ikut min-content dan melebar keluar viewport */}
+          <div className="flex-1 min-w-0 w-full [&>*]:max-w-full bg-white dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-2xl relative min-h-[calc(100vh-160px)] flex flex-col">
             <Outlet context={{ activeTab }} />
           </div>
 

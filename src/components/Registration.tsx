@@ -433,7 +433,7 @@ export function Registration() {
             }`}>
               👤
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-xs uppercase tracking-wider text-blue-200/80 font-mono">Modul 1</div>
               <div className="text-sm font-bold truncate">MASTER PASIEN</div>
             </div>
@@ -453,7 +453,7 @@ export function Registration() {
             }`}>
               🏥
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-xs uppercase tracking-wider text-teal-200/80 font-mono">Modul 2</div>
               <div className="text-sm font-bold truncate">REGISTRASI KUNJUNGAN</div>
             </div>
@@ -473,7 +473,7 @@ export function Registration() {
             }`}>
               🎫
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-xs uppercase tracking-wider text-amber-200/80 font-mono">Modul 3</div>
               <div className="text-sm font-bold truncate">ANTRIAN & LOKET</div>
             </div>
@@ -493,7 +493,7 @@ export function Registration() {
             }`}>
               📜
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-xs uppercase tracking-wider text-purple-200/80 font-mono">Modul 4</div>
               <div className="text-sm font-bold truncate">RIWAYAT PENDAFTARAN</div>
             </div>

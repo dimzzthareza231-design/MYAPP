@@ -562,7 +562,7 @@ export function BlueprintSystemView() {
               <div className="mt-3 flex items-center justify-between text-center gap-1">
                 {BLUEPRINT_OFFLINE_SYNC.pipeline.map((p, i) => (
                   <React.Fragment key={i}>
-                    <div className="flex-1 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                    <div className="flex-1 min-w-0 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                       <span className="text-sm block">{p.icon}</span>
                       <span className="text-[9px] font-bold text-slate-800 dark:text-slate-200 block truncate">{p.title}</span>
                     </div>

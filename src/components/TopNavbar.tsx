@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MODULE_REGISTRY } from '../data/moduleRegistry';
 import { isModuleAvailableInMode, type OperatingMode } from '../data/operatingModes';
@@ -869,7 +870,8 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
       {/* ========================================================================= */}
       {/* 4. MOBILE NAVIGATION DRAWER (REPLACING OLD UGLY SELECT BOX)               */}
       {/* ========================================================================= */}
-      {showMobileDrawer && (
+      {/* Portal ke body: backdrop-blur di <header> membuat `fixed` terkurung setinggi header */}
+      {showMobileDrawer && createPortal(
         <div className="lg:hidden fixed inset-x-0 top-[66px] bottom-0 bg-[#07111D]/95 backdrop-blur-2xl z-40 border-t border-[#C9A94E]/25 p-4 overflow-y-auto animate-in slide-in-from-top-4 duration-200">
           <div className="space-y-4 max-w-lg mx-auto">
             {/* Quick Actions Bar */}
@@ -988,7 +990,8 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
               ))}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ========================================================================= */}
