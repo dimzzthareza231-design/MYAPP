@@ -47,6 +47,7 @@ jobs:
     needs: verify
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    environment: myitaru
     timeout-minutes: 20
     # Deploy tidak boleh dibatalkan di tengah jalan oleh push berikutnya.
     concurrency:
@@ -54,7 +55,7 @@ jobs:
       cancel-in-progress: false
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +69,7 @@ jobs:
         id: secret
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::warning::Deploy dilewati: secret repo CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID belum terbaca (Settings > Secrets and variables > Actions)."
+            echo "::warning::Deploy dilewati: environment myitaru membutuhkan secret CLOUDFLARE_API_TOKEN dan variable CLOUDFLARE_ACCOUNT_ID."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
