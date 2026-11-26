@@ -100,7 +100,6 @@ interface RecentTicketSummary {
 
 interface HeroSlide {
   id: string;
-  eyebrow: string;
   titlePrefix: string;
   titleHighlight: string;
   description: string;
@@ -116,7 +115,6 @@ interface HeroSlide {
 const HERO_SLIDES: HeroSlide[] = [
   {
     id: 'slide-main',
-    eyebrow: 'MYITARU SIMK · LAYANAN MEDIS 24 JAM',
     titlePrefix: 'Pelayanan Kesehatan Terpadu dengan',
     titleHighlight: 'Akses Pendaftaran & Antrean Digital.',
     description:
@@ -130,7 +128,6 @@ const HERO_SLIDES: HeroSlide[] = [
   },
   {
     id: 'slide-rehab',
-    eyebrow: 'FISIOTERAPI, SPORTS MEDICINE & HOME CARE EKSKLUSIF',
     titlePrefix: 'Pemulihan Cedera & Rehabilitasi Gerak',
     titleHighlight: 'Di Klinik maupun di Rumah Anda.',
     description:
@@ -145,7 +142,6 @@ const HERO_SLIDES: HeroSlide[] = [
   },
   {
     id: 'slide-inpatient',
-    eyebrow: 'RAWAT INAP NYAMAN · DELUXE HINGGA JUNIOR SUITE',
     titlePrefix: 'Kenyamanan Ruang Perawatan',
     titleHighlight: 'Dengan Pengawasan Tim Medis 24 Jam.',
     description:
@@ -159,7 +155,6 @@ const HERO_SLIDES: HeroSlide[] = [
   },
   {
     id: 'slide-campus',
-    eyebrow: 'KAMPUS KESEHATAN MYITARU · AKSES FASILITAS',
     titlePrefix: 'Akses Kampus dan Area Drop-off',
     titleHighlight: 'Dirancang untuk Kunjungan yang Lebih Mudah.',
     description:
@@ -173,7 +168,6 @@ const HERO_SLIDES: HeroSlide[] = [
   },
   {
     id: 'slide-lobby',
-    eyebrow: 'FASILITAS MYITARU · LOBI UTAMA',
     titlePrefix: 'Lingkungan yang Nyaman',
     titleHighlight: 'Dengan Layanan Terpadu sejak Kedatangan.',
     description:
@@ -187,7 +181,6 @@ const HERO_SLIDES: HeroSlide[] = [
   },
   {
     id: 'slide-apm',
-    eyebrow: 'PENDAFTARAN MANDIRI · FASILITAS MYITARU',
     titlePrefix: 'Pendaftaran Pasien yang Lebih Praktis',
     titleHighlight: 'Didukung Informasi dan Layanan Terpadu.',
     description:
@@ -201,7 +194,6 @@ const HERO_SLIDES: HeroSlide[] = [
   },
   {
     id: 'slide-education',
-    eyebrow: 'EDUKASI MEDIS · MYITARU',
     titlePrefix: 'Informasi Kesehatan yang Mudah Dipahami',
     titleHighlight: 'Untuk Membantu Pasien Mengambil Langkah Tepat.',
     description:
@@ -582,25 +574,25 @@ export const PublicHospitalPortal: React.FC = () => {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="min-h-screen bg-white text-slate-900 font-sans flex flex-col">
+      <div className="public-portal min-h-screen bg-white text-slate-900 font-sans flex flex-col">
         {/* Top Emergency, Customer Relations & Visiting Hours Info Strip */}
-        <div className="bg-[#082B6B] text-white text-xs py-2 px-4 sm:px-6 lg:px-8 border-b border-white/10">
+        <div className="bg-slate-50 text-slate-600 text-xs py-2 px-4 sm:px-6 lg:px-8 border-b border-slate-200">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-4">
               <a
                 href="tel:1500911"
-                className="inline-flex items-center gap-2 font-semibold text-white hover:text-red-200 transition whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-2 font-semibold text-slate-800 hover:text-red-700 transition whitespace-nowrap shrink-0"
               >
-                <span className="inline-flex items-center gap-1 bg-[#DC2626] px-2 py-0.5 rounded font-bold tracking-wide">
+                <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2 py-0.5 rounded font-bold tracking-wide">
                   <PhoneCall className="w-3 h-3" /> IGD 24 JAM
                 </span>
                 <span className="font-mono tabular-nums font-bold">1-500-911</span>
               </a>
-              <span className="hidden md:inline text-blue-200">
+              <span className="hidden md:inline text-slate-500">
                 Jam Besuk Rawat Inap: {VISITING_HOURS_INFO.morningSession} &amp;{' '}
                 {VISITING_HOURS_INFO.eveningSession}
               </span>
-              <span className="hidden lg:inline text-blue-200">
+              <span className="hidden lg:inline text-slate-500">
                 · Customer Relations (021) 5098-8800
               </span>
             </div>
@@ -608,7 +600,7 @@ export const PublicHospitalPortal: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('/mobile')}
-              className="inline-flex items-center gap-1.5 text-sky-200 hover:text-white font-semibold cursor-pointer whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 text-[#0B3D91] hover:text-slate-900 font-semibold cursor-pointer whitespace-nowrap shrink-0"
             >
               <Smartphone className="w-3.5 h-3.5" />
               <span>Buka App Mobile Pasien</span>
@@ -617,15 +609,15 @@ export const PublicHospitalPortal: React.FC = () => {
         </div>
 
         {/* Strict 3-Zone Patient-Only Sticky Header */}
-        <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-6">
+        <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-6">
             {/* Zone 1: Brand Wordmark */}
             <button
               type="button"
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <BrandLogo alt="MYITARU" className="w-9 h-9 rounded-xl shadow-xs object-cover" />
+              <BrandLogo alt="MYITARU" className="w-8 h-8 rounded-lg object-cover" />
               <span className="text-lg sm:text-xl font-extrabold tracking-tight text-[#0B3D91]">
                 MYITARU
               </span>
@@ -776,8 +768,8 @@ export const PublicHospitalPortal: React.FC = () => {
         </header>
 
         {/* Section 1: Multi-Slide Hospital Hero Showcase + Floating Quick Search & Queue Dock */}
-        <section className="relative overflow-hidden bg-[#061A3D]">
-          <div className="relative min-h-[420px] sm:min-h-[500px] lg:min-h-[570px] flex items-center overflow-hidden">
+        <section className="public-hero relative overflow-hidden">
+          <div className="relative min-h-[400px] sm:min-h-[450px] lg:min-h-[500px] flex items-center overflow-hidden">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentSlide.id}
@@ -792,11 +784,11 @@ export const PublicHospitalPortal: React.FC = () => {
                   alt={currentSlide.imageAlt}
                   className="w-full h-full object-cover object-center"
                 />
-                <div className="absolute inset-0 bg-gradient-to-r from-[#051430]/95 via-[#0B3D91]/80 to-[#0B3D91]/25" />
+                <div className="absolute inset-0 bg-gradient-to-r from-slate-950/90 via-slate-900/65 to-slate-900/20" />
               </motion.div>
             </AnimatePresence>
 
-            <div className="relative z-10 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-8 sm:pt-16 pb-24 sm:pb-32">
+            <div className="relative z-10 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12 pb-20 sm:pb-24">
               <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 sm:gap-8">
                 <AnimatePresence mode="wait">
                   <motion.div
@@ -805,20 +797,12 @@ export const PublicHospitalPortal: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -12 }}
                     transition={{ duration: 0.45, ease: EASE_OUT_EXPO }}
-                    className="max-w-2xl lg:flex-1 space-y-4 sm:space-y-5"
+                    className="max-w-2xl lg:flex-1 space-y-4"
                   >
-                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-300">
-                      {currentSlide.eyebrow}
-                    </p>
-
-                    <h1 className="text-[1.75rem] sm:text-5xl font-extrabold text-white leading-[1.12] tracking-tight text-balance">
+                    <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold text-white leading-[1.12] tracking-tight text-balance">
                       {currentSlide.titlePrefix}{' '}
-                      <span className="relative inline-block text-sky-200">
+                      <span className="relative inline-block text-sky-100">
                         {currentSlide.titleHighlight}
-                        <span
-                          aria-hidden="true"
-                          className="block h-1 w-full bg-sky-400/70 rounded-full mt-1"
-                        />
                       </span>
                     </h1>
 
@@ -838,7 +822,7 @@ export const PublicHospitalPortal: React.FC = () => {
                             scrollToWorkspace(currentSlide.primaryActionMode, currentSlide.primaryAnchor);
                           }
                         }}
-                        className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-100 text-[#0B3D91] font-bold px-3 sm:px-6 py-3 sm:py-3.5 rounded-2xl shadow-lg transition cursor-pointer min-h-[48px] text-sm sm:text-base leading-tight text-center sm:whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
+                        className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-100 text-[#0B3D91] font-semibold px-3 sm:px-6 py-3 sm:py-3.5 rounded-xl shadow-sm transition cursor-pointer min-h-[48px] text-sm sm:text-base leading-tight text-center sm:whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
                       >
                         <CalendarCheck className="hidden sm:block w-5 h-5 shrink-0" />
                         <span>{currentSlide.primaryActionLabel}</span>
@@ -849,7 +833,7 @@ export const PublicHospitalPortal: React.FC = () => {
                         whileHover={{ y: -2 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={() => scrollToWorkspace('antrean', 'portal-workspace')}
-                        className="inline-flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 border border-white/35 text-white font-semibold px-3 sm:px-6 py-3 sm:py-3.5 rounded-2xl backdrop-blur-xs transition cursor-pointer min-h-[48px] text-sm sm:text-base leading-tight text-center sm:whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
+                        className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white font-medium px-3 sm:px-6 py-3 sm:py-3.5 rounded-xl transition cursor-pointer min-h-[48px] text-sm sm:text-base leading-tight text-center sm:whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
                       >
                         <Ticket className="hidden sm:block w-5 h-5 shrink-0" />
                         <span>Cek Nomor Antrean</span>
@@ -859,7 +843,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 </AnimatePresence>
 
                 {/* Hero Carousel Controls & Slide Selector */}
-                <div className="flex sm:flex-col items-center sm:items-start lg:items-end gap-2 sm:gap-3 min-w-0 lg:max-w-md">
+                <div className="flex flex-col items-start lg:items-end gap-2 sm:gap-3 min-w-0 lg:max-w-md">
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
@@ -867,7 +851,7 @@ export const PublicHospitalPortal: React.FC = () => {
                         setActiveSlideIdx((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length)
                       }
                       aria-label="Slide sebelumnya"
-                      className="w-11 h-11 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/25 text-white flex items-center justify-center transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
+                      className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/25 text-white flex items-center justify-center transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
                     >
                       <ChevronLeft className="w-5 h-5" />
                     </button>
@@ -875,13 +859,13 @@ export const PublicHospitalPortal: React.FC = () => {
                       type="button"
                       onClick={() => setActiveSlideIdx((prev) => (prev + 1) % HERO_SLIDES.length)}
                       aria-label="Slide berikutnya"
-                      className="w-11 h-11 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/25 text-white flex items-center justify-center transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
+                      className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/25 text-white flex items-center justify-center transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91]"
                     >
                       <ChevronRight className="w-5 h-5" />
                     </button>
                   </div>
 
-                  <div className="flex flex-nowrap sm:flex-wrap lg:justify-end gap-2 min-w-0 overflow-x-auto sm:overflow-visible -mr-4 pr-4 sm:mr-0 sm:pr-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="flex flex-nowrap gap-1 min-w-0 overflow-x-auto -mr-4 pr-4 sm:mr-0 sm:pr-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {HERO_SLIDES.map((slide, idx) => (
                       <button
                         key={slide.id}
@@ -889,13 +873,18 @@ export const PublicHospitalPortal: React.FC = () => {
                         onClick={() => setActiveSlideIdx(idx)}
                         aria-label={`Tampilkan slide ${slide.tabLabel}`}
                         aria-current={idx === activeSlideIdx ? 'true' : undefined}
-                        className={`px-3.5 min-h-11 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91] ${
+                        className={`w-8 h-8 rounded-full flex items-center justify-center transition cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3D91] ${
                           idx === activeSlideIdx
-                            ? 'bg-white text-[#0B3D91] shadow-xs'
-                            : 'bg-[#061A3D]/50 text-white hover:bg-[#061A3D]/70 border border-white/25 backdrop-blur-xs'
+                            ? 'bg-white/20'
+                            : 'hover:bg-white/10'
                         }`}
                       >
-                        {slide.tabLabel}
+                        <span
+                          aria-hidden="true"
+                          className={`h-2 rounded-full transition-all ${
+                            idx === activeSlideIdx ? 'w-5 bg-white' : 'w-2 bg-white/55'
+                          }`}
+                        />
                       </button>
                     ))}
                   </div>
@@ -911,7 +900,7 @@ export const PublicHospitalPortal: React.FC = () => {
             transition={{ duration: 0.65, delay: 0.25, ease: EASE_OUT_EXPO }}
             className="relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-16 pb-8 sm:pb-10"
           >
-            <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-4 sm:p-6">
+            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
                 <div className="lg:col-span-5">
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
@@ -986,9 +975,6 @@ export const PublicHospitalPortal: React.FC = () => {
               className="flex flex-col md:flex-row md:items-end justify-between gap-4"
             >
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                  LAYANAN MANDIRI PASIEN
-                </p>
                 <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
                   Jadwal Dokter, Pendaftaran Online &amp; Status Antrean
                 </h2>
@@ -1704,9 +1690,6 @@ export const PublicHospitalPortal: React.FC = () => {
               className="flex flex-col lg:flex-row lg:items-end justify-between gap-6"
             >
               <div className="max-w-2xl">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                  DIREKTORI LAYANAN KESEHATAN
-                </p>
                 <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
                   Unit Pelayanan Medis, Penunjang &amp; Terapi 24 Jam
                 </h2>
@@ -1804,9 +1787,6 @@ export const PublicHospitalPortal: React.FC = () => {
                 transition={{ duration: 0.65, ease: EASE_OUT_EXPO }}
                 className="lg:col-span-6 space-y-4"
               >
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                  CENTERS OF EXCELLENCE
-                </p>
                 <h2 className="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight text-balance">
                   Pusat Unggulan Spesialis &amp; Bedah Minimal Invasif
                 </h2>
@@ -1924,9 +1904,6 @@ export const PublicHospitalPortal: React.FC = () => {
               transition={{ duration: 0.55, ease: EASE_OUT_EXPO }}
               className="max-w-2xl"
             >
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                FASILITAS RAWAT INAP &amp; HOSPITALITY
-              </p>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
                 Pilihan Kelas Kamar Rawat Inap &amp; Jam Besuk Pasien
               </h2>
@@ -2108,9 +2085,6 @@ export const PublicHospitalPortal: React.FC = () => {
                   />
                 </div>
                 <div className="lg:col-span-7 p-6 sm:p-8 space-y-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                    PROMO &amp; PROGRAM PEMULIHAN EKSKLUSIF
-                  </p>
                   <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
                     Fisioterapi Home Care &amp; Skrining Kesehatan Berkala
                   </h2>
@@ -2181,9 +2155,6 @@ export const PublicHospitalPortal: React.FC = () => {
                 transition={{ duration: 0.55, ease: EASE_OUT_EXPO }}
                 className="max-w-2xl mb-8"
               >
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                  PREVENTIVE &amp; DIAGNOSTIC PACKAGES
-                </p>
                 <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
                   Paket Medical Check-Up Transparan
                 </h2>
@@ -2258,9 +2229,6 @@ export const PublicHospitalPortal: React.FC = () => {
                 transition={{ duration: 0.65, ease: EASE_OUT_EXPO }}
                 className="lg:col-span-7 space-y-5"
               >
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-300">
-                  APLIKASI MOBILE PASIEN MYITARU
-                </p>
                 <h2 className="text-2xl sm:text-4xl font-extrabold leading-tight text-balance">
                   Cek Antrean Poli, Jadwal Dokter &amp; Hasil Lab Langsung Dari Ponsel
                 </h2>
@@ -2350,9 +2318,6 @@ export const PublicHospitalPortal: React.FC = () => {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                  PENJAMINAN &amp; KEMITRAAN RESMI
-                </p>
                 <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
                   Mitra Asuransi, BPJS Kesehatan &amp; Perusahaan
                 </h2>
@@ -2423,9 +2388,6 @@ export const PublicHospitalPortal: React.FC = () => {
                   viewport={VIEWPORT_CONFIG}
                   transition={{ duration: 0.5, ease: EASE_OUT_EXPO }}
                 >
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                    HEALTHPEDIA &amp; PANDUAN PASIEN
-                  </p>
                   <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
                     Edukasi Medis Terverifikasi Dokter
                   </h2>
@@ -2507,9 +2469,6 @@ export const PublicHospitalPortal: React.FC = () => {
                   viewport={VIEWPORT_CONFIG}
                   transition={{ duration: 0.5, ease: EASE_OUT_EXPO }}
                 >
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                    PENGALAMAN PASIEN
-                  </p>
                   <h2 className="text-2xl font-extrabold text-slate-900 mt-1">
                     Kisah Pemulihan &amp; Kepercayaan
                   </h2>
@@ -2548,9 +2507,6 @@ export const PublicHospitalPortal: React.FC = () => {
               viewport={VIEWPORT_CONFIG}
               transition={{ duration: 0.5, ease: EASE_OUT_EXPO }}
             >
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#0B3D91]">
-                JARINGAN FASILITAS KESEHATAN
-              </p>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">
                 Lokasi, Kontak Customer Relations &amp; Jam Layanan
               </h2>

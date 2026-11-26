@@ -1,0 +1,79 @@
+.public-site {
+  --public-blue: #285477;
+  --public-blue-dark: #1c3e58;
+  background-color: #f7f8fa;
+}
+
+.public-site h1,
+.public-site h2 {
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.public-site h3 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.public-site [class~="bg-slate-50"] {
+  background-color: #f7f8fa;
+}
+
+.public-site [class~="bg-[#0B3D91]"] {
+  background-color: var(--public-blue);
+}
+
+.public-site [class~="hover:bg-[#082D6E]"]:hover {
+  background-color: var(--public-blue-dark);
+}
+
+.public-site [class~="text-[#0B3D91]"] {
+  color: var(--public-blue);
+}
+
+.public-site [class~="hover:text-[#0B3D91]"]:hover {
+  color: var(--public-blue);
+}
+
+.public-site [class~="rounded-3xl"] {
+  border-radius: 1.25rem;
+}
+
+.public-site [class~="shadow-xl"],
+.public-site [class~="shadow-2xl"] {
+  box-shadow: 0 12px 30px rgb(15 23 42 / 0.08);
+}
+
+.public-site input,
+.public-site select,
+.public-site textarea {
+  accent-color: var(--public-blue);
+}
+
+.public-site section[id] {
+  scroll-margin-top: 5rem;
+}
+
+.public-portal > section:not(.public-hero) {
+  padding-block: 3.5rem;
+}
+
+.public-hero {
+  background-color: #182f40;
+}
+
+.public-hero [class~="bg-gradient-to-r"] {
+  background-image: linear-gradient(
+    90deg,
+    rgb(8 22 33 / 0.88) 0%,
+    rgb(8 22 33 / 0.66) 58%,
+    rgb(8 22 33 / 0.24) 100%
+  );
+}
+
+@media (min-width: 640px) {
+  .public-portal > section:not(.public-hero) {
+    padding-block: 4.25rem;
+  }
+}

@@ -16,7 +16,7 @@ export default function PublicApp() {
       <AuthProvider>
         <BrowserRouter>
           <HospitalProvider>
-            <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-50 font-sans flex flex-col">
+            <div className="public-site min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-50 font-sans flex flex-col">
               <Toaster position="top-right" />
               <OfflineIndicator />
               <main className="flex-1 flex flex-col min-w-0 relative w-full">
