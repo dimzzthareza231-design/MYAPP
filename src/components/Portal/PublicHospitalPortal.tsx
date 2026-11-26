@@ -2554,7 +2554,7 @@ export const PublicHospitalPortal: React.FC = () => {
                 <div className="flex items-center gap-2.5">
                   <BrandLogo alt="MYITARU" className="w-9 h-9 rounded-xl object-cover" />
                   <span className="font-extrabold text-lg tracking-tight">
-                    MYITARU SIMK
+                    MYITARU
                   </span>
                 </div>
                 <p className="text-xs sm:text-sm text-blue-200 leading-relaxed max-w-md">
