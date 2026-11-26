@@ -230,7 +230,9 @@ export default function ModuleLayout() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      // Escape saat mengetik di form tidak boleh membuang isian dengan pindah ke dashboard.
+      const typing = e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable="true"]');
+      if (e.key === 'Escape' && !typing) {
         const hasOpenModal = document.querySelector('[role="dialog"]') !== null || 
                              document.querySelector('.fixed.inset-0:not(.top-navbar-overlay)') !== null;
         if (!hasOpenModal) {

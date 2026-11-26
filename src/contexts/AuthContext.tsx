@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { 
   User as FirebaseUser,
   onAuthStateChanged, 
@@ -646,10 +646,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFirebaseUser(null);
   };
 
-  const hasAccess = (moduleId: string): boolean => {
+  const hasAccess = useCallback((moduleId: string): boolean => {
     if (!currentUser) return false;
     return hasModuleAccess(currentUser.roleId, moduleId);
-  };
+  }, [currentUser]);
 
   const addUser = async (userData: Omit<User, 'id' | 'dibuatPada'>) => {
     const newId = 'u_' + Date.now().toString();
