@@ -1056,8 +1056,28 @@ export async function createApps(
   });
 
   // 5. Patients API: Register New Patient
+  // Dipakai POST dan PATCH pasien agar aturan tipe/panjang field sama.
+  const PATIENT_STRING_LIMITS: Record<string, number> = {
+    nik: 16, nama: 160, tanggal_lahir: 32, jenis_kelamin: 1,
+    alamat: 500, no_hp: 40, golongan_darah: 10, penjamin: 80,
+    no_bpjs: 40, status: 30
+  };
+  const invalidPatientField = (entries: Array<[string, unknown]>): string | null => {
+    for (const [key, value] of entries) {
+      if (key in PATIENT_STRING_LIMITS && (typeof value !== 'string' || value.length > PATIENT_STRING_LIMITS[key])) return key;
+      if (key === 'jenis_kelamin' && value !== 'L' && value !== 'P') return key;
+      if (key === 'status' && !['Aktif', 'Rawat Jalan', 'Rawat Inap', 'IGD', 'Selesai', 'Nonaktif'].includes(String(value))) return key;
+      if (['alergi', 'riwayat_penyakit'].includes(key) && (!Array.isArray(value) || value.length > 100 ||
+          value.some((item) => typeof item !== 'string' || item.length > 200))) return key;
+    }
+    return null;
+  };
+
   app.post('/api/v1/patients', (req, res) => {
     const { nik, nama, tanggal_lahir, jenis_kelamin, alamat, no_hp, golongan_darah, penjamin, no_bpjs } = req.body;
+    const invalidField = invalidPatientField(Object.entries({ nik, nama, tanggal_lahir, jenis_kelamin, alamat, no_hp, golongan_darah, penjamin, no_bpjs, alergi: req.body?.alergi })
+      .filter(([, value]) => value !== undefined && value !== null && value !== ''));
+    if (invalidField) return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: invalidField });
 
     if (!nama || !tanggal_lahir || !jenis_kelamin || !alamat) {
       return res.status(400).json({
@@ -1146,29 +1166,8 @@ export async function createApps(
         return res.status(409).json({ success: false, code: 'DUPLICATE_NIK' });
       }
     }
-    const stringLimits: Record<string, number> = {
-      nik: 16, nama: 160, tanggal_lahir: 32, jenis_kelamin: 1,
-      alamat: 500, no_hp: 40, golongan_darah: 10, penjamin: 80,
-      no_bpjs: 40, status: 30
-    };
-    for (const [key, value] of entries) {
-      if (key in stringLimits && (typeof value !== 'string' || value.length > stringLimits[key])) {
-        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
-      }
-      if (key === 'jenis_kelamin' && value !== 'L' && value !== 'P') {
-        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
-      }
-      if (key === 'status' && !['Aktif', 'Rawat Jalan', 'Rawat Inap', 'IGD', 'Selesai', 'Nonaktif'].includes(String(value))) {
-        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
-      }
-      if (['alergi', 'riwayat_penyakit'].includes(key) && !Array.isArray(value)) {
-        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
-      }
-      if (['alergi', 'riwayat_penyakit'].includes(key) &&
-          ((value as unknown[]).length > 100 || (value as unknown[]).some((item) => typeof item !== 'string' || item.length > 200))) {
-        return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: key });
-      }
-    }
+    const invalidField = invalidPatientField(entries);
+    if (invalidField) return res.status(422).json({ success: false, code: 'INVALID_PATIENT_FIELD', field: invalidField });
     Object.assign(patient, req.body);
     return res.json({ success: true, data: patient });
   });
@@ -1430,6 +1429,10 @@ export async function createApps(
         success: false,
         error: 'no_rm, doc_type, dan title dokumen wajib diisi.'
       });
+    }
+    // Firestore menolak dokumen >1 MB; tanpa batas ini commit gagal dan request dibalas 503.
+    if (Buffer.byteLength(JSON.stringify(data ?? {}), 'utf8') > 800_000) {
+      return res.status(413).json({ success: false, code: 'DOCUMENT_TOO_LARGE', error: 'Isi dokumen melebihi 800 KB.' });
     }
 
     const newDoc: DossierDocument = {

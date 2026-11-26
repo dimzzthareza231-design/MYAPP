@@ -139,6 +139,16 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal((await call(core, 'GET', '/api/v1/module-data')).body.index.hospital_billing_ralan, undefined);
   });
 
+  test('validasi pasien sama untuk POST dan PATCH; dokumen dossier dibatasi ukurannya', async () => {
+    const bad = await call(core, 'POST', '/api/v1/patients', { nama: 123, tanggal_lahir: '1990-01-01', jenis_kelamin: 'L', alamat: 'x' });
+    assert.equal(bad.status, 422);
+    assert.equal(bad.body.field, 'nama');
+    assert.equal((await call(core, 'POST', '/api/v1/patients', { nama: 'A', tanggal_lahir: '1990-01-01', jenis_kelamin: 'X', alamat: 'x' })).body.field, 'jenis_kelamin');
+    assert.equal((await call(core, 'POST', '/api/v1/patients', { nama: 'A', tanggal_lahir: '1990-01-01', jenis_kelamin: 'L', alamat: 'x', alergi: 'debu' })).body.field, 'alergi');
+    const big = await call(core, 'POST', '/api/v1/dossier/documents', { no_rm: 'RM-1', doc_type: 'cppt', title: 'x', data: { isi: 'a'.repeat(900_000) } });
+    assert.equal(big.status, 413);
+  });
+
   test('pertukaran Firebase ID token menerbitkan cookie HttpOnly yang bisa dicabut', async () => {
     const issued = await call(core, 'POST', '/api/auth/session', { idToken: 'test-token' });
     assert.equal(issued.status, 204);
