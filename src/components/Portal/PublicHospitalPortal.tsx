@@ -1185,10 +1185,7 @@ export const PublicHospitalPortal: React.FC = () => {
                   <div id="formulir-pendaftaran" className="lg:col-span-5">
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden sticky top-24">
                       <div className="bg-[#0B3D91] text-white px-6 py-4">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-sky-200">
-                          FORMULIR PENDAFTARAN ONLINE
-                        </p>
-                        <h3 className="text-lg font-extrabold mt-0.5">
+                        <h3 className="text-lg font-bold leading-snug">
                           {bookingSuccess ? 'Kartu Nomor Antrean Diterbitkan' : 'Registrasi Kunjungan Poliklinik'}
                         </h3>
                       </div>
@@ -2641,7 +2638,7 @@ export const PublicHospitalPortal: React.FC = () => {
 
             <div className="pt-6 flex flex-wrap items-center justify-between gap-3 text-[11px] text-blue-200/80">
               <span>
-                © {new Date().getFullYear()} MYITARU SIMK · Portal Publik Layanan Pasien
+                © {new Date().getFullYear()} MYITARU · Portal Publik Layanan Pasien
               </span>
               <SystemCopyrightFooterBadge />
             </div>
