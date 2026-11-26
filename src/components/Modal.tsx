@@ -28,21 +28,61 @@ export function Modal({
   variant = 'default',
   badgeText
 }: ModalProps) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    if (!isOpen) return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.body.style.overflow = 'hidden';
+
+    const focusTimer = window.setTimeout(() => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const firstFocusable = dialog.querySelector<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      (firstFocusable || dialog).focus();
+    }, 0);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const focusables = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.offsetParent !== null);
+      if (focusables.length === 0) {
+        e.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
-    if (isOpen) {
-      document.addEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
+
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener('keydown', handleEsc);
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = 'unset';
+      previousFocusRef.current?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -92,9 +132,11 @@ export function Modal({
       onClick={onClose}
     >
       <div 
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
         onClick={(e) => e.stopPropagation()}
         className={`relative bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl shadow-2xl w-full max-w-[calc(100vw-1.5rem)] ${widthClass} flex flex-col max-h-[92vh] overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200`}
       >
@@ -108,7 +150,7 @@ export function Modal({
             )}
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 id="modal-title" className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight truncate">
+                <h3 id={titleId} className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight truncate">
                   {title}
                 </h3>
                 {badgeText && (
@@ -125,7 +167,9 @@ export function Modal({
             </div>
           </div>
           <button 
+            type="button"
             onClick={onClose}
+            aria-label="Tutup modal"
             className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors rounded-xl hover:bg-slate-200/60 dark:hover:bg-slate-700/60 shrink-0 ml-2"
             title="Tutup (Esc)"
           >

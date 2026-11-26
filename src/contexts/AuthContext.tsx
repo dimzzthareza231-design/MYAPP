@@ -194,6 +194,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isLocalAuthMode) return;
+    if (import.meta.env.VITE_APP_TARGET === 'public') {
+      setLoading(false);
+      return;
+    }
 
     let isMounted = true;
     const controller = new AbortController();

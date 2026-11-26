@@ -547,6 +547,9 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
           toast.error(payload?.message || 'Kata sandi gagal diganti.');
           return;
         }
+        if (currentUser?.id) {
+          void updateUser(currentUser.id, { mustChangePassword: false });
+        }
         toast.success(payload?.message || 'Kata sandi berhasil diganti.');
         onClose();
       } catch {

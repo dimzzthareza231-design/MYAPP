@@ -484,7 +484,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
                     aria-pressed={isSelected}
                     onClick={() => {
                       setSelectedRoleId(item.roleId);
-                      if (isLocalAuthMode) setUsername(item.loginIdentifier);
+                      if (isLocalAuthMode && import.meta.env.DEV) setUsername(item.loginIdentifier);
                       usernameInputRef.current?.focus();
                     }}
                     className={`group flex items-start gap-3 rounded-xl border p-3.5 text-left transition-all ${

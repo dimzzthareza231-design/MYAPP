@@ -126,6 +126,23 @@ function AppContent() {
       <Toaster position="top-right" />
       <OfflineIndicator />
       {currentUser && <CommandPalette />}
+      {currentUser?.mustChangePassword && (
+        <div
+          role="alert"
+          className="no-print bg-amber-50 dark:bg-amber-950/60 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-xs text-amber-900 dark:text-amber-100 flex flex-wrap items-center justify-between gap-2"
+        >
+          <div className="flex items-center gap-2 font-medium">
+            <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>Akun ini masih memakai kata sandi bawaan. Segera ganti kata sandi demi keamanan data pasien.</span>
+          </div>
+          <Link
+            to="/modul/profile?tab=security"
+            className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold transition-colors shrink-0"
+          >
+            Ganti Kata Sandi
+          </Link>
+        </div>
+      )}
 
       <main className="flex-1 flex flex-col min-w-0 relative w-full scroll-smooth">
         <ErrorBoundary>

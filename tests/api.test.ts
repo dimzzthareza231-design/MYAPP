@@ -92,6 +92,14 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal(r.body?.storage?.mode, 'memory');
     assert.equal(r.body?.storage?.persistentReady, false);
   });
+  test('security headers mengizinkan kamera/mikrofon self dan unknown /api mengembalikan 404 JSON', async () => {
+    const res = await fetch(`${core}/api/v1/health`);
+    assert.equal(res.headers.get('permissions-policy'), 'camera=(self), microphone=(self), geolocation=(self)');
+    assert.match(res.headers.get('content-security-policy') || '', /frame-ancestors 'none'/);
+    const unknownPub = await call(pub, 'GET', '/api/auth/me');
+    assert.equal(unknownPub.status, 404);
+    assert.equal(unknownPub.body?.code, 'NOT_FOUND');
+  });
 
   test('API operasional menolak sesi kosong dan membatasi akses berbasis role dan MFA', async () => {
     assert.equal((await call(core, 'GET', '/api/v1/inventory/stock', undefined, null)).status, 401);

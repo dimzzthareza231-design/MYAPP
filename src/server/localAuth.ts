@@ -33,6 +33,7 @@ export interface LocalAuthPublicUser {
   roleId: string;
   aktif: true;
   dibuatPada: string;
+  mustChangePassword?: boolean;
 }
 
 export interface LocalAuthLoginResult {
@@ -114,7 +115,8 @@ function asPublicUser(user: LocalStaffUserRecord): LocalAuthPublicUser {
     nama: user.nama,
     roleId: user.roleId,
     aktif: true,
-    dibuatPada: user.dibuatPada
+    dibuatPada: user.dibuatPada,
+    mustChangePassword: user.passwordSeed === PASSWORD_SEED
   };
 }
 

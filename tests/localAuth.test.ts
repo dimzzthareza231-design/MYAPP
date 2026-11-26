@@ -167,9 +167,12 @@ describe('ganti kata sandi', () => {
     await service.initialize();
     const session = await service.login('kasir', 'kasir123');
     assert.ok(session);
+    assert.equal(session.user.mustChangePassword, true);
     assert.equal(await service.changePassword(session.token, 'salah', 'SandiBaru-2026'), 'WRONG_PASSWORD');
     assert.equal(await service.changePassword(session.token, 'kasir123', 'pendek'), 'WEAK_PASSWORD');
     assert.equal(await service.changePassword(session.token, 'kasir123', 'SandiBaru-2026'), 'OK');
+    const updatedSession = await service.resolveSession(session.token);
+    assert.equal(updatedSession?.user.mustChangePassword, false);
 
     const restarted = new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) });
     await restarted.initialize();

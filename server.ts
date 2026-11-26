@@ -101,8 +101,14 @@ function installPersistenceMiddleware(
   for (const target of targets) {
     target.use(async (req, res, next) => {
       if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
-      // Route ini tidak menulis array persisten; jangan antre di belakang panggilan Gemini yang lambat.
-      if (req.path.startsWith('/api/ai/') || req.path.startsWith('/api/cloudflare/')) return next();
+      // Route ini tidak menulis array persisten; jangan antre di belakang panggilan Gemini atau sync modul yang lambat.
+      if (
+        req.path.startsWith('/api/ai/') ||
+        req.path.startsWith('/api/cloudflare/') ||
+        req.path.startsWith('/api/v1/module-data') ||
+        req.path.startsWith('/api/v1/system-data') ||
+        req.path.startsWith('/api/auth/')
+      ) return next();
 
       let release!: () => void;
       const currentWrite = new Promise<void>((resolve) => { release = resolve; });
@@ -241,7 +247,8 @@ export async function createApps(
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
+    res.setHeader('Content-Security-Policy', "base-uri 'self'; object-src 'none'; frame-ancestors 'none'");
     next();
   });
 
@@ -2421,6 +2428,12 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
       });
     }
   });
+
+  for (const target of [app, publicApp]) {
+    target.use('/api', (_req, res) => {
+      res.status(404).json({ success: false, code: 'NOT_FOUND' });
+    });
+  }
 
   return { app, publicApp, persistence };
 }
