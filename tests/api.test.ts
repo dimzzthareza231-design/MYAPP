@@ -306,7 +306,7 @@ describe('web publik pasien', () => {
   test('pendaftaran daring menerbitkan antrean tanpa sesi atau data rekam medis', async () => {
     const cat = (await call(pub, 'GET', '/api/public/hospital-catalog')).body;
     const d = (cat.doctors ?? cat.data.doctors)[0];
-    const appointmentDate = new Date().toISOString().slice(0, 10);
+    const appointmentDate = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
     const r = await call(pub, 'POST', '/api/patient/appointments', {
       nama: 'Pasien Uji', tanggal_lahir: '1990-05-15', no_hp: '081200000000',
       poli_id: d.poli_id, poli_nama: d.poli, dokter_id: d.id, dokter_nama: d.nama,
