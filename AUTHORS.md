@@ -11,4 +11,4 @@
 
 ## Kontributor Pengembangan Lanjutan (Setelah Hibah)
 *(Silakan tambahkan nama pengembang berikutnya di bawah baris ini tanpa menghapus kredit Pencipta Asli di atas)*
-* _Belum ada kontributor tambahan._
+* **GitHub Copilot (Copilot App)** — bantuan pengembangan dan dokumentasi.
