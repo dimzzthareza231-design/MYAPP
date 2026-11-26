@@ -110,6 +110,16 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal((await call(core, 'GET', '/api/v1/patients?page=abc&limit=1')).body.page, 1);
   });
 
+  test('kasir hanya menerima identitas pasien, bukan catatan klinis', async () => {
+    const admin = (await call(core, 'GET', '/api/v1/patients?limit=1')).body.data[0];
+    await call(core, 'PATCH', `/api/v1/patients/${admin.id}`, { riwayat_penyakit: ['Hipertensi'] });
+    const asCashier = (await call(core, 'GET', `/api/v1/patients/${admin.id}`, undefined, 'cashier-token')).body.data;
+    assert.equal(asCashier.nama, admin.nama);
+    assert.equal(asCashier.riwayat_penyakit, undefined);
+    assert.equal((await call(core, 'GET', '/api/v1/patients?limit=1', undefined, 'cashier-token')).body.data[0].riwayat_penyakit, undefined);
+    assert.ok((await call(core, 'GET', `/api/v1/patients/${admin.id}`)).body.data.riwayat_penyakit);
+  });
+
   test('pertukaran Firebase ID token menerbitkan cookie HttpOnly yang bisa dicabut', async () => {
     const issued = await call(core, 'POST', '/api/auth/session', { idToken: 'test-token' });
     assert.equal(issued.status, 204);

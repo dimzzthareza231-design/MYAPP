@@ -914,6 +914,14 @@ export async function createApps(
     res.json(data);
   });
 
+  // Kasir, farmasi, pendaftaran dsb. hanya butuh identitas; catatan klinis (SOAP, resume, obat) untuk peran rekam medis.
+  const PATIENT_IDENTITY_FIELDS = ['id', 'no_rm', 'nik', 'nama', 'tanggal_lahir', 'jenis_kelamin', 'alamat', 'no_hp',
+    'golongan_darah', 'penjamin', 'no_bpjs', 'status', 'alergi', 'created_at'] as const;
+  const patientForRole = (patient: PatientRecord, req: express.Request) =>
+    hasScope((req as CoreAuthRequest).corePrincipal?.roleId || '', 'rekam-medis')
+      ? patient
+      : Object.fromEntries(PATIENT_IDENTITY_FIELDS.filter((key) => key in patient).map((key) => [key, patient[key]]));
+
   // 3. Patients API: List & Search
   app.get('/api/v1/patients', (req, res) => {
     const { q, penjamin, status, page = '1', limit = '20' } = req.query;
@@ -939,7 +947,7 @@ export async function createApps(
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
     const startIndex = (pageNum - 1) * limitNum;
-    const paginated = results.slice(startIndex, startIndex + limitNum);
+    const paginated = results.slice(startIndex, startIndex + limitNum).map((patient) => patientForRole(patient, req));
 
     res.json({
       success: true,
@@ -966,7 +974,7 @@ export async function createApps(
     res.json({
       success: true,
       data: {
-        ...patient,
+        ...patientForRole(patient, req),
         appointments,
         // Dokumen klinis hanya untuk peran dengan akses rekam medis.
         ...(hasScope((req as CoreAuthRequest).corePrincipal?.roleId || '', 'rekam-medis') ? { documents: dossiers } : {})
