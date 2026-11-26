@@ -6,7 +6,7 @@ const VERSIONS_KEY = 'hospital_sync_versions';
 // Sudah punya API sendiri, data per pengguna, atau preferensi tampilan.
 const EXCLUDED = new Set([
   VERSIONS_KEY, 'hospital_pasien', 'hospital_kunjungan', 'hospital_dokter', 'hospital_perawat', 'hospital_settings',
-  'hospital_poli_master', 'simrs_theme', 'simrs_registration_draft'
+  'hospital_poli_master', 'simrs_theme', 'hospital_theme', 'simrs_registration_draft'
 ]);
 const MAX_BYTES = 900_000;
 
@@ -79,13 +79,17 @@ export async function pullModuleData(): Promise<void> {
   const { index = {} } = await response.json() as { index?: Record<string, string> };
   const versions = readVersions();
   const changed = Object.entries(index).filter(([key, updatedAt]) => isSyncedKey(key) && versions[key] !== updatedAt && !pending.has(key));
-  await Promise.all(changed.map(async ([key]) => {
-    const record = await fetch(url(key), { credentials: 'same-origin' });
-    if (!record.ok) return;
-    const body = await record.json() as { data: string; updatedAt: string };
-    originalSetItem.call(localStorage, key, body.data);
-    versions[key] = body.updatedAt;
-  }));
+  // Satu request per 20 kunci (bukan satu per kunci): login di browser baru turun dari ~5 detik.
+  for (let i = 0; i < changed.length; i += 20) {
+    const keys = changed.slice(i, i + 20).map(([key]) => key);
+    const batch = await fetch(`/api/v1/module-data?keys=${keys.map(encodeURIComponent).join(',')}`, { credentials: 'same-origin' });
+    if (!batch.ok) continue;
+    const { records = {} } = await batch.json() as { records?: Record<string, { data: string; updatedAt: string }> };
+    for (const [key, record] of Object.entries(records)) {
+      originalSetItem.call(localStorage, key, record.data);
+      versions[key] = record.updatedAt;
+    }
+  }
   for (const key of Object.keys(localStorage)) {
     if (!isSyncedKey(key) || key in index || pending.has(key)) continue;
     if (versions[key]) {

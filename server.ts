@@ -859,8 +859,15 @@ export async function createApps(
   const readModuleIndex = async () =>
     (await persistence.get<{ index?: ModuleIndex }>('system_data', MODULE_INDEX_ID))?.index ?? {};
 
-  app.get('/api/v1/module-data', async (_req, res) => {
+  app.get('/api/v1/module-data', async (req, res) => {
     try {
+      // ?keys=a,b,c: ambil banyak kunci sekaligus (paralel) — browser baru menarik ~30 kunci saat login.
+      if (typeof req.query.keys === 'string') {
+        const keys = req.query.keys.split(',').filter((key) => MODULE_DATA_KEY.test(key)).slice(0, 200);
+        const records = await Promise.all(keys.map(async (key) =>
+          [key, await persistence.get<{ data: string; updatedAt: string }>('system_data', moduleDocId(key))] as const));
+        return res.json({ success: true, records: Object.fromEntries(records.filter(([, record]) => record).map(([key, record]) => [key, { data: record!.data, updatedAt: record!.updatedAt }])) });
+      }
       return res.json({ success: true, index: await readModuleIndex() });
     } catch (error) {
       console.error('[Persistence] Could not read module index.', error);

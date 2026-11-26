@@ -129,6 +129,8 @@ describe('isolasi web publik dan aplikasi inti', () => {
     const index = (await call(core, 'GET', '/api/v1/module-data', undefined, 'role:dokter')).body.index;
     assert.equal(index.hospital_billing_ralan, saved.body.updatedAt);
     assert.equal((await call(core, 'GET', '/api/v1/module-data/hospital_billing_ralan', undefined, 'role:apoteker')).body.data, '[{"id":"BIL-1"}]');
+    const batch = (await call(core, 'GET', '/api/v1/module-data?keys=hospital_billing_ralan,hospital_tidak_ada,rahasia')).body.records;
+    assert.deepEqual(Object.keys(batch), ['hospital_billing_ralan']);
     assert.equal((await call(core, 'PUT', '/api/v1/module-data/rahasia', { data: 'x' })).status, 400);
     assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_igd_Penanganan IGD')}`, { data: '[]' })).status, 200);
     assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_a/b')}`, { data: '[]' })).status, 400);
