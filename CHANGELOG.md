@@ -5,6 +5,12 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 ## [Unreleased]
 
 ### Ditambahkan
+- Konfigurasi kolaborasi multi-agent selalu aktif: `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.agent/rules/multi-agent-workflow.md` — Claude memimpin kasus berat; Gemini CLI, GitHub Copilot CLI, dan Google Antigravity menangani tugas ringan dan verifikasi.
+- Agent dispatcher (`scripts/agent-dispatch.mjs`) dengan mode `check`, `light`, `assist`, `auto`, dan `parallel`; slash commands di `.claude/commands/`, `.gemini/commands/`, dan `.github/prompts/`.
+- Subagent auto-delegation Claude: `.claude/agents/gemini-worker.md`, `copilot-worker.md`, `verify-runner.md`.
+- Pre-push hook (`scripts/hooks/pre-push`) yang memblokir push bila `typecheck` atau `test` gagal; diinstal via `npm run hooks:install` atau otomatis via `npm run prepare`.
+- `AUTHORS.md` dengan profil lengkap semua agent AI kontributor (Antigravity, Claude, Copilot, Gemini CLI).
+- `mustChangePassword` dipamerkan ke frontend dan banner peringatan kata sandi default di `App.tsx`.
 - Deployment di Cloudflare Workers dengan database Cloudflare D1 (`STORAGE_MODE=d1`), dua Worker (`myitaru-public`, `myitaru-core`) dari satu `wrangler.jsonc`.
 - `D1Adapter`, migrasi `migrations/0001_init.sql`, dan pengujian adapter di atas SQLite.
 - Autentikasi lokal (scrypt, sesi yang dapat dicabut), adapter persistence MySQL/Firebase/hybrid, QR pasien terenkripsi, dan mode operasional SIMK/SIMRS.

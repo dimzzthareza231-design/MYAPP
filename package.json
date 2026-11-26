@@ -35,7 +35,8 @@
     "agent:assist": "node scripts/agent-dispatch.mjs assist",
     "agent:auto": "node scripts/agent-dispatch.mjs auto",
     "agent:parallel": "node scripts/agent-dispatch.mjs parallel",
-    "hooks:install": "node scripts/install-hooks.mjs"
+    "hooks:install": "node scripts/install-hooks.mjs",
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "@google/genai": "^3.3.0",

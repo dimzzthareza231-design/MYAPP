@@ -14,7 +14,7 @@ function buildCommand(command, args) {
 
 function run(command, args, opts = {}) {
   const result = process.platform === 'win32'
-    ? spawnSync(buildCommand(command, args), { stdio: 'inherit', shell: true, ...opts })
+    ? spawnSync('cmd', ['/c', buildCommand(command, args)], { stdio: 'inherit', ...opts })
     : spawnSync(command, args, { stdio: 'inherit', ...opts });
   return result.status ?? 1;
 }
@@ -22,7 +22,7 @@ function run(command, args, opts = {}) {
 function runAsync(label, command, args) {
   return new Promise((resolve) => {
     const child = process.platform === 'win32'
-      ? spawn(buildCommand(command, args), { stdio: ['ignore', 'pipe', 'pipe'], shell: true })
+      ? spawn('cmd', ['/c', buildCommand(command, args)], { stdio: ['ignore', 'pipe', 'pipe'] })
       : spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     let stdout = '';
