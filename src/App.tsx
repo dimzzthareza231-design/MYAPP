@@ -9,74 +9,79 @@ import { PatientFlowProvider } from './contexts/PatientFlowContext';
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { UserManagement } from './components/Auth/UserManagement';
+const UserManagement = lazyNamed(() => import('./components/Auth/UserManagement'), 'UserManagement');
 import { ProtectedRoute, withAuthorization } from './components/Auth/ProtectedRoute';
 import Dashboard from './components/Dashboard';
 import ModuleLayout from './layouts/ModuleLayout';
 import { GenericModuleContent } from './components/GenericModuleContent';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Login } from './components/Login';
-import { EmployeeAppLanding } from './components/Employee/EmployeeAppLanding';
-import { EmployeePortal } from './components/Employee/EmployeePortal';
-import { EmployeeMobileApp } from './components/Employee/EmployeeMobileApp';
+const EmployeeAppLanding = lazyNamed(() => import('./components/Employee/EmployeeAppLanding'), 'EmployeeAppLanding');
+const EmployeePortal = lazyNamed(() => import('./components/Employee/EmployeePortal'), 'EmployeePortal');
+const EmployeeMobileApp = lazyNamed(() => import('./components/Employee/EmployeeMobileApp'), 'EmployeeMobileApp');
 import { OfflineIndicator } from './components/PWA/OfflineIndicator';
 
 // Existing Modules
-import { Registration } from './components/Registration';
-import { Emergency } from './components/Emergency';
-import { Outpatient } from './components/Outpatient';
-import { BedManagement } from './components/BedManagement';
-import { KamarOperasi } from './components/KamarOperasi';
-import { Laboratorium } from './components/Laboratorium';
-import { RadiologiDashboard } from './components/Radiologi/RadiologiDashboard';
-import { MedicalRecords } from './components/MedicalRecords';
-import { ManajemenSDM } from './components/ManajemenSDM';
-import { InventoryManagement } from './components/InventoryManagement';
-import PatientFlowDashboard from './components/PatientFlowDashboard';
-import { PatientSafety } from './components/Safety/PatientSafety';
-import { Pharmacy } from './components/Pharmacy';
-import { Billing } from './components/Billing';
-import { BPJSModule } from './components/BPJS/BPJSModule';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
-import { SatuSehatIntegration } from './components/SatuSehatIntegration';
-import { ApiManagementSystem } from './components/ApiManagement/ApiManagementSystem';
-import { PanduanModule } from './components/Panduan/PanduanModule';
-import NotificationPreferences from './components/NotificationPreferences';
-import { Profile } from './components/Profile';
-import { AuthManagement } from './components/Auth/AuthManagement';
-import AuditTrail from './components/AuditTrail';
-import { BackupManagement } from './components/Backup/BackupManagement';
-import { MonitoringSystem } from './components/Monitoring/MonitoringSystem';
-import ModulTriase from './components/ModulTriase';
-import { PengaturanRS } from './components/Settings/PengaturanRS';
-import { JKNMobile } from './components/JKNMobile/JKNMobile';
+// Tiap modul dimuat saat dibuka; sebelumnya semua modul (~6 MB) diunduh sebelum halaman login bisa dipakai.
+function lazyNamed<M, K extends keyof M>(load: () => Promise<M>, name: K) {
+  return React.lazy(async () => ({ default: (await load())[name] as React.ComponentType<any> }));
+}
+
+const Registration = lazyNamed(() => import('./components/Registration'), 'Registration');
+const Emergency = lazyNamed(() => import('./components/Emergency'), 'Emergency');
+const Outpatient = lazyNamed(() => import('./components/Outpatient'), 'Outpatient');
+const BedManagement = lazyNamed(() => import('./components/BedManagement'), 'BedManagement');
+const KamarOperasi = lazyNamed(() => import('./components/KamarOperasi'), 'KamarOperasi');
+const Laboratorium = lazyNamed(() => import('./components/Laboratorium'), 'Laboratorium');
+const RadiologiDashboard = lazyNamed(() => import('./components/Radiologi/RadiologiDashboard'), 'RadiologiDashboard');
+const MedicalRecords = lazyNamed(() => import('./components/MedicalRecords'), 'MedicalRecords');
+const ManajemenSDM = lazyNamed(() => import('./components/ManajemenSDM'), 'ManajemenSDM');
+const InventoryManagement = lazyNamed(() => import('./components/InventoryManagement'), 'InventoryManagement');
+const PatientFlowDashboard = React.lazy(() => import('./components/PatientFlowDashboard'));
+const PatientSafety = lazyNamed(() => import('./components/Safety/PatientSafety'), 'PatientSafety');
+const Pharmacy = lazyNamed(() => import('./components/Pharmacy'), 'Pharmacy');
+const Billing = lazyNamed(() => import('./components/Billing'), 'Billing');
+const BPJSModule = lazyNamed(() => import('./components/BPJS/BPJSModule'), 'BPJSModule');
+const AnalyticsDashboard = React.lazy(() => import('./components/AnalyticsDashboard'));
+const SatuSehatIntegration = lazyNamed(() => import('./components/SatuSehatIntegration'), 'SatuSehatIntegration');
+const ApiManagementSystem = lazyNamed(() => import('./components/ApiManagement/ApiManagementSystem'), 'ApiManagementSystem');
+const PanduanModule = lazyNamed(() => import('./components/Panduan/PanduanModule'), 'PanduanModule');
+const NotificationPreferences = React.lazy(() => import('./components/NotificationPreferences'));
+const Profile = lazyNamed(() => import('./components/Profile'), 'Profile');
+const AuthManagement = lazyNamed(() => import('./components/Auth/AuthManagement'), 'AuthManagement');
+const AuditTrail = React.lazy(() => import('./components/AuditTrail'));
+const BackupManagement = lazyNamed(() => import('./components/Backup/BackupManagement'), 'BackupManagement');
+const MonitoringSystem = lazyNamed(() => import('./components/Monitoring/MonitoringSystem'), 'MonitoringSystem');
+const ModulTriase = React.lazy(() => import('./components/ModulTriase'));
+const PengaturanRS = lazyNamed(() => import('./components/Settings/PengaturanRS'), 'PengaturanRS');
+const JKNMobile = lazyNamed(() => import('./components/JKNMobile/JKNMobile'), 'JKNMobile');
 import { AntrianProvider } from "./contexts/AntrianContext";
-import { PoliPelayanan } from "./components/Poli/PoliPelayanan";
-import { DisplayAntrianPoli } from "./components/Poli/DisplayAntrianPoli";
+const PoliPelayanan = lazyNamed(() => import('./components/Poli/PoliPelayanan'), 'PoliPelayanan');
+const DisplayAntrianPoli = lazyNamed(() => import('./components/Poli/DisplayAntrianPoli'), 'DisplayAntrianPoli');
 import CommandPalette from './components/CommandPalette';
-import { ICUMonitoring } from './components/ICU/ICUMonitoring';
-import { RehabMedik } from './components/Rehab/RehabMedik';
-import { GiziDiet } from './components/Gizi/GiziDiet';
-import { Telemedicine } from './components/Telemed/Telemedicine';
-import { PatientPortal } from './components/Portal/PatientPortal';
-import MultiBranchSystem from './components/MultiBranch/MultiBranchSystem';
-import { CRMManagement } from './components/CRM/CRMManagement';
-import { BlueprintSystemView } from './components/Blueprint/BlueprintSystemView';
+const ICUMonitoring = lazyNamed(() => import('./components/ICU/ICUMonitoring'), 'ICUMonitoring');
+const RehabMedik = lazyNamed(() => import('./components/Rehab/RehabMedik'), 'RehabMedik');
+const GiziDiet = lazyNamed(() => import('./components/Gizi/GiziDiet'), 'GiziDiet');
+const Telemedicine = lazyNamed(() => import('./components/Telemed/Telemedicine'), 'Telemedicine');
+const PatientPortal = lazyNamed(() => import('./components/Portal/PatientPortal'), 'PatientPortal');
+const MultiBranchSystem = React.lazy(() => import('./components/MultiBranch/MultiBranchSystem'));
+const CRMManagement = lazyNamed(() => import('./components/CRM/CRMManagement'), 'CRMManagement');
+const BlueprintSystemView = lazyNamed(() => import('./components/Blueprint/BlueprintSystemView'), 'BlueprintSystemView');
 
 // Bridging Modules
-import { BridgingHub } from './components/Bridging/BridgingHub';
-import { VClaimBridging } from './components/Bridging/VClaimBridging';
-import { SatuSehatBridging } from './components/Bridging/SatuSehatBridging';
-import { WAGatewayBridging } from './components/Bridging/WAGatewayBridging';
-import { AnjunganBridging } from './components/Bridging/AnjunganBridging';
-import { HFISBridging } from './components/Bridging/HFISBridging';
-import { VedikaBridging } from './components/Bridging/VedikaBridging';
-import { VeronisaBridging } from './components/Bridging/VeronisaBridging';
-import { BPJSEMRBridging } from './components/Bridging/BPJSEMRBridging';
-import { SertisignBridging } from './components/Bridging/SertisignBridging';
-import { OrthancBridging } from './components/Bridging/OrthancBridging';
-import { ApiGatewayBridging } from './components/Bridging/ApiGatewayBridging';
-import { CloudflareBridging } from './components/Bridging/CloudflareBridging';
+const BridgingHub = lazyNamed(() => import('./components/Bridging/BridgingHub'), 'BridgingHub');
+const VClaimBridging = lazyNamed(() => import('./components/Bridging/VClaimBridging'), 'VClaimBridging');
+const SatuSehatBridging = lazyNamed(() => import('./components/Bridging/SatuSehatBridging'), 'SatuSehatBridging');
+const WAGatewayBridging = lazyNamed(() => import('./components/Bridging/WAGatewayBridging'), 'WAGatewayBridging');
+const AnjunganBridging = lazyNamed(() => import('./components/Bridging/AnjunganBridging'), 'AnjunganBridging');
+const HFISBridging = lazyNamed(() => import('./components/Bridging/HFISBridging'), 'HFISBridging');
+const VedikaBridging = lazyNamed(() => import('./components/Bridging/VedikaBridging'), 'VedikaBridging');
+const VeronisaBridging = lazyNamed(() => import('./components/Bridging/VeronisaBridging'), 'VeronisaBridging');
+const BPJSEMRBridging = lazyNamed(() => import('./components/Bridging/BPJSEMRBridging'), 'BPJSEMRBridging');
+const SertisignBridging = lazyNamed(() => import('./components/Bridging/SertisignBridging'), 'SertisignBridging');
+const OrthancBridging = lazyNamed(() => import('./components/Bridging/OrthancBridging'), 'OrthancBridging');
+const ApiGatewayBridging = lazyNamed(() => import('./components/Bridging/ApiGatewayBridging'), 'ApiGatewayBridging');
+const CloudflareBridging = lazyNamed(() => import('./components/Bridging/CloudflareBridging'), 'CloudflareBridging');
 
 function AppContent() {
   const { currentUser, logout, loading } = useAuth();
@@ -108,6 +113,7 @@ function AppContent() {
 
       <main className="flex-1 flex flex-col min-w-0 relative w-full scroll-smooth">
         <ErrorBoundary>
+          <React.Suspense fallback={<div className="flex-1 flex items-center justify-center p-10"><div className="w-10 h-10 border-4 border-sky-500 border-t-transparent rounded-full animate-spin" role="status" aria-label="Memuat modul" /></div>}>
           <Routes>
             {/* 1. Portal Publik Pasien & App Mobile Pasien dipisah ke aplikasi web publik (PublicApp.tsx / public.html) */}
             <Route path="/" element={<Navigate to={currentUser ? '/dashboard' : '/staff/login'} replace />} />
@@ -245,6 +251,7 @@ function AppContent() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </React.Suspense>
         </ErrorBoundary>
       </main>
     </div>

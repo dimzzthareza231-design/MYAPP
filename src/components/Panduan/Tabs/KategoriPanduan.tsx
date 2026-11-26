@@ -1,7 +1,9 @@
 import React from 'react';
-import { Plus, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Folder, Activity, Bot, CreditCard, FlaskConical, HeartPulse, Stethoscope, UserPlus } from 'lucide-react';
 import { dummyCategories } from '../dummyData';
-import * as Icons from 'lucide-react';
+
+// Peta eksplisit: `import * as` dari lucide-react memasukkan semua ikon (~900 KB) ke bundle.
+const CATEGORY_ICONS: Record<string, typeof Folder> = { Activity, Bot, CreditCard, FlaskConical, HeartPulse, Stethoscope, UserPlus };
 
 export function KategoriPanduan() {
   return (
@@ -28,8 +30,7 @@ export function KategoriPanduan() {
           </thead>
           <tbody className="divide-y divide-slate-200">
             {dummyCategories.map((cat, i) => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const IconComp = (Icons as any)[cat.icon] || Icons.Folder;
+              const IconComp = CATEGORY_ICONS[cat.icon] || Folder;
               return (
                 <tr key={i} className="hover:bg-slate-50">
                   <td className="p-4">

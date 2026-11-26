@@ -39,10 +39,10 @@ import {
   CheckCircle2,
   Filter
 } from 'lucide-react';
-import { MedicalSearchGrounding } from './MedicalSearchGrounding';
-import { PatientQRScannerModal } from './RME/PatientQRScannerModal';
-import ClinicalDecisionSupportWidget from './ClinicalDecisionSupportWidget';
-import { SmartVoiceReport } from './RME/SmartVoiceReport';
+const MedicalSearchGrounding = React.lazy(() => import('./MedicalSearchGrounding').then((m) => ({ default: m.MedicalSearchGrounding })));
+const PatientQRScannerModal = React.lazy(() => import('./RME/PatientQRScannerModal').then((m) => ({ default: m.PatientQRScannerModal })));
+const ClinicalDecisionSupportWidget = React.lazy(() => import('./ClinicalDecisionSupportWidget'));
+const SmartVoiceReport = React.lazy(() => import('./RME/SmartVoiceReport').then((m) => ({ default: m.SmartVoiceReport })));
 import NotificationBell from './NotificationBell';
 import { BrandLogo } from './Common/BrandLogo';
 
@@ -992,8 +992,9 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
       )}
 
       {/* ========================================================================= */}
-      {/* 5. MODALS & POPUPS                                                        */}
+      {/* 5. MODALS & POPUPS (dimuat saat dibuka)                                   */}
       {/* ========================================================================= */}
+      <React.Suspense fallback={null}>
       {showQRScanner && (
         <PatientQRScannerModal
           isOpen={showQRScanner}
@@ -1030,6 +1031,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
           onClose={() => setShowVoiceScribeModal(false)}
         />
       )}
+      </React.Suspense>
     </header>
   );
 }

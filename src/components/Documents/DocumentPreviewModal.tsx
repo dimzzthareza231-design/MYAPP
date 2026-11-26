@@ -7,8 +7,9 @@ import {
 import { HospitalDocumentModel } from '../../types/document';
 import { HospitalDocumentSheet } from './HospitalDocumentSheet';
 import { useToast } from '../../contexts/ToastContext';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas-pro';
+// jspdf + html2canvas (~580 KB) dimuat saat tombol unduh/cetak ditekan, bukan di bundle awal.
+const loadHtml2canvas = () => import('html2canvas-pro').then((m) => m.default);
+const loadJsPDF = () => import('jspdf').then((m) => m.default);
 
 interface DocumentPreviewModalProps {
   isOpen: boolean;
@@ -80,6 +81,7 @@ export function DocumentPreviewModal({
         return;
       }
 
+      const html2canvas = await loadHtml2canvas();
       const canvas = await html2canvas(element, {
         scale: 2.0, // High-DPI for sharp typography
         useCORS: true,
@@ -88,6 +90,7 @@ export function DocumentPreviewModal({
       });
 
       const imgData = canvas.toDataURL('image/png', 1.0);
+      const jsPDF = await loadJsPDF();
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
@@ -138,6 +141,7 @@ export function DocumentPreviewModal({
         return;
       }
 
+      const html2canvas = await loadHtml2canvas();
       const canvas = await html2canvas(element, {
         scale: 2.0,
         useCORS: true,

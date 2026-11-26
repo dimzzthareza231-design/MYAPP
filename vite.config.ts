@@ -9,7 +9,7 @@ export type AppTarget = 'core' | 'public';
 // Dua aplikasi dari satu codebase: 'public' (portal pasien, public.html) dan 'core' (SIMK/RME, index.html).
 export function makeConfig(target: AppTarget) {
   const isPublic = target === 'public';
-  return defineConfig({
+  return defineConfig(({ mode }) => ({
     define: {
       'import.meta.env.VITE_APP_TARGET': JSON.stringify(target),
     },
@@ -118,6 +118,10 @@ export function makeConfig(target: AppTarget) {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        // Build Cloudflare inti memakai login lokal; SDK Firebase tidak pernah dipanggil.
+        ...(mode === 'cloudflare' && !isPublic ? Object.fromEntries(
+          ['firebase/app', 'firebase/auth', 'firebase/firestore'].map((id) => [id, path.resolve(__dirname, 'src/lib/firebaseStub.ts')])
+        ) : {}),
       },
     },
     server: {
@@ -127,7 +131,7 @@ export function makeConfig(target: AppTarget) {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
-  });
+  }));
 }
 
 export default makeConfig('core');
