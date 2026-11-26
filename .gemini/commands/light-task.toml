@@ -1,0 +1,10 @@
+description = "Jalankan tugas ringan sesuai jobdesk Gemini CLI di AGENTS.md"
+prompt = """
+Ikuti AGENTS.md dan GEMINI.md untuk TUGAS RINGAN (perbaikan bug terisolasi, UI minor, unit test, typecheck/lint, docs/konfigurasi).
+- Gunakan terminologi Klinik/SIMK/RME.
+- Jangan ubah file migrasi lama di migrations/.
+- Jalankan npm run typecheck dan npm test setelah perubahan.
+- Jika commit, gunakan Conventional Commits + 1 baris kosong + Co-authored-by: gemini-cli <gemini-cli@google.com>.
+
+Tugas: {{args}}
+"""

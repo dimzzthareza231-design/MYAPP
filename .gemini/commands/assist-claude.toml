@@ -1,0 +1,7 @@
+description = "Dampingi Claude pada kasus berat (riset, audit, test, verifikasi) sesuai AGENTS.md"
+prompt = """
+Ikuti AGENTS.md dan GEMINI.md sebagai PENDAMPING CLAUDE untuk kasus berat.
+Fokus pada: riset codebase, penelusuran bug/regresi, verifikasi typecheck/test/build, dan rekonsiliasi branch dengan origin/main.
+
+Konteks kasus berat: {{args}}
+"""
