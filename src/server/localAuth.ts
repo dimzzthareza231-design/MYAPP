@@ -16,6 +16,7 @@ interface LocalStaffUserRecord {
   passwordHash: string;
   aktif: boolean;
   dibuatPada: string;
+  passwordSeed?: string;
 }
 
 interface LocalAuthSessionRecord {
@@ -59,7 +60,6 @@ interface LocalAuthBootstrapUser {
   nama: string;
   roleId: string;
   password: string;
-  passwordEnv?: string;
 }
 
 interface LocalAuthOptions {
@@ -68,15 +68,26 @@ interface LocalAuthOptions {
   bootstrapUsers?: LocalAuthBootstrapUser[];
 }
 
+// Sandi bawaan per role = <username>123 (permintaan pemilik). Naikkan versi untuk me-reset ulang semua akun bawaan.
+const PASSWORD_SEED = 'rbac-default-v1';
 const ROLE_SEEDS = [
-  { username: 'admin', email: process.env.LOCAL_AUTH_ADMIN_EMAIL?.trim() || 'admin@myitaru.local', nama: 'Administrator SIMK', roleId: 'admin', passwordEnv: 'LOCAL_AUTH_ADMIN_PASSWORD' },
-  { username: 'dokter', email: 'dokter@myitaru.local', nama: 'Dokter MYITARU', roleId: 'dokter', passwordEnv: 'LOCAL_AUTH_DOKTER_PASSWORD' },
-  { username: 'perawat', email: 'perawat@myitaru.local', nama: 'Perawat MYITARU', roleId: 'perawat', passwordEnv: 'LOCAL_AUTH_PERAWAT_PASSWORD' },
-  { username: 'rmik', email: 'rmik@myitaru.local', nama: 'Perekam Medis MYITARU', roleId: 'rekam_medis', passwordEnv: 'LOCAL_AUTH_RMIK_PASSWORD' },
-  { username: 'apoteker', email: 'apoteker@myitaru.local', nama: 'Apoteker MYITARU', roleId: 'apoteker', passwordEnv: 'LOCAL_AUTH_APOTEKER_PASSWORD' },
-  { username: 'kasir', email: 'kasir@myitaru.local', nama: 'Kasir MYITARU', roleId: 'kasir', passwordEnv: 'LOCAL_AUTH_KASIR_PASSWORD' },
-  // Opsional: deployment lama tetap bisa start sebelum LOCAL_AUTH_LAB_PASSWORD diisi.
-  { username: 'lab', email: 'lab@myitaru.local', nama: 'Analis Laboratorium MYITARU', roleId: 'laboran', passwordEnv: 'LOCAL_AUTH_LAB_PASSWORD', optional: true }
+  { username: 'admin', email: process.env.LOCAL_AUTH_ADMIN_EMAIL?.trim() || 'admin@myitaru.local', nama: 'Administrator SIMK', roleId: 'admin' },
+  { username: 'dokter', email: 'dokter@myitaru.local', nama: 'Dokter MYITARU', roleId: 'dokter' },
+  { username: 'perawat', email: 'perawat@myitaru.local', nama: 'Perawat MYITARU', roleId: 'perawat' },
+  { username: 'rmik', email: 'rmik@myitaru.local', nama: 'Perekam Medis MYITARU', roleId: 'rekam_medis' },
+  { username: 'apoteker', email: 'apoteker@myitaru.local', nama: 'Apoteker MYITARU', roleId: 'apoteker' },
+  { username: 'kasir', email: 'kasir@myitaru.local', nama: 'Kasir MYITARU', roleId: 'kasir' },
+  { username: 'lab', email: 'lab@myitaru.local', nama: 'Analis Laboratorium MYITARU', roleId: 'laboran' },
+  { username: 'super_admin', email: 'super_admin@myitaru.local', nama: 'Super Admin', roleId: 'super_admin' },
+  { username: 'viewer', email: 'viewer@myitaru.local', nama: 'Guest Viewer', roleId: 'viewer' },
+  { username: 'direksi', email: 'direksi@myitaru.local', nama: 'Direksi & Manajemen', roleId: 'direksi' },
+  { username: 'bidan', email: 'bidan@myitaru.local', nama: 'Bidan', roleId: 'bidan' },
+  { username: 'pendaftaran', email: 'pendaftaran@myitaru.local', nama: 'Petugas Pendaftaran', roleId: 'pendaftaran' },
+  { username: 'radiografer', email: 'radiografer@myitaru.local', nama: 'Radiografer', roleId: 'radiografer' },
+  { username: 'manajemen_mutu', email: 'manajemen_mutu@myitaru.local', nama: 'Komite Mutu (PMKP)', roleId: 'manajemen_mutu' },
+  { username: 'rehab_medik', email: 'rehab_medik@myitaru.local', nama: 'Fisioterapis & Rehab', roleId: 'rehab_medik' },
+  { username: 'gizi', email: 'gizi@myitaru.local', nama: 'Nutrisionis / Ahli Gizi', roleId: 'gizi' },
+  { username: 'it_support', email: 'it_support@myitaru.local', nama: 'IT Support & Infra', roleId: 'it_support' }
 ] as const;
 
 function derivePassword(password: string, salt: string): Promise<Buffer> {
@@ -111,11 +122,7 @@ function isValidPasswordHash(value: string): boolean {
 }
 
 function getBootstrapUsers(): LocalAuthBootstrapUser[] {
-  return ROLE_SEEDS.flatMap(({ username, email, nama, roleId, passwordEnv }) => {
-    const password = process.env[passwordEnv];
-    // Panjang dicek di initialize(), hanya saat akun benar-benar dibuat; akun yang sudah ada tidak memakai secret ini.
-    return password ? [{ username, email, nama, roleId, password, passwordEnv }] : [];
-  });
+  return ROLE_SEEDS.map((seed) => ({ ...seed, password: `${seed.username}123` }));
 }
 
 export class LocalAuthService implements LocalAuthProvider {
@@ -174,10 +181,11 @@ export class LocalAuthService implements LocalAuthProvider {
         if (stored.roleId !== account.roleId || stored.username.toLowerCase() !== normalizedUsername) {
           throw new Error(`Existing local staff account ${username} conflicts with its configured role.`);
         }
-        continue;
+        // Akun lama (sandi dari secret) di-reset sekali ke sandi bawaan; setelah itu dilewati.
+        if (stored.passwordSeed === PASSWORD_SEED) continue;
       }
-      if (account.password.length < 12 || account.password.length > 128) {
-        throw new Error(`${account.passwordEnv || 'Local staff password'} must contain between 12 and 128 characters.`);
+      if (account.password.length < 6 || account.password.length > 128) {
+        throw new Error(`Local staff password for ${username} must contain between 6 and 128 characters.`);
       }
 
       const salt = randomBytes(16).toString('hex');
@@ -194,25 +202,13 @@ export class LocalAuthService implements LocalAuthProvider {
           passwordSalt: salt,
           passwordHash,
           aktif: true,
-          dibuatPada: new Date().toISOString()
+          dibuatPada: stored?.dibuatPada || new Date().toISOString(),
+          passwordSeed: PASSWORD_SEED
         } satisfies LocalStaffUserRecord
       });
     }
 
     if (changes.length) await this.persistence.commit(changes);
-    const persistedUsers = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
-    const provisionedRoles = new Set(persistedUsers.filter(({ data }) => data.aktif).map(({ data }) => data.roleId));
-    const missingRoles = ROLE_SEEDS
-      .filter((seed) => !('optional' in seed) && !provisionedRoles.has(seed.roleId))
-      .map(({ roleId, passwordEnv }) => ({ roleId, passwordEnv }));
-
-    if (process.env.NODE_ENV === 'production' && missingRoles.length) {
-      throw new Error(`Local authentication requires provisioned accounts for all staff roles. Configure: ${missingRoles.map(({ passwordEnv }) => passwordEnv).join(', ')}.`);
-    }
-    if (persistedUsers.length === 0) {
-      console.warn('[Auth:local] No local staff accounts are provisioned; set role-specific LOCAL_AUTH_*_PASSWORD values before logging in.');
-    }
-
     const now = Date.now();
     const expiredSessions = (await this.persistence.list<LocalAuthSessionRecord>('local_auth_sessions'))
       .filter(({ data }) => !Number.isFinite(data.expiresAt) || data.expiresAt <= now)

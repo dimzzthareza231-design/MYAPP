@@ -139,7 +139,7 @@ npm run dev
 
 - Web publik: http://localhost:3000
 - Aplikasi inti: http://localhost:3001.
-- Untuk mode intranet tanpa Firebase, pertahankan `AUTH_MODE=local`, `VITE_AUTH_MODE=local`, dan `STORAGE_MODE=mysql`. Aktifkan MySQL/MariaDB dan isi enam sandi unik kuat (`LOCAL_AUTH_ADMIN_PASSWORD`, `LOCAL_AUTH_DOKTER_PASSWORD`, `LOCAL_AUTH_PERAWAT_PASSWORD`, `LOCAL_AUTH_RMIK_PASSWORD`, `LOCAL_AUTH_APOTEKER_PASSWORD`, `LOCAL_AUTH_KASIR_PASSWORD`) sebelum menjalankan server. `LOCAL_AUTH_LAB_PASSWORD` opsional untuk akun `lab` (Laboratorium). Email akun admin dapat dikonfigurasi lewat `LOCAL_AUTH_ADMIN_EMAIL`. Server membuat akun bawaan sekali dan menyimpan hash scrypt ke tabel `local_auth_users`; tidak ada sandi default yang ditanam di kode. Login awal: `admin`, `dokter`, `perawat`, `rmik`, `apoteker`, `kasir`, atau `lab`, lalu masukkan sandi yang Anda konfigurasi.
+- Untuk mode intranet tanpa Firebase, pertahankan `AUTH_MODE=local`, `VITE_AUTH_MODE=local`, dan `STORAGE_MODE=mysql`. Server membuat satu akun per role RBAC (`src/data/roles.ts`) dan menyimpan hash scrypt ke `local_auth_users`. Sandi bawaan = `<username>123`: `admin`/`admin123`, `dokter`/`dokter123`, `perawat`/`perawat123`, `rmik`/`rmik123`, `apoteker`/`apoteker123`, `kasir`/`kasir123`, `lab`/`lab123`, `super_admin`, `viewer`, `direksi`, `bidan`, `pendaftaran`, `radiografer`, `manajemen_mutu`, `rehab_medik`, `gizi`, `it_support` (pola sama). Akun lama di-reset sekali ke sandi ini. Email admin dapat diubah lewat `LOCAL_AUTH_ADMIN_EMAIL`.
 - Untuk Firebase, set `AUTH_MODE=firebase`, `VITE_AUTH_MODE=firebase`, isi `VITE_FIREBASE_API_KEY` serta konfigurasi Firebase Admin, dan provision akun beserta MFA TOTP. Tombol Google hanya tampil bila konfigurasi Firebase tersedia.
 - `ALLOW_INSECURE_DEMO_AUTH=true` hanya membuka jalur autentikasi demo pasien dan gateway karyawan untuk pengujian lokal. Jangan pernah mengaktifkannya di produksi; API inti tetap memerlukan identitas Firebase.
 
@@ -149,7 +149,6 @@ npm run dev
 |---|---|---|
 | `SESSION_SECRET` | Produksi | Kunci tanda tangan token sesi; gunakan nilai acak minimal 32 karakter. |
 | `AUTH_MODE` / `VITE_AUTH_MODE` | Tidak | Gunakan `local` untuk intranet (tanpa Firebase) atau `firebase`; keduanya harus selaras. Tanpa `VITE_FIREBASE_API_KEY`, klien memilih mode lokal. |
-| `LOCAL_AUTH_*_PASSWORD` | Mode lokal | Sandi awal unik kuat untuk enam akun peran; hanya dibaca server lalu di-hash dengan scrypt. Jangan memasukkan nilai sandi ke repositori. |
 | `LOCAL_AUTH_ADMIN_EMAIL` | Tidak | Alamat email akun admin lokal; bawaan `admin@myitaru.local`. |
 | `MYITARU_QR_SECRET` | Produksi | Kunci enkripsi QR khusus server; bila kosong, QR memakai `SESSION_SECRET`. |
 | `STORAGE_MODE` / `VITE_STORAGE_MODE` | Produksi | Set nilainya sama. Cloudflare memakai `d1`; mode lokal memakai `mysql`; Firebase/hybrid untuk integrasi cloud, sedangkan `memory` hanya untuk demo dan tes. |
@@ -217,7 +216,6 @@ npm run cf:migrate                        # terapkan migrations/ ke D1
 # Secret --env core (Worker publik cukup SESSION_SECRET dan MYITARU_QR_SECRET dengan --env public):
 npx wrangler secret put SESSION_SECRET --env core   # minimal 32 karakter
 npx wrangler secret put MYITARU_QR_SECRET --env core
-npx wrangler secret put LOCAL_AUTH_ADMIN_PASSWORD --env core   # juga DOKTER/PERAWAT/RMIK/APOTEKER/KASIR
 npx wrangler secret put GEMINI_API_KEY --env core              # opsional
 ```
 
@@ -254,7 +252,7 @@ Mode `NODE_ENV=production` hanya dapat startup bila `STORAGE_MODE` menunjuk ke p
 ## Keamanan dan keterbatasan
 
 - **Jangan gunakan data pasien nyata.** Walau beberapa endpoint kini memakai persistent adapter dan API inti memerlukan autentikasi server-side, sejumlah modul klinis masih belum terhubung ke persistence tersebut.
-- Mode autentikasi lokal tidak mewajibkan MFA. Batasi ke intranet tersegmentasi, gunakan sandi unik kuat, lindungi akses jaringan dan database, serta jaga kerahasiaan `SESSION_SECRET`. Akun awal dibuat dari variabel `LOCAL_AUTH_*_PASSWORD` dan tidak memiliki sandi bawaan.
+- Mode autentikasi lokal tidak mewajibkan MFA. Batasi ke intranet tersegmentasi, lindungi akses jaringan dan database, serta jaga kerahasiaan `SESSION_SECRET`. Akun bawaan memakai sandi `<username>123` yang tercantum di README ini, jadi siapa pun yang membaca repo bisa login.
 - **Ketahanan operasional belum lengkap.** Backup/pemulihan dan integrasi BPJS, SATUSEHAT, serta QRIS belum tervalidasi end-to-end; integrasi yang belum tersedia harus tetap dianggap simulasi.
 - Keluaran AI belum dievaluasi akurasinya terhadap standar klinis dan wajib diverifikasi tenaga kesehatan.
 - Portal karyawan masih prototipe dan belum memiliki integrasi identitas HRIS.
