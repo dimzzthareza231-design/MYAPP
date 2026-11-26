@@ -397,10 +397,14 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
       };
 
       void refreshFromServer();
-      const timer = window.setInterval(() => void refreshFromServer(), 30_000);
+      // Tab tersembunyi tidak polling; saat kembali terlihat langsung disegarkan.
+      const timer = window.setInterval(() => { if (!document.hidden) void refreshFromServer(); }, 30_000);
+      const onVisible = () => { if (!document.hidden) void refreshFromServer(); };
+      document.addEventListener('visibilitychange', onVisible);
       return () => {
         active = false;
         window.clearInterval(timer);
+        document.removeEventListener('visibilitychange', onVisible);
       };
     }
 

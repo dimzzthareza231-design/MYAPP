@@ -949,9 +949,13 @@ export async function createApps(
     }
 
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
+    // Daftar hanya ringkasan (~300 B/pasien), jadi batas 1000 aman; rekam lengkap lewat GET /patients/:id.
+    const limitNum = Math.min(1000, Math.max(1, parseInt(limit as string, 10) || 20));
     const startIndex = (pageNum - 1) * limitNum;
-    const paginated = results.slice(startIndex, startIndex + limitNum).map((patient) => patientForRole(patient, req));
+    const clinical = hasScope((req as CoreAuthRequest).corePrincipal?.roleId || '', 'rekam-medis');
+    const summaryFields: readonly string[] = clinical ? [...PATIENT_IDENTITY_FIELDS, 'keluhan_utama', 'diagnosa_primer'] : PATIENT_IDENTITY_FIELDS;
+    const paginated = results.slice(startIndex, startIndex + limitNum).map((patient) =>
+      Object.fromEntries(summaryFields.filter((key) => key in patient).map((key) => [key, (patient as unknown as Record<string, unknown>)[key]])));
 
     res.json({
       success: true,
