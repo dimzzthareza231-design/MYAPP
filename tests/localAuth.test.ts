@@ -398,7 +398,6 @@ describe('ganti kata sandi', () => {
     assert.ok(session);
     // Sebelum ganti sandi: mustChangePassword harus true
     assert.equal(session.user.mustChangePassword, true);
-
     assert.equal(await service.changePassword(session.token, 'salah', 'SandiBaru-2026'), 'WRONG_PASSWORD');
     assert.equal(await service.changePassword(session.token, 'kasir123', 'pendek'), 'WEAK_PASSWORD');
     assert.equal(await service.changePassword(session.token, 'kasir123', 'SandiBaru-2026'), 'OK');

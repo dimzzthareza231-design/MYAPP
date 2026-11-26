@@ -80,7 +80,7 @@ function parseLocalUser(value: unknown): User | null {
     roleId: record.roleId,
     aktif: record.aktif,
     dibuatPada: typeof record.dibuatPada === 'string' ? record.dibuatPada : '',
-    mustChangePassword: record.mustChangePassword === true || undefined
+    ...(typeof record.mustChangePassword === 'boolean' ? { mustChangePassword: record.mustChangePassword } : {})
   };
 }
 

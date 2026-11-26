@@ -36,3 +36,8 @@ Cloudflare diurus pengguna sendiri. Job `deploy` di `.github/workflows/ci.yml` h
 
 - Jangan menulis catatan sesi, spec, atau log kerja agen ke repo (misalnya `.10x/`).
 - Pesan commit tanpa baris `Claude-Session:` atau tautan sesi lain.
+
+## Kolaborasi Multi-Agent (`AGENTS.md`)
+
+- **Claude** menjadi lead untuk **kasus berat/kompleks** (arsitektur, keamanan/auth, migrasi, refactor lintas modul) dan berkolaborasi dengan **GitHub Copilot CLI**, **Antigravity**, serta **Gemini CLI** untuk riset, test, verifikasi, dan tugas ringan.
+- Ikuti konvensi bersama di `AGENTS.md`.
