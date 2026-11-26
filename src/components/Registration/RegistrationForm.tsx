@@ -567,14 +567,14 @@ export function RegistrationForm({ initialData, onClose }: { initialData?: any, 
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <button 
+            {import.meta.env.DEV && <button
               type="button"
-              onClick={populateDummyData} 
+              onClick={populateDummyData}
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 flex items-center gap-1 shadow-sm transition-all"
               title="Isi otomatis dengan data dummy untuk mempermudah testing"
             >
               <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> Auto-Fill Dummy
-            </button>
+            </button>}
             <button 
               type="button"
               onClick={saveDraft} 

@@ -206,7 +206,7 @@ export function ActivityLogsTab() {
               Unduh CSV
             </button>
 
-            <button
+            {import.meta.env.DEV && <button
               id="clear-logs-btn"
               onClick={() => {
                 clearActivityLogs();
@@ -216,7 +216,7 @@ export function ActivityLogsTab() {
             >
               <Trash2 className="w-3.5 h-3.5" />
               Bersihkan
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -277,8 +277,8 @@ export function ActivityLogsTab() {
           </div>
         </div>
 
-        {/* Real-Time Live Activity Simulator Bar */}
-        <div className="mt-5 p-3.5 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-900/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        {/* Real-Time Live Activity Simulator Bar (hanya dev: menulis log palsu) */}
+        {import.meta.env.DEV && <div className="mt-5 p-3.5 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-900/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Radio className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-pulse" />
             <div>
@@ -328,7 +328,7 @@ export function ActivityLogsTab() {
               + Sim. Akses Ditolak
             </button>
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Filter & Search Bar */}

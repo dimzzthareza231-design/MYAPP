@@ -1197,14 +1197,14 @@ export const EmployeePortal: React.FC = () => {
                   Radius Kampus: <strong>{attendanceData.geofence.name}</strong> (Maks. {attendanceData.geofence.radiusMeters} meter).
                 </p>
 
-                <label className="flex items-center gap-2 text-xs font-semibold p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 cursor-pointer">
+                {import.meta.env.DEV && <label className="flex items-center gap-2 text-xs font-semibold p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={simulateOutOfRange}
                     onChange={(e) => setSimulateOutOfRange(e.target.checked)}
                   />
                   <span>Simulasikan Posisi di Luar Radius Klinik (Uji Tolak Geofence)</span>
-                </label>
+                </label>}
 
                 <div className="grid grid-cols-2 gap-2.5">
                   {(['MASUK', 'PULANG', 'LEMBUR', 'KOREKSI'] as const).map((clockType) => (

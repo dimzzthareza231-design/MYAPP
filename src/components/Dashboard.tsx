@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MODULE_REGISTRY } from '../data/moduleRegistry';
 import { useHospital } from '../contexts/HospitalContext';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getRoleById } from '../data/roles';
+import { isModuleAvailableInMode } from '../data/operatingModes';
 import TopNavbar from './TopNavbar';
 import { storage } from '../utils/storage';
 import { DashboardWidgetAntrian } from './DashboardWidgetAntrian';
@@ -31,8 +32,14 @@ const HEALTH_QUOTES = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { activeUser, pasien, kunjungan } = useHospital();
+  const { activeUser, pasien, kunjungan, hospitalSettings } = useHospital();
   const { currentUser, hasAccess } = useAuth();
+  const operatingMode = hospitalSettings.operatingMode === 'SIMRS' ? 'SIMRS' : 'SIMK';
+  // Filter sama dengan Direktori Modul (TopNavbar): role + mode operasional
+  const canOpen = useCallback(
+    (moduleId: string) => hasAccess(moduleId) && isModuleAvailableInMode(moduleId, operatingMode),
+    [hasAccess, operatingMode]
+  );
   const currentRole = currentUser ? getRoleById(currentUser.roleId) : null;
   const toast = useToast();
   
@@ -139,14 +146,14 @@ export default function Dashboard() {
                   <div className="text-xs text-slate-500 dark:text-slate-400 font-medium tracking-wide uppercase">Total Pasien</div>
                   <div className="text-3xl font-black mt-1 text-slate-900 dark:text-white font-mono tabular-nums">{totalPasien}</div>
                 </div>
-                <div className="bg-rose-50/60 dark:bg-white/[0.04] backdrop-blur-xl rounded-2xl p-4 border border-rose-200/80 dark:border-white/[0.08] transform transition-all duration-300 hover:bg-rose-50 dark:hover:bg-white/[0.08] hover:border-rose-300 dark:hover:border-rose-400/40 hover:-translate-y-0.5 flex-1 flex flex-col justify-center relative overflow-hidden group">
+                {canOpen('igd') && <div className="bg-rose-50/60 dark:bg-white/[0.04] backdrop-blur-xl rounded-2xl p-4 border border-rose-200/80 dark:border-white/[0.08] transform transition-all duration-300 hover:bg-rose-50 dark:hover:bg-white/[0.08] hover:border-rose-300 dark:hover:border-rose-400/40 hover:-translate-y-0.5 flex-1 flex flex-col justify-center relative overflow-hidden group">
                   <div className="text-xs text-slate-500 dark:text-slate-400 font-medium tracking-wide uppercase">Pasien IGD</div>
                   <div className="text-3xl font-black mt-1 text-rose-600 dark:text-rose-400 font-mono tabular-nums">{totalIgd}</div>
-                </div>
-                <div className="bg-amber-50/60 dark:bg-white/[0.04] backdrop-blur-xl rounded-2xl p-4 border border-amber-200/80 dark:border-white/[0.08] transform transition-all duration-300 hover:bg-amber-50 dark:hover:bg-white/[0.08] hover:border-amber-300 dark:hover:border-[#C9A94E]/40 hover:-translate-y-0.5 flex-1 flex flex-col justify-center relative overflow-hidden group">
+                </div>}
+                {canOpen('rawat-jalan') && <div className="bg-amber-50/60 dark:bg-white/[0.04] backdrop-blur-xl rounded-2xl p-4 border border-amber-200/80 dark:border-white/[0.08] transform transition-all duration-300 hover:bg-amber-50 dark:hover:bg-white/[0.08] hover:border-amber-300 dark:hover:border-[#C9A94E]/40 hover:-translate-y-0.5 flex-1 flex flex-col justify-center relative overflow-hidden group">
                   <div className="text-xs text-slate-500 dark:text-slate-400 font-medium tracking-wide uppercase">Antrean Poli</div>
                   <div className="text-3xl font-black mt-1 text-amber-700 dark:text-[#E5CA78] font-mono tabular-nums">{totalPoli}</div>
-                </div>
+                </div>}
               </div>
             </div>
           </div>
@@ -183,7 +190,7 @@ export default function Dashboard() {
           {MODULE_REGISTRY.map((cat) => {
             const matchingModules = cat.modules.filter(m => {
               // Proteksi berdasarkan role
-              if (!hasAccess(m.id)) return false;
+              if (!canOpen(m.id)) return false;
               // Proteksi security hanya untuk super_admin, admin, dan it_support
               if ((m.id === 'security' || m.label === 'Security') && currentUser?.roleId !== 'super_admin' && currentUser?.roleId !== 'admin' && currentUser?.roleId !== 'it_support') return false;
               return m.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -249,7 +256,7 @@ export default function Dashboard() {
 
         {/* AI CLINICAL INSIGHTS MODULAR DRAG-AND-DROP GRID */}
         <div className="mb-10">
-          <AIClinicalInsightsGrid />
+          <AIClinicalInsightsGrid canOpen={canOpen} />
         </div>
 
         {/* BLUEPRINT SISTEM EVALUASI & PENGEMBANGAN HERO CARD */}
@@ -286,16 +293,16 @@ export default function Dashboard() {
                   { n: '6', l: 'Billing', r: '/modul/kasir' },
                   { n: '7', l: 'Disposisi', r: '/modul/rawat-inap' },
                   { n: '8', l: 'RME Final', r: '/modul/rekam-medis' }
-                ].map((s, idx) => (
+                ].filter(s => canOpen(s.r.slice('/modul/'.length).split('?')[0])).map((s, idx, steps) => (
                   <React.Fragment key={s.n}>
                     <button
                       onClick={() => navigate(s.r)}
                       className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-cyan-500 hover:text-slate-950 text-white border border-white/15 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1"
                     >
-                      <span className="w-4 h-4 rounded-full bg-cyan-400/30 text-cyan-200 text-[9px] flex items-center justify-center font-mono">{s.n}</span>
+                      <span className="w-4 h-4 rounded-full bg-cyan-400/30 text-cyan-200 text-[9px] flex items-center justify-center font-mono">{idx + 1}</span>
                       <span>{s.l}</span>
                     </button>
-                    {idx < 7 && <span className="text-cyan-400/60 font-bold">→</span>}
+                    {idx < steps.length - 1 && <span className="text-cyan-400/60 font-bold">→</span>}
                   </React.Fragment>
                 ))}
               </div>
@@ -309,12 +316,12 @@ export default function Dashboard() {
                 <span>Buka Blueprint Lengkap</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
-              <button
+              {canOpen('blueprint') && <button
                 onClick={() => navigate('/modul/blueprint')}
                 className="px-4 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white border border-white/20 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer"
               >
                 <span>Halaman Modul</span>
-              </button>
+              </button>}
             </div>
           </div>
         </div>

@@ -152,12 +152,12 @@ export default function TalkToText({ onTranscriptReady, currentSOAP, setCurrentS
             Dokter berbicara, AI otomatis isi form SOAP
           </p>
         </div>
-        <button
+        {import.meta.env.DEV && <button
           onClick={handleDemoMode}
           className="text-xs bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded hover:bg-gray-300"
         >
           🎭 Demo Mode
-        </button>
+        </button>}
       </div>
 
       {isRecording && (

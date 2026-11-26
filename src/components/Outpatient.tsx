@@ -1527,13 +1527,13 @@ export function Outpatient() {
             <UserPlus className="w-3.5 h-3.5" /> + Pasien Baru
           </button>
 
-          <button
+          {import.meta.env.DEV && <button
             onClick={() => handleLoadDemoScribe('dalam')}
             className="px-3 py-2 bg-purple-950/60 hover:bg-purple-900/70 border border-purple-700/60 text-purple-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
             title="Muat demo suara AI Scribe kasus Penyakit Dalam"
           >
             <Sparkles className="w-3.5 h-3.5" /> Demo AI
-          </button>
+          </button>}
         </div>
       </div>
 

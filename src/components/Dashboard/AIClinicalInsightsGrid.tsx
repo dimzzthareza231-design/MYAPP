@@ -44,7 +44,7 @@ const DEFAULT_INSIGHT_CARDS: AIInsightCardItem[] = [
       { text: 'Pasien Tn. Budi di Triase IGD menunjukkan desaturasi SpO2 89%. Dianjurkan kanul O2 4Lpm.', type: 'warning' }
     ],
     actionLabel: 'Buka Modul Triase IGD',
-    actionRoute: '/modul/triase',
+    actionRoute: '/modul/igd',
     lastUpdated: 'Baru saja'
   },
   {
@@ -66,7 +66,7 @@ const DEFAULT_INSIGHT_CARDS: AIInsightCardItem[] = [
       { text: 'Kapasitas Poli Penyakit Dalam diproyeksikan melonjak 22% pada jam 09.00-11.30 esok hari.', type: 'recommendation' }
     ],
     actionLabel: 'Buka Poliklinik & Antrean',
-    actionRoute: '/modul/poli',
+    actionRoute: '/modul/rawat-jalan',
     lastUpdated: '3 menit lalu'
   },
   {
@@ -161,7 +161,7 @@ const DEFAULT_INSIGHT_CARDS: AIInsightCardItem[] = [
 
 const STORAGE_KEY = 'myitaru_ai_clinical_insights_order';
 
-export function AIClinicalInsightsGrid() {
+export function AIClinicalInsightsGrid({ canOpen }: { canOpen: (moduleId: string) => boolean }) {
   const navigate = useNavigate();
 
   // Load ordered cards from localStorage or fall back to default
@@ -295,17 +295,23 @@ export function AIClinicalInsightsGrid() {
     }));
   };
 
+  // Sembunyikan kartu yang modul tujuannya tidak tersedia (mode operasional / role)
+  const visibleCards = useMemo(
+    () => cards.filter(c => canOpen(c.actionRoute.replace('/modul/', ''))),
+    [cards, canOpen]
+  );
+
   // Categories list
   const categories = useMemo(() => {
     const set = new Set<string>();
-    cards.forEach(c => set.add(c.category));
+    visibleCards.forEach(c => set.add(c.category));
     return ['all', ...Array.from(set)];
-  }, [cards]);
+  }, [visibleCards]);
 
   const filteredCards = useMemo(() => {
-    if (selectedCategory === 'all') return cards;
-    return cards.filter(c => c.category === selectedCategory);
-  }, [cards, selectedCategory]);
+    if (selectedCategory === 'all') return visibleCards;
+    return visibleCards.filter(c => c.category === selectedCategory);
+  }, [visibleCards, selectedCategory]);
 
   const renderIcon = (name: AIInsightCardItem['iconName']) => {
     switch (name) {
