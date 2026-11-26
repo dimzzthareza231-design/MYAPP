@@ -23,12 +23,14 @@ async function start(): Promise<void> {
 }
 
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, _env: unknown, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
     // Retry startup on the next request if it failed (e.g. migration not applied yet).
     ready ??= start().catch((error: unknown) => {
       ready = undefined;
       throw error;
     });
+    // Startup jalan terus walau request pemicunya dibatalkan browser; tanpa ini login berikutnya ikut 503.
+    ctx.waitUntil(ready.catch(() => undefined));
     try {
       await ready;
     } catch (error) {

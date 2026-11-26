@@ -372,7 +372,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const message = payload && typeof payload === 'object' && !Array.isArray(payload) &&
             typeof (payload as Record<string, unknown>).message === 'string'
             ? (payload as Record<string, unknown>).message as string
-            : 'Username/email atau kata sandi tidak valid.';
+            : response.status === 429
+              ? 'Terlalu banyak percobaan login. Tunggu 1 menit lalu coba lagi.'
+              : response.status >= 500
+                ? 'Server sedang memulai atau bermasalah. Coba lagi beberapa detik lagi.'
+                : 'Username/email atau kata sandi tidak valid.';
           return { success: false, message };
         }
         if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
