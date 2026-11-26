@@ -10,7 +10,7 @@ cp .env.example .env   # isi nilai yang diperlukan
 npm run dev            # web publik :3000, aplikasi inti :3001
 ```
 
-Untuk menguji di runtime Cloudflare, lihat bagian [Deployment › Cloudflare](README.md#cloudflare-workers--d1).
+Untuk menguji di runtime Cloudflare, lihat bagian [Deployment › Cloudflare](README.md#cloudflare-workers--firestore).
 
 ## Alur kerja
 

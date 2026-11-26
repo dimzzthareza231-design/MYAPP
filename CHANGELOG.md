@@ -15,6 +15,9 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/id-ID/1.1.0/).
 - Custom domain: web publik di `www.myitaru.my.id`, aplikasi inti di `myitaru.my.id`.
 - File komunitas: `CONTRIBUTING.md`, `SECURITY.md`, template issue/PR, Dependabot.
 
+### Diubah
+- Konfigurasi runtime Cloudflare memakai Firestore REST (`STORAGE_MODE=firestore`); binding dan migrasi D1 dipertahankan untuk kompatibilitas serta migrasi data lama.
+
 ### Diperbaiki
 - Daftar pasien dan janji temu kini bisa dibaca semua role yang melayani pasien (scope `data-pasien`); sebelumnya dokter mendapat 403. Menulis data pasien tetap khusus pendaftaran/RMIK.
 - Tautan cepat navbar hanya menampilkan modul yang boleh diakses role.

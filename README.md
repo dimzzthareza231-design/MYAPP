@@ -2,12 +2,12 @@
 
 [![CI](https://github.com/dimzzthareza231-design/MYAPP/actions/workflows/ci.yml/badge.svg)](https://github.com/dimzzthareza231-design/MYAPP/actions/workflows/ci.yml)
 ![Cloudflare Workers](https://img.shields.io/badge/hosting-Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)
-![Cloudflare D1](https://img.shields.io/badge/database-Cloudflare%20D1-F38020?logo=cloudflare&logoColor=white)
+![Cloud Firestore](https://img.shields.io/badge/database-Cloud%20Firestore-FFCA28?logo=firebase&logoColor=black)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=nodedotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Sistem informasi manajemen dan rekam medis elektronik (RME) berbasis web, dilengkapi fitur kecerdasan buatan untuk mendukung pelayanan dan manajemen operasional. MYITARU terdiri atas dua aplikasi yang dibangun dari satu kode sumber dan kini berjalan di **Cloudflare Workers** dengan database **Cloudflare D1**:
+Sistem informasi manajemen dan rekam medis elektronik (RME) berbasis web, dilengkapi fitur kecerdasan buatan untuk mendukung pelayanan dan manajemen operasional. MYITARU terdiri atas dua aplikasi dari satu kode sumber, dikonfigurasi untuk **Cloudflare Workers** dengan penyimpanan **Cloud Firestore**:
 
 | Aplikasi | Untuk | Alamat |
 |---|---|---|
@@ -74,15 +74,15 @@ flowchart LR
   AI -->|/api/v1, /api/ai, /api/gateway| FC[Express app inti]
   FP --> STORE[(Data store)]
   FC --> STORE[Persistence adapter]
-  STORE --> D1[(Cloudflare D1<br/>STORAGE_MODE=d1)]
+  STORE --> FB[Cloud Firestore<br/>REST di Workers; Firebase/hybrid]
+  STORE -. migrasi legacy .-> D1[(Cloudflare D1)]
   STORE --> MYSQL[(MySQL / MariaDB)]
-  STORE --> FB[Firestore<br/>Firebase / hybrid replication]
   FC --> GEM[Google Gemini]
   AI --> FB
 ```
 
 - `server.ts` mengekspor `createApps()` yang membangun dua aplikasi Express. Web publik hanya membuka `/api/public/*` dan `/api/patient/*`; aplikasi inti membuka `/api/v1/*`, `/api/ai/*`, `/api/gateway/*`, dan `/api/cloudflare/*`. Permintaan ke API inti dari domain publik selalu dijawab 404.
-- **Cloudflare (utama):** dua Worker, `myitaru-public` dan `myitaru-core`, dibangun dari satu `wrangler.jsonc`. `worker/index.ts` menjalankan Express yang sama lewat `cloudflare:node`; frontend disajikan sebagai Workers Static Assets. Keduanya berbagi satu database D1 (`myitaru-db`) melalui `D1Adapter`.
+- **Cloudflare (utama):** dua Worker, `myitaru-public` dan `myitaru-core`, dibangun dari satu `wrangler.jsonc`. `worker/index.ts` menjalankan Express yang sama lewat `cloudflare:node`; frontend disajikan sebagai Workers Static Assets. Keduanya memakai Firestore melalui REST dan service account; binding D1 tetap tersedia untuk kompatibilitas serta migrasi data lama, bukan sebagai penyimpanan runtime aktif.
 - **Lokal/Docker:** kedua aplikasi berjalan dalam satu proses pada port `3000` (publik) dan `3001` (inti).
 - **Vercel:** dua proyek terpisah. `api/index.ts` adalah satu Vercel Function yang memilih aplikasi lewat variabel `APP_TARGET`.
 - Sesi pasien dan beberapa komponen prototipe memakai token bertanda tangan HMAC-SHA256 (`src/server/signedStore.ts`). Token stateless tidak menyediakan pencabutan global; jangan gunakan sesi demo untuk data nyata.
@@ -96,7 +96,7 @@ flowchart LR
 | Antarmuka | React 19, React Router 7, Vite 6, Tailwind CSS 4, Motion, Recharts, Leaflet |
 | Server | Node.js ≥ 20, Express 4, TypeScript 5.8 |
 | AI | Google Gemini melalui `@google/genai` |
-| Data & autentikasi | Cloudflare D1 di Workers; MySQL/MariaDB untuk mode lokal; Firebase Authentication dan Cloud Firestore opsional |
+| Data & autentikasi | Cloud Firestore REST di Workers; MySQL/MariaDB untuk mode lokal; Firebase Authentication dan Firestore untuk mode Firebase/hybrid; D1 untuk migrasi legacy |
 | PWA | `vite-plugin-pwa` (Workbox) |
 | Deployment | Cloudflare Workers + Static Assets (utama), Vercel (dua proyek), Docker multi-stage |
 | Pengujian & CI | `node:test` + `tsx`, GitHub Actions |
@@ -120,7 +120,7 @@ flowchart LR
 ├── tests/                  Pengujian API black-box dan adapter persistence
 ├── worker/                 Entry Cloudflare Worker dan stub bundling
 ├── server.ts               Server Express (dua aplikasi)
-├── wrangler.jsonc          Konfigurasi Worker publik/inti dan binding D1
+├── wrangler.jsonc          Konfigurasi Worker publik/inti, Firestore, dan binding D1 legacy
 ├── index.html              Halaman aplikasi inti
 ├── public.html             Halaman web publik
 ├── vite.config.ts          Build aplikasi inti
@@ -201,25 +201,31 @@ GitHub Actions menjalankan typecheck, pengujian, dan kedua build pada setiap pus
 
 ## Deployment
 
-### Cloudflare (Workers + D1)
+### Cloudflare (Workers + Firestore)
 
-Dua Worker dari satu kode (`wrangler.jsonc`): `myitaru-public` (`--env public`) dan `myitaru-core` (`--env core`), berbagi satu database D1 `myitaru-db`. Express dijalankan lewat `worker/index.ts`; frontend disajikan sebagai Static Assets. Di Cloudflare hanya `AUTH_MODE=local` + `STORAGE_MODE=d1` yang didukung (firebase-admin tidak berjalan di Workers).
+Dua Worker dari satu kode (`wrangler.jsonc`): `myitaru-public` (`--env public`) dan `myitaru-core` (`--env core`). Express dijalankan lewat `worker/index.ts`; frontend disajikan sebagai Static Assets. Konfigurasi aktif Cloudflare memakai `AUTH_MODE=local` + `STORAGE_MODE=firestore`; Worker mengakses Firestore melalui REST karena `firebase-admin` tidak berjalan di Workers. Binding D1 `myitaru-db` masih tercantum untuk kompatibilitas dan migrasi lama, tetapi bukan penyimpanan runtime aktif.
 
-Deployment aktif: web publik di https://www.myitaru.my.id dan aplikasi inti di https://myitaru.my.id (custom domain di `wrangler.jsonc`; alamat `*.myappv1.workers.dev` tetap aktif). Untuk men-deploy perubahan cukup jalankan `npm run cf:deploy`.
+Domain yang dikonfigurasi: web publik di https://www.myitaru.my.id dan aplikasi inti di https://myitaru.my.id (custom domain di `wrangler.jsonc`; alamat `*.myappv1.workers.dev` juga dapat digunakan setelah Worker aktif). Ketersediaan deployment bergantung pada secret Cloudflare dan secret Firestore yang benar.
 
 Penyiapan dari nol (akun Cloudflare baru):
 
 ```bash
 npx wrangler login
-npx wrangler d1 create myitaru-db        # salin database_id ke kedua env di wrangler.jsonc
-npm run cf:migrate                        # terapkan migrations/ ke D1
-# Secret --env core (Worker publik cukup SESSION_SECRET dan MYITARU_QR_SECRET dengan --env public):
-npx wrangler secret put SESSION_SECRET --env core   # minimal 32 karakter
+npx wrangler d1 create myitaru-db        # binding legacy; salin database_id ke wrangler.jsonc
+npm run cf:migrate                        # siapkan skema D1 untuk jalur migrasi legacy
+# Service account Google dengan akses Firestore; simpan JSON hanya di secret manager.
+npx wrangler secret put FIRESTORE_SERVICE_ACCOUNT_JSON --env core
+npx wrangler secret put SESSION_SECRET --env core          # minimal 32 karakter
 npx wrangler secret put MYITARU_QR_SECRET --env core
-npx wrangler secret put GEMINI_API_KEY --env core              # opsional
+npx wrangler secret put FIRESTORE_SERVICE_ACCOUNT_JSON --env public
+npx wrangler secret put SESSION_SECRET --env public        # minimal 32 karakter
+npx wrangler secret put MYITARU_QR_SECRET --env public
+npx wrangler secret put GEMINI_API_KEY --env core          # opsional
 ```
 
-Deploy: `npm run cf:deploy`. Uji lokal: isi `.dev.vars` (lihat `.env.example`), lalu `npm run cf:build`, `npm run cf:migrate:local`, dan `npm run cf:dev:core` atau `npm run cf:dev:public` (jalankan bergantian; keduanya memakai D1 lokal yang sama).
+GitHub Actions menjalankan job deploy hanya jika `CLOUDFLARE_API_TOKEN` dan `CLOUDFLARE_ACCOUNT_ID` tersedia sebagai repository secrets. Secret `FIRESTORE_SERVICE_ACCOUNT_JSON` harus sudah dipasang pada masing-masing Worker di Cloudflare; tanpa secret tersebut, health check setelah deploy akan gagal. Deploy manual: `npm run cf:deploy`.
+
+Untuk uji lokal Worker, isi `.dev.vars` dengan `FIRESTORE_SERVICE_ACCOUNT_JSON` dari project Firestore khusus pengujian, lalu jalankan `npm run cf:build` dan `npm run cf:dev:core` atau `npm run cf:dev:public`. Jangan arahkan pengujian ke data pasien nyata. `npm run cf:migrate:local` hanya diperlukan bila menguji jalur D1 legacy; migrasi data D1 ke Firestore dilakukan terpisah melalui `scripts/migrate-d1-to-firestore.ts`.
 
 Keterbatasan: rate limiter in-memory berlaku per isolate Worker; koneksi SSE portal pasien dapat diputus dan klien harus menyambung ulang.
 
