@@ -52,6 +52,7 @@ export interface LocalAuthProvider {
   loginWithEmail?(email: string): Promise<LocalAuthLoginResult | null>;
   resolveSession(token: string): Promise<LocalAuthSession | null>;
   logout(token: string): Promise<void>;
+  changePassword?(token: string, currentPassword: string, newPassword: string): Promise<'OK' | 'INVALID_SESSION' | 'WRONG_PASSWORD' | 'WEAK_PASSWORD'>;
 }
 
 interface LocalAuthBootstrapUser {
@@ -181,8 +182,9 @@ export class LocalAuthService implements LocalAuthProvider {
         if (stored.roleId !== account.roleId || stored.username.toLowerCase() !== normalizedUsername) {
           throw new Error(`Existing local staff account ${username} conflicts with its configured role.`);
         }
-        // Akun lama (sandi dari secret) di-reset sekali ke sandi bawaan; setelah itu dilewati.
-        if (stored.passwordSeed === PASSWORD_SEED) continue;
+        // Akun lama (sandi dari secret, tanpa penanda) di-reset sekali ke sandi bawaan; akun yang sudah
+        // di-reset atau sudah ganti sandi sendiri ('changed') dilewati.
+        if (stored.passwordSeed) continue;
       }
       if (account.password.length < 6 || account.password.length > 128) {
         throw new Error(`Local staff password for ${username} must contain between 6 and 128 characters.`);
@@ -305,6 +307,26 @@ export class LocalAuthService implements LocalAuthProvider {
         authMode: 'local'
       }
     };
+  }
+
+  async changePassword(token: string, currentPassword: string, newPassword: string): Promise<'OK' | 'INVALID_SESSION' | 'WRONG_PASSWORD' | 'WEAK_PASSWORD'> {
+    const session = await this.resolveSession(token);
+    if (!session) return 'INVALID_SESSION';
+    const user = await this.persistence.get<LocalStaffUserRecord>('local_auth_users', session.user.id);
+    if (!user) return 'INVALID_SESSION';
+    const currentHash = await derivePassword(currentPassword, user.passwordSalt);
+    const expected = Buffer.from(user.passwordHash, 'hex');
+    if (expected.length !== currentHash.length || !timingSafeEqual(expected, currentHash)) return 'WRONG_PASSWORD';
+    if (newPassword.length < 8 || newPassword.length > 128 || newPassword === currentPassword ||
+        newPassword.toLowerCase() === `${user.username.toLowerCase()}123`) return 'WEAK_PASSWORD';
+    const passwordSalt = randomBytes(16).toString('hex');
+    const passwordHash = (await derivePassword(newPassword, passwordSalt)).toString('hex');
+    await this.persistence.commit([{
+      entity: 'local_auth_users',
+      id: user.id,
+      data: { ...user, passwordSalt, passwordHash, passwordSeed: 'changed' } satisfies LocalStaffUserRecord
+    }]);
+    return 'OK';
   }
 
   async logout(token: string): Promise<void> {

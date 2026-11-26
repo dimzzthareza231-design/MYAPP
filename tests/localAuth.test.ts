@@ -160,6 +160,24 @@ describe('akun bawaan per role', () => {
   });
 });
 
+describe('ganti kata sandi', () => {
+  test('sandi baru berlaku, sandi lama ditolak, dan restart tidak me-reset ke bawaan', async () => {
+    const store = new MemoryPersistenceRepository();
+    const service = new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) });
+    await service.initialize();
+    const session = await service.login('kasir', 'kasir123');
+    assert.ok(session);
+    assert.equal(await service.changePassword(session.token, 'salah', 'SandiBaru-2026'), 'WRONG_PASSWORD');
+    assert.equal(await service.changePassword(session.token, 'kasir123', 'pendek'), 'WEAK_PASSWORD');
+    assert.equal(await service.changePassword(session.token, 'kasir123', 'SandiBaru-2026'), 'OK');
+
+    const restarted = new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) });
+    await restarted.initialize();
+    assert.equal(await restarted.login('kasir', 'kasir123'), null);
+    assert.equal((await restarted.login('kasir', 'SandiBaru-2026'))?.principal.roleId, 'kasir');
+  });
+});
+
 describe('lockout per akun', () => {
   test('5 password salah mengunci akun, password benar pun ditolak', async () => {
     for (let i = 0; i < 5; i++) assert.equal(await localAuth.login('admin', 'salah-' + i), null);

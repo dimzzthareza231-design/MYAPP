@@ -37,6 +37,7 @@ export interface CoreAuthOptions {
   revokeRefreshTokens?: (uid: string) => Promise<void>;
   localAuth?: {
     initialize(): Promise<void>;
+    changePassword?(token: string, currentPassword: string, newPassword: string): Promise<'OK' | 'INVALID_SESSION' | 'WRONG_PASSWORD' | 'WEAK_PASSWORD'>;
     loginWithEmail?(email: string): Promise<{
       token: string;
       user: { id: string; username: string; email: string; nama: string; roleId: string; aktif: true; dibuatPada: string };
@@ -336,6 +337,30 @@ export function registerCoreAuthentication(
       }
     });
 
+    app.post('/api/auth/password', async (req, res, next) => {
+      if (!isSameOrigin(req)) return res.status(403).json({ success: false, code: 'ORIGIN_NOT_ALLOWED' });
+      const token = getCookie(req, LOCAL_SESSION_COOKIE);
+      const { currentPassword, newPassword } = req.body ?? {};
+      if (!token) return res.status(401).json({ success: false, code: 'UNAUTHENTICATED' });
+      if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || currentPassword.length > 128) {
+        return res.status(400).json({ success: false, code: 'WEAK_PASSWORD' });
+      }
+      try {
+        const result = await localAuth!.changePassword?.(token, currentPassword, newPassword);
+        const messages = {
+          OK: 'Kata sandi berhasil diganti.',
+          INVALID_SESSION: 'Sesi berakhir. Silakan login ulang.',
+          WRONG_PASSWORD: 'Kata sandi saat ini salah.',
+          WEAK_PASSWORD: 'Kata sandi baru minimal 8 karakter, beda dari yang lama dan bukan sandi bawaan.'
+        } as const;
+        if (!result) return res.status(404).json({ success: false, code: 'NOT_FOUND' });
+        const status = result === 'OK' ? 200 : result === 'INVALID_SESSION' ? 401 : 400;
+        return res.status(status).json({ success: result === 'OK', code: result, message: messages[result] });
+      } catch (error) {
+        return next(error);
+      }
+    });
+
     app.post('/api/auth/logout', async (req, res, next) => {
       if (!isSameOrigin(req)) {
         return res.status(403).json({ success: false, code: 'ORIGIN_NOT_ALLOWED' });
@@ -408,7 +433,7 @@ export function registerCoreAuthentication(
   app.use('/api', async (req: CoreAuthRequest, res, next) => {
     const apiPath = `${req.baseUrl}${req.path}`;
     const publicAuthEndpoint = authMode === 'local'
-      ? ['/api/auth/login', '/api/auth/me', '/api/auth/logout', '/api/auth/google', '/api/auth/google/callback'].includes(apiPath)
+      ? ['/api/auth/login', '/api/auth/me', '/api/auth/logout', '/api/auth/password', '/api/auth/google', '/api/auth/google/callback'].includes(apiPath)
       : apiPath === '/api/auth/session';
     if (publicAuthEndpoint || apiPath === '/api/v1/health') return next();
 
