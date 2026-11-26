@@ -615,6 +615,36 @@ describe('portal karyawan', () => {
     assert.equal(afterRestart.status, 200);
     assert.ok(afterRestart.body.requests.some((leave: { id: string }) => leave.id === submitted.body.leave.id));
   });
+
+  test('gateway menolak snapshot kedaluwarsa dari instance lain', async () => {
+    const { createApps, addErrorHandler } = await import('../server');
+    const makeGatewayApp = async () => {
+      const { app } = await createApps({
+        resolvePrincipal: async (token) => token === 'role:super_admin'
+          ? { uid: token, email: 'admin@test.local', roleId: 'super_admin', mfaVerified: true }
+          : null
+      }, { mode: 'firestore', firestore: sharedPersistence });
+      addErrorHandler(app);
+      return listen(app);
+    };
+    const firstInstance = await makeGatewayApp();
+    const staleInstance = await makeGatewayApp();
+
+    await call(firstInstance, 'GET', '/api/gateway/profile', undefined, 'role:super_admin');
+    await call(staleInstance, 'GET', '/api/gateway/profile', undefined, 'role:super_admin');
+
+    const firstLogin = await call(firstInstance, 'POST', '/api/gateway/auth/login', {
+      divisionId: 'sdm-umum',
+      deviceInfo: 'cas-first'
+    }, 'role:super_admin');
+    assert.equal(firstLogin.status, 200);
+    const staleLogin = await call(staleInstance, 'POST', '/api/gateway/auth/login', {
+      divisionId: 'sdm-umum',
+      deviceInfo: 'cas-stale'
+    }, 'role:super_admin');
+    assert.equal(staleLogin.status, 409);
+    assert.equal(staleLogin.body.code, 'GATEWAY_STATE_CONFLICT');
+  });
 });
 
 describe('role based access aplikasi inti', () => {

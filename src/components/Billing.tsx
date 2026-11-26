@@ -8,6 +8,7 @@ import {
 import { useHospital } from '../contexts/HospitalContext';
 import { useToast } from '../contexts/ToastContext';
 import { storage } from '../utils/storage';
+import { usesServerPersistence } from '../lib/firestoreService';
 
 import { BillingRecord, MasterTarifItem, ShiftKasirRecord, PaymentMethod } from './Finance/types';
 import { INITIAL_BILLINGS, INITIAL_MASTER_TARIF, INITIAL_SHIFTS } from './Finance/mockFinanceData';
@@ -44,7 +45,7 @@ export function Billing() {
 
   // Persistent States using storage wrapper
   const [billings, setBillings] = useState<BillingRecord[]>(() => {
-    return storage.getItem<BillingRecord[]>('hospital_finance_billings', INITIAL_BILLINGS);
+    return storage.getItem<BillingRecord[]>('hospital_finance_billings', usesServerPersistence ? [] : INITIAL_BILLINGS);
   });
 
   const [tarifs, setTarifs] = useState<MasterTarifItem[]>(() => {

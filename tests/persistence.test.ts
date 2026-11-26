@@ -73,6 +73,16 @@ class FakePrimaryRepository implements PrimaryPersistenceRepository {
     }
   }
 
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    if (!this.online) throw new Error('simulated MySQL outage');
+    const records = this.records.get(entity)!;
+    const current = records.get(id);
+    if (expected === null ? current !== undefined : current === undefined ||
+        JSON.stringify(current) !== JSON.stringify(expected)) return false;
+    records.set(id, structuredClone(data));
+    return true;
+  }
+
   async commitWithOutbox(localChanges: PersistenceChange[], cloudChanges: PersistenceChange[]): Promise<void> {
     await this.commit(localChanges);
     for (const change of cloudChanges) {
@@ -142,6 +152,11 @@ class FakeCloudRepository implements CloudPersistenceRepository {
   async commit(changes: PersistenceChange[]): Promise<void> {
     if (!this.online) throw new Error('simulated offline state');
     await this.records.commit(changes);
+  }
+
+  compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    if (!this.online) throw new Error('simulated offline state');
+    return this.records.compareAndSwap(entity, id, expected, data);
   }
 
   async close(): Promise<void> {}

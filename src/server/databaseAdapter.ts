@@ -101,6 +101,7 @@ export interface PersistenceRepository {
     hasMore: boolean;
   }>;
   commit(changes: PersistenceChange[]): Promise<void>;
+  compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -145,6 +146,18 @@ function serializePayload(data: unknown): string {
   return payload;
 }
 
+function canonicalPayload(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => item === undefined ? 'null' : canonicalPayload(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalPayload(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 function decodePayload(value: unknown): unknown {
   if (typeof value !== 'string') return value;
   return JSON.parse(value) as unknown;
@@ -152,6 +165,11 @@ function decodePayload(value: unknown): unknown {
 
 function errorText(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error &&
+    (error as { code?: unknown }).code === 'ER_DUP_ENTRY');
 }
 
 function persistentReady(mode: StorageMode, mysqlConnected: boolean, firebaseConnected: boolean): boolean {
@@ -223,6 +241,18 @@ export class MemoryPersistenceRepository implements PersistenceRepository {
       if (change.data === null) records.delete(change.id);
       else records.set(change.id, structuredClone(JSON.parse(serializePayload(change.data))));
     }
+  }
+
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    assertEntity(entity);
+    assertRecordId(id);
+    const records = this.records.get(entity)!;
+    const current = records.get(id);
+    if (expected === null ? current !== undefined : current === undefined || canonicalPayload(current) !== canonicalPayload(expected)) {
+      return false;
+    }
+    records.set(id, structuredClone(JSON.parse(serializePayload(data))));
+    return true;
   }
 
   async close(): Promise<void> {}
@@ -382,6 +412,45 @@ export class MySQLAdapter implements PrimaryPersistenceRepository {
 
   async commit(changes: PersistenceChange[]): Promise<void> {
     await this.commitTransaction(changes, []);
+  }
+
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    await this.ensureReady();
+    assertEntity(entity);
+    assertRecordId(id);
+    const connection = await this.pool.getConnection();
+    let transactionStarted = false;
+    try {
+      await connection.beginTransaction();
+      transactionStarted = true;
+      const [rows] = await connection.query(`SELECT payload FROM \`${MYSQL_TABLES[entity]}\` WHERE id = ? FOR UPDATE`, [id]);
+      const record = (rows as Array<{ payload: unknown }>)[0];
+      if (expected === null ? Boolean(record) : !record || canonicalPayload(decodePayload(record.payload)) !== canonicalPayload(expected)) {
+        await connection.rollback();
+        transactionStarted = false;
+        return false;
+      }
+      if (record) {
+        await connection.query(`UPDATE \`${MYSQL_TABLES[entity]}\` SET payload = ? WHERE id = ?`, [serializePayload(data), id]);
+      } else {
+        await connection.query(`INSERT INTO \`${MYSQL_TABLES[entity]}\` (id, payload) VALUES (?, ?)`, [id, serializePayload(data)]);
+      }
+      await connection.commit();
+      transactionStarted = false;
+      return true;
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await connection.rollback();
+        } catch (rollbackError) {
+          console.error('[Persistence:mysql] Compare-and-swap rollback failed.', rollbackError);
+        }
+      }
+      if (expected === null && isDuplicateKeyError(error)) return false;
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async commitWithOutbox(localChanges: PersistenceChange[], cloudChanges: PersistenceChange[]): Promise<void> {
@@ -607,6 +676,29 @@ export class D1Adapter implements PersistenceRepository {
     await this.db.batch(statements);
   }
 
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    assertEntity(entity);
+    assertRecordId(id);
+    const table = MYSQL_TABLES[entity];
+    if (expected === null) {
+      const result = await this.db
+        .prepare(`INSERT INTO "${table}" (id, payload, updated_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) ON CONFLICT(id) DO NOTHING`)
+        .bind(id, serializePayload(data))
+        .run() as { meta?: { changes?: number } };
+      return result.meta?.changes === 1;
+    }
+    const current = await this.db
+      .prepare(`SELECT payload FROM "${table}" WHERE id = ? LIMIT 1`)
+      .bind(id)
+      .first<{ payload: string }>();
+    if (!current || canonicalPayload(decodePayload(current.payload)) !== canonicalPayload(expected)) return false;
+    const result = await this.db
+      .prepare(`UPDATE "${table}" SET payload = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND payload = ?`)
+      .bind(serializePayload(data), id, current.payload)
+      .run() as { meta?: { changes?: number } };
+    return result.meta?.changes === 1;
+  }
+
   async close(): Promise<void> {}
 }
 
@@ -727,6 +819,20 @@ export class FirebaseServerAdapter implements CloudPersistenceRepository {
     await batch.commit();
   }
 
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    if (!this.firestore) throw new Error('Firebase persistence is not configured.');
+    assertEntity(entity);
+    assertRecordId(id);
+    const reference = this.firestore.collection(FIRESTORE_COLLECTIONS[entity]).doc(id);
+    return this.firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(reference);
+      if (expected === null ? snapshot.exists : !snapshot.exists ||
+          canonicalPayload(snapshot.data()) !== canonicalPayload(expected)) return false;
+      transaction.set(reference, JSON.parse(serializePayload(data)) as DocumentData);
+      return true;
+    });
+  }
+
   async close(): Promise<void> {}
 }
 
@@ -781,6 +887,10 @@ export class HybridAdapter implements PersistenceRepository {
       this.lastSyncError = errorText(error);
       console.warn(`[Persistence:hybrid] Firestore replication deferred to sync_outbox: ${this.lastSyncError}`);
     });
+  }
+
+  compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    return this.mysql.compareAndSwap(entity, id, expected, data);
   }
 
   async syncPending(): Promise<number> {

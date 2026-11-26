@@ -4,6 +4,7 @@ import { useHospital } from '../contexts/HospitalContext';
 import { useToast } from '../contexts/ToastContext';
 import { storage } from '../utils/storage';
 import { integratePharmacyDispense } from '../utils/interlineIntegration';
+import { usesServerPersistence } from '../lib/firestoreService';
 
 // TYPES & MOCK DATA
 import { 
@@ -110,7 +111,7 @@ export function Pharmacy() {
   });
 
   const [prescriptions, setPrescriptions] = useState<PrescriptionOrder[]>(() => {
-    return storage.get<PrescriptionOrder[]>('hospital_pharmacy_prescriptions', INITIAL_PRESCRIPTIONS);
+    return storage.get<PrescriptionOrder[]>('hospital_pharmacy_prescriptions', usesServerPersistence ? [] : INITIAL_PRESCRIPTIONS);
   });
 
   const [uddSchedules, setUddSchedules] = useState<UDDSchedule[]>(() => {

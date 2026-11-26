@@ -30,6 +30,19 @@ const fromFields = (f: Record<string, FsValue> = {}) => Object.fromEntries(Objec
 const b64url = (b: ArrayBuffer | string) =>
   btoa(typeof b === 'string' ? b : String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => item === undefined ? 'null' : canonicalJson(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(',')}}`;
+  }
+  const json = JSON.stringify(value);
+  return json ?? 'null';
+}
+
 interface ServiceAccount { client_email: string; private_key: string; project_id: string }
 
 export class FirestoreRestAdapter implements PersistenceRepository {
@@ -89,6 +102,37 @@ export class FirestoreRestAdapter implements PersistenceRepository {
     const res = await this.call(`${this.base}/${FIRESTORE_COLLECTIONS[entity]}/${encodeURIComponent(id)}`);
     if (res.status === 404) return null;
     return fromFields(((await res.json()) as { fields?: Record<string, FsValue> }).fields) as T;
+  }
+
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    assertEntity(entity); assertRecordId(id);
+    const path = `${this.base}/${FIRESTORE_COLLECTIONS[entity]}/${encodeURIComponent(id)}`;
+    const currentResponse = await this.call(path);
+    let updateTime: string | undefined;
+    if (currentResponse.status === 404) {
+      if (expected !== null) return false;
+    } else {
+      const current = await currentResponse.json() as { fields?: Record<string, FsValue>; updateTime?: string };
+      if (expected === null || canonicalJson(fromFields(current.fields)) !== canonicalJson(expected)) return false;
+      updateTime = current.updateTime;
+      if (!updateTime) throw new Error('Firestore compare-and-swap read omitted updateTime.');
+    }
+
+    const value = toFs(data);
+    const write = {
+      update: {
+        name: path,
+        fields: value.mapValue ? (value.mapValue as { fields: unknown }).fields : { value }
+      },
+      currentDocument: updateTime ? { updateTime } : { exists: false }
+    };
+    try {
+      await this.call(`${this.base}:commit`, { method: 'POST', body: JSON.stringify({ writes: [write] }) });
+      return true;
+    } catch (error) {
+      if (error instanceof Error && /Firestore (?:400|409):.*(?:FAILED_PRECONDITION|ABORTED|ALREADY_EXISTS)/s.test(error.message)) return false;
+      throw error;
+    }
   }
 
   async list<T>(entity: PersistenceEntity): Promise<Array<StoredRecord<T>>> {

@@ -6,15 +6,20 @@
 // Bed Ranap -> Kasir/Billing -> BPJS & SatuSehat -> RME / Patient360
 
 import { storage } from './storage';
+import { usesServerPersistence } from '../lib/firestoreService';
 import { Pasien, Kunjungan } from '../types';
 import { BillingRecord, BillingItem } from '../components/Finance/types';
 import { PrescriptionOrder, PrescriptionItem } from '../components/Pharmacy/types';
 import { LabOrder } from '../components/Laboratorium/types';
 import { STATUS_RJ, STATUS_RI } from '../contexts/PatientFlowContext';
 import { generate50InpatientBeds } from '../data/patientPelayananData';
-import { INITIAL_BILLINGS } from '../components/Finance/mockFinanceData';
-import { INITIAL_LAB_ORDERS_MOCK } from '../components/Laboratorium/data';
-import { INITIAL_PRESCRIPTIONS, INITIAL_MEDICATIONS } from '../components/Pharmacy/data';
+import { INITIAL_BILLINGS as DEMO_INITIAL_BILLINGS } from '../components/Finance/mockFinanceData';
+import { INITIAL_LAB_ORDERS_MOCK as DEMO_INITIAL_LAB_ORDERS } from '../components/Laboratorium/data';
+import { INITIAL_PRESCRIPTIONS as DEMO_INITIAL_PRESCRIPTIONS, INITIAL_MEDICATIONS } from '../components/Pharmacy/data';
+
+const INITIAL_BILLINGS = usesServerPersistence ? [] as BillingRecord[] : DEMO_INITIAL_BILLINGS;
+const INITIAL_LAB_ORDERS_MOCK = usesServerPersistence ? [] as LabOrder[] : DEMO_INITIAL_LAB_ORDERS;
+const INITIAL_PRESCRIPTIONS = usesServerPersistence ? [] as PrescriptionOrder[] : DEMO_INITIAL_PRESCRIPTIONS;
 
 export const SIMRS_STORAGE_KEYS = {
   PASIEN: 'hospital_pasien',

@@ -4,6 +4,8 @@
 const SYNCED_KEY = /^(hospital_|simrs_|klinik_|bpjs_|myitaru_igd_)/;
 const VERSIONS_KEY = 'hospital_sync_versions';
 const CLINICAL_VERSIONS_KEY = 'hospital_clinical_record_versions';
+const CLINICAL_DEFERRED_KEY = 'hospital_clinical_record_deferred';
+const CLINICAL_INITIALIZED_KEY = 'hospital_clinical_sync_initialized';
 const CLINICAL_KEYS: Record<string, string> = {
   hospital_finance_billings: 'billings',
   hospital_pharmacy_prescriptions: 'prescriptions',
@@ -13,7 +15,7 @@ const CLINICAL_KEYS: Record<string, string> = {
 };
 // Sudah punya API sendiri, data per pengguna, atau preferensi tampilan.
 const EXCLUDED = new Set([
-  VERSIONS_KEY, CLINICAL_VERSIONS_KEY, 'hospital_pasien', 'hospital_kunjungan', 'hospital_dokter', 'hospital_perawat', 'hospital_settings',
+  VERSIONS_KEY, CLINICAL_VERSIONS_KEY, CLINICAL_DEFERRED_KEY, CLINICAL_INITIALIZED_KEY, 'hospital_pasien', 'hospital_kunjungan', 'hospital_dokter', 'hospital_perawat', 'hospital_settings',
   'hospital_poli_master', 'simrs_theme', 'hospital_theme', 'simrs_registration_draft'
 ]);
 const MAX_BYTES = 900_000;
@@ -41,6 +43,7 @@ function writeVersions(versions: Record<string, string>) {
 }
 
 type ClinicalVersions = Record<string, Record<string, string>>;
+type DeferredClinicalRecords = Record<string, Record<string, string>>;
 type ClinicalRecord = { id: string | number; [key: string]: unknown };
 
 function readClinicalVersions(): ClinicalVersions {
@@ -49,6 +52,45 @@ function readClinicalVersions(): ClinicalVersions {
 
 function writeClinicalVersions(versions: ClinicalVersions) {
   originalSetItem.call(localStorage, CLINICAL_VERSIONS_KEY, JSON.stringify(versions));
+}
+
+function readDeferredClinicalRecords(): DeferredClinicalRecords {
+  try { return JSON.parse(localStorage.getItem(CLINICAL_DEFERRED_KEY) || '{}'); } catch { return {}; }
+}
+
+function writeDeferredClinicalRecords(records: DeferredClinicalRecords) {
+  originalSetItem.call(localStorage, CLINICAL_DEFERRED_KEY, JSON.stringify(records));
+}
+
+function readInitializedClinicalCollections(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(CLINICAL_INITIALIZED_KEY) || '{}'); } catch { return {}; }
+}
+
+function writeInitializedClinicalCollections(collections: Record<string, boolean>) {
+  originalSetItem.call(localStorage, CLINICAL_INITIALIZED_KEY, JSON.stringify(collections));
+}
+
+async function clinicalRecordFingerprint(record: ClinicalRecord): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(record));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function parseClinicalRecords(key: string, raw: string | null): ClinicalRecord[] | null {
+  if (raw === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const records = parsed.filter((record): record is ClinicalRecord =>
+      record !== null && typeof record === 'object' && !Array.isArray(record) &&
+      (typeof record.id === 'string' || typeof record.id === 'number')
+    );
+    if (records.length !== parsed.length) return null;
+    return records;
+  } catch (error) {
+    console.warn(`[ModuleSync] ${key} berisi JSON tidak valid.`, error);
+    return null;
+  }
 }
 
 function clinicalUrl(collection: string, id?: string | number) {
@@ -81,36 +123,23 @@ async function pushClinicalRecords(key: string): Promise<void> {
   const collection = clinicalCollectionForKey(key);
   if (!collection) return;
   const raw = localStorage.getItem(key);
-  let records: ClinicalRecord[] = [];
-  if (raw !== null) {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        console.warn(`[ModuleSync] ${key} bukan daftar record; perubahan tidak disimpan.`);
-        return;
-      }
-      const validRecords = parsed.filter((record): record is ClinicalRecord =>
-        record !== null && typeof record === 'object' && !Array.isArray(record) &&
-        (typeof record.id === 'string' || typeof record.id === 'number')
-      );
-      if (validRecords.length !== parsed.length) {
-        console.warn(`[ModuleSync] ${key} memiliki record tanpa ID; perubahan tidak disimpan.`);
-        return;
-      }
-      records = validRecords;
-    } catch (error) {
-      console.warn(`[ModuleSync] ${key} berisi JSON tidak valid.`, error);
-      return;
-    }
+  const records = parseClinicalRecords(key, raw);
+  if (!records) {
+    console.warn(`[ModuleSync] ${key} bukan daftar record dengan ID; perubahan tidak disimpan.`);
+    return;
   }
 
   const versions = readClinicalVersions();
   const collectionVersions = versions[collection] || {};
   versions[collection] = collectionVersions;
+  const deferred = readDeferredClinicalRecords();
+  const deferredCollection = deferred[collection] || {};
+  deferred[collection] = deferredCollection;
   const currentIds = new Set(records.map((record) => String(record.id)));
   for (const record of records) {
     const id = String(record.id);
     const version = collectionVersions[id];
+    if (!version && deferredCollection[id] === await clinicalRecordFingerprint(record)) continue;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (version) headers['If-Match'] = `"${version}"`;
     else headers['If-None-Match'] = '*';
@@ -136,7 +165,9 @@ async function pushClinicalRecords(key: string): Promise<void> {
     }
     const result = await response.json() as { version: string };
     collectionVersions[id] = result.version;
+    delete deferredCollection[id];
     writeClinicalVersions(versions);
+    writeDeferredClinicalRecords(deferred);
   }
 
   for (const [id, version] of Object.entries(collectionVersions)) {
@@ -162,8 +193,12 @@ async function pushClinicalRecords(key: string): Promise<void> {
       console.warn(`[ModuleSync] ${key}/${id} gagal dihapus (HTTP ${response.status}).`);
     }
   }
+  for (const id of Object.keys(deferredCollection)) {
+    if (!currentIds.has(id)) delete deferredCollection[id];
+  }
   versions[collection] = collectionVersions;
   writeClinicalVersions(versions);
+  writeDeferredClinicalRecords(deferred);
 }
 
 async function push(key: string): Promise<void> {
@@ -245,6 +280,8 @@ function install() {
 export async function pullModuleData(): Promise<void> {
   let clinicalUpdated = false;
   const clinicalVersions = readClinicalVersions();
+  const deferred = readDeferredClinicalRecords();
+  const initialized = readInitializedClinicalCollections();
   for (const [key, collection] of Object.entries(CLINICAL_KEYS)) {
     if (pending.has(key) || clinicalConflicted.has(key)) continue;
     const result = await fetchClinicalCollection(collection);
@@ -255,20 +292,51 @@ export async function pullModuleData(): Promise<void> {
       continue;
     }
     const existing = localStorage.getItem(key);
-    if (result.length === 0 && existing !== null) {
-      schedule(key);
+    const localRecords = parseClinicalRecords(key, existing);
+    if (!localRecords) {
+      console.warn(`[ModuleSync] ${key} tidak dapat dipakai sebagai daftar record.`);
       continue;
     }
-    const nextRecords = result.map(({ data }) => data);
+    const firstPull = !initialized[collection];
+    if (firstPull && result.length === 0 && existing !== null) {
+      const deferredCollection = deferred[collection] || (deferred[collection] = {});
+      for (const record of localRecords) {
+        const id = String(record.id);
+        if (!(id in deferredCollection)) deferredCollection[id] = await clinicalRecordFingerprint(record);
+      }
+      initialized[collection] = true;
+      writeDeferredClinicalRecords(deferred);
+      writeInitializedClinicalCollections(initialized);
+      console.warn(`[ModuleSync] ${key} punya data lokal lama; tidak diunggah otomatis.`);
+      continue;
+    }
     const nextVersions = Object.fromEntries(result.map(({ id, version }) => [id, version]));
+    const remoteIds = new Set(Object.keys(nextVersions));
+    const deferredCollection = deferred[collection] || (deferred[collection] = {});
+    const localById = new Map(localRecords.map((record) => [String(record.id), record]));
+    const nextRecords = result.map(({ data }) => data);
+    let hasPendingLocalRecord = false;
+    for (const [id, record] of localById) {
+      if (remoteIds.has(id)) {
+        delete deferredCollection[id];
+      } else {
+        if (firstPull && !(id in deferredCollection)) deferredCollection[id] = await clinicalRecordFingerprint(record);
+        else if (!(id in deferredCollection)) hasPendingLocalRecord = true;
+        nextRecords.push(record);
+      }
+    }
+    initialized[collection] = true;
     const isChanged = existing !== JSON.stringify(nextRecords);
     if (isChanged) {
       originalSetItem.call(localStorage, key, JSON.stringify(nextRecords));
       clinicalUpdated = true;
     }
     clinicalVersions[collection] = nextVersions;
+    if (hasPendingLocalRecord) schedule(key);
   }
   writeClinicalVersions(clinicalVersions);
+  writeDeferredClinicalRecords(deferred);
+  writeInitializedClinicalCollections(initialized);
 
   const response = await fetch('/api/v1/module-data', { credentials: 'same-origin' });
   if (!response.ok) return;
