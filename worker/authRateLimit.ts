@@ -9,7 +9,9 @@ const AUTH_PATHS = new Set([
   '/api/gateway/auth/login',
   '/api/gateway/auth/verify-mfa',
   '/api/patient/verify',
-  '/api/patient/google-session'
+  '/api/patient/google-session',
+  // Booking publik tanpa login: tanpa batas lintas isolate bisa dipakai membanjiri data pasien/antrean.
+  '/api/patient/appointments'
 ]);
 
 export async function checkAuthRateLimit(request: Request, limiter?: RateLimiterLike): Promise<Response | undefined> {

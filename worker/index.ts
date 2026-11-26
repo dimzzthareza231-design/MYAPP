@@ -8,7 +8,9 @@ import type { D1DatabaseLike } from '../src/server/databaseAdapter';
 import { FirestoreRestAdapter } from '../src/server/firestoreRest';
 import { checkAuthRateLimit, type RateLimiterLike } from './authRateLimit';
 
-const PORT = 8080;
+const PORTS = { core: 8080, public: 8081 } as const;
+type Target = keyof typeof PORTS;
+const ownTarget: Target = process.env.APP_TARGET === 'public' ? 'public' : 'core';
 let ready: Promise<void> | undefined;
 
 async function start(): Promise<void> {
@@ -17,12 +19,14 @@ async function start(): Promise<void> {
     ? { mode: 'firestore' as const, firestore: new FirestoreRestAdapter(process.env.FIRESTORE_SERVICE_ACCOUNT_JSON ?? '', process.env.FIRESTORE_DATABASE_ID) }
     : { mode: 'd1' as const, d1: env.DB as D1DatabaseLike };
   const { app, publicApp } = await createApps({}, persistence);
-  const target = process.env.APP_TARGET === 'public' ? publicApp : app;
-  addErrorHandler(target);
-  await new Promise<void>((resolve) => http.createServer(target).listen(PORT, resolve));
+  // Kedua app berbagi satu salinan data; Durable Object melayani web publik dan aplikasi inti sekaligus.
+  for (const [target, express] of [['core', app], ['public', publicApp]] as const) {
+    addErrorHandler(express);
+    await new Promise<void>((resolve) => http.createServer(express).listen(PORTS[target], resolve));
+  }
 }
 
-async function serve(request: Request): Promise<Response> {
+async function serve(request: Request, target: Target): Promise<Response> {
   // Retry startup on the next request if it failed (e.g. migration not applied yet).
   ready ??= start().catch((error: unknown) => {
     ready = undefined;
@@ -34,16 +38,19 @@ async function serve(request: Request): Promise<Response> {
     console.error('[Worker] startup failed:', error);
     return Response.json({ success: false, code: 'STARTUP_FAILED' }, { status: 503 });
   }
-  return handleAsNodeRequest(PORT, request);
+  return handleAsNodeRequest(PORTS[target], request);
 }
 
 // Satu instance memegang data rumah sakit di memori. Isolate Worker biasa tidak berbagi memori,
 // sehingga tiap isolate punya salinan basi (pasien dobel, RM dobel, stok minus, update saling timpa).
 export class CoreState extends DurableObject {
   fetch(request: Request): Promise<Response> {
-    return serve(request);
+    // Header ditimpa Worker depan (lihat bawah), jadi tidak bisa dipalsukan browser.
+    return serve(request, request.headers.get(TARGET_HEADER) === 'public' ? 'public' : 'core');
   }
 }
+
+const TARGET_HEADER = 'x-myitaru-app';
 
 interface CoreStateNamespace {
   idFromName(name: string): unknown;
@@ -55,10 +62,14 @@ export default {
     const limited = await checkAuthRateLimit(request, env.AUTH_LIMITER as RateLimiterLike | undefined);
     if (limited) return limited;
     const coreState = env.CORE_STATE as CoreStateNamespace | undefined;
-    if (coreState) return coreState.get(coreState.idFromName('myitaru')).fetch(request);
+    if (coreState) {
+      const forwarded = new Request(request);
+      forwarded.headers.set(TARGET_HEADER, ownTarget);
+      return coreState.get(coreState.idFromName('myitaru')).fetch(forwarded);
+    }
 
-    // Tanpa binding CORE_STATE (env public): jalan per isolate seperti sebelumnya.
-    const response = serve(request);
+    // Tanpa binding CORE_STATE: jalan per isolate seperti sebelumnya.
+    const response = serve(request, ownTarget);
     // Startup jalan terus walau request pemicunya dibatalkan browser; tanpa ini login berikutnya ikut 503.
     if (ready) ctx.waitUntil(ready.catch(() => undefined));
     return response;
