@@ -14,4 +14,12 @@ describe('scope jalur API inti', () => {
     assert.equal(hasScope('super_admin', 'data-pasien'), true);
     assert.equal(hasScope('role_tidak_ada', 'data-pasien'), false);
   });
+
+  it('ubah status antrean: farmasi, kasir, dokter, perawat boleh; laboran tidak', () => {
+    const scope = scopeForPath('/api/v1/appointments/A-1', { method: 'PATCH' } as never);
+    assert.equal(scope, 'antrean');
+    for (const role of ['apoteker', 'kasir', 'dokter', 'perawat', 'pendaftaran']) assert.equal(hasScope(role, scope!), true, role);
+    assert.equal(hasScope('laboran', scope!), false);
+    assert.equal(scopeForPath('/api/v1/appointments', { method: 'POST' } as never), 'pendaftaran');
+  });
 });

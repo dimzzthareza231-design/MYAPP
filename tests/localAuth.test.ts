@@ -79,6 +79,11 @@ describe('autentikasi staf lokal', () => {
 
     const protectedRead = await fetch(`${baseUrl}/api/v1/inventory/test`, { headers: { Cookie: cookie } });
     assert.equal(protectedRead.status, 200);
+    const crossSiteWrite = await fetch(`${baseUrl}/api/v1/inventory/test`, {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: 'https://www.myitaru.my.id' }
+    });
+    assert.equal(crossSiteWrite.status, 403);
     const bearerOnly = await fetch(`${baseUrl}/api/v1/inventory/test`, {
       headers: { Authorization: `Bearer ${cookie.split('=')[1]}` }
     });

@@ -177,6 +177,8 @@ export function scopeForPath(path: string, req?: express.Request): string | null
   if (path === '/api/v1/health' || path === '/api/v1/system/stats' || path.startsWith('/api/v1/health-updates')) return 'dashboard';
   if (path.startsWith('/api/v1/system-data')) return 'data-pasien';
   const isRead = req?.method === 'GET' || req?.method === 'HEAD';
+  // Ubah status antrean dipakai poli, farmasi dan kasir, bukan hanya pendaftaran.
+  if (path.startsWith('/api/v1/appointments/') && req?.method === 'PATCH') return 'antrean';
   if (path.startsWith('/api/v1/patients') || path.startsWith('/api/v1/appointments')) return isRead ? 'data-pasien' : 'pendaftaran';
   if (path.startsWith('/api/v1/patient-qr') || path.startsWith('/api/v1/patient-notifications')) return 'rekam-medis';
   if (path.startsWith('/api/v1/bed-management')) return 'rawat-inap';
@@ -199,6 +201,7 @@ export function hasScope(roleId: string, scope: string): boolean {
   const role = ROLES.find((item) => item.id === roleId);
   if (!role) return false;
   if (scope === 'data-pasien') return role.moduleAccess.some((module) => PATIENT_DATA_MODULES.includes(module));
+  if (scope === 'antrean') return ['pendaftaran', 'patient-flow', 'apotek-ralan', 'kasir'].some((module) => role.moduleAccess.includes(module));
   const aliases = MODULE_ALIASES[scope] || [];
   return role.moduleAccess.includes(scope) || aliases.some((alias) => role.moduleAccess.includes(alias));
 }
@@ -416,6 +419,10 @@ export function registerCoreAuthentication(
     const token = cookieToken || (authMode === 'local' ? '' : bearerToken);
     if (!token) {
       return res.status(401).json({ success: false, code: 'UNAUTHENTICATED' });
+    }
+    // CSRF: cookie juga terkirim dari subdomain lain (www) karena SameSite menganggapnya situs yang sama.
+    if (cookieToken && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !isSameOrigin(req)) {
+      return res.status(403).json({ success: false, code: 'ORIGIN_NOT_ALLOWED' });
     }
 
     try {
