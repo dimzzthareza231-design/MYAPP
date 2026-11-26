@@ -315,13 +315,14 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
         ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
+            <label htmlFor="login-username" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
               {isLocalAuthMode ? 'Username / Email Pegawai' : 'Email Pegawai'}
             </label>
             <div className="relative">
               <UserIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
               ref={usernameInputRef}
+              id="login-username"
               type={isLocalAuthMode ? 'text' : 'email'}
               autoComplete="username"
                 value={username}
@@ -334,12 +335,13 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
+            <label htmlFor="login-password" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
               {isLocalAuthMode ? 'Kata Sandi Lokal' : 'Kata Sandi Akun Staf'}
             </label>
             <div className="relative">
               <Lock className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
+                id="login-password"
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
                 value={password}
@@ -351,6 +353,8 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
+                aria-pressed={showPassword}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -426,7 +430,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
             : 'Akses memerlukan akun Firebase aktif dan verifikasi dua langkah melalui aplikasi autentikator.'}
         </p>
 
-        <p className="text-center text-[10px] text-slate-400 mt-5 font-semibold tracking-widest uppercase opacity-70">
+        <p className="text-center text-[10px] text-slate-500 dark:text-slate-400 mt-5 font-semibold tracking-widest uppercase">
           MYITARU · MYITARU SIMK
         </p>
       </div>
@@ -453,7 +457,9 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
         </header>
 
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-7">
+          {/* Form login lebih dulu di DOM agar Tab langsung ke username; di desktop tetap tampil di kanan. */}
+          <div className="lg:col-span-5 lg:order-2">{loginCard}</div>
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-7 lg:order-1">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">
@@ -513,8 +519,6 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
                 : `Kartu peran hanya membantu memilih konteks kerja. Kartu ini tidak melewati login atau memberikan akses tanpa akun staf aktif${isLocalAuthMode ? '.' : ' dan verifikasi MFA.'}`}
             </div>
           </section>
-
-          <div className="lg:col-span-5">{loginCard}</div>
         </div>
       </div>
     </div>

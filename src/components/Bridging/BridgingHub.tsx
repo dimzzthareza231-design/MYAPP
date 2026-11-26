@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useOutletContext, useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { DemoDataBadge } from './DemoDataBadge';
 
 interface BridgingService {
   id: string;
@@ -225,7 +226,7 @@ export function BridgingHub() {
         lastSync: 'Baru saja'
       })));
       setIsRefreshing(false);
-      toast.success('Status seluruh endpoint bridging berhasil disegarkan!');
+      toast('Data contoh: status tidak diambil dari layanan nyata.');
     }, 800);
   };
 
@@ -240,19 +241,19 @@ export function BridgingHub() {
       'Sinkronisasi Status Antrian WS BPJS & Mobile JKN... Berhasil (41ms)',
       'Validasi Koneksi PACS DICOM Orthanc Port 8042... Connected (12ms)',
       'Pengecekan Kuota WhatsApp Gateway Official... 8,420 Pesan Tersedia',
-      'Verifikasi Sertifikat BSrE TTE Keystore... Certificate Valid s.d. 2028',
+      'Verifikasi Sertifikat BSrE TTE Keystore... belum dikonfigurasi',
       'Pemeriksaan Webhook Duitku & Payment Gateway... Listener Ready'
     ];
 
     const interval = setInterval(() => {
       if (step < targets.length) {
-        setTestLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${targets[step]}`]);
+        setTestLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] [SIMULASI] ${targets[step]}`]);
         step++;
       } else {
         clearInterval(interval);
         setIsRunningPing(false);
-        setTestLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✅ Seluruh 12 modul bridging berstatus OPERASIONAL NORMAL!`]);
-        toast.success('Health check bridging selesai! Semua sistem terhubung sempurna.');
+        setTestLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] [SIMULASI] Selesai — log ini contoh, bukan hasil uji koneksi nyata.`]);
+        toast('Simulasi selesai: belum ada koneksi nyata yang diuji.');
       }
     }, 400);
   };
@@ -283,6 +284,7 @@ export function BridgingHub() {
               <span className="px-2.5 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-md font-mono">
                 12 Services Integrated
               </span>
+              <DemoDataBadge />
             </div>
             <h1 className="text-2xl md:text-3xl font-black text-white flex items-center gap-2">
               <span>🔗</span> Pusat Integrasi & Bridging Eksternal Klinik
@@ -462,7 +464,7 @@ export function BridgingHub() {
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => {
-                  toast.success(`Ping ke ${service.name}: ${service.latency}ms (200 OK)`);
+                  toast(`Simulasi ping ${service.name}: belum terhubung ke layanan.`);
                 }}
                 className="flex-1 px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1"
               >

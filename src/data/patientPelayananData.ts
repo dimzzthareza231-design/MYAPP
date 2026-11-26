@@ -67,7 +67,7 @@ export interface ClinicalResume {
   kondisi_pulang: 'Sembuh' | 'Perbaikan' | 'Alih Rawat / Rujuk' | 'Pulang Atas Permintaan Sendiri (PAPS)' | 'Meninggal';
   instruksi_edukasi: string;
   jadwal_kontrol: string;
-  tte_status: 'Tersertifikasi BSrE' | 'Menunggu Validasi';
+  tte_status: 'Konfirmasi Internal' | 'Menunggu Validasi';
   tte_timestamp: string;
 }
 
@@ -695,7 +695,7 @@ export function generateAllPatientsWithResumes(): PatientFullRecord[] {
       kondisi_pulang: caseTemplate.kondisi,
       instruksi_edukasi: caseTemplate.edukasi || caseTemplate.instruksi || 'Patuhi anjuran diet, istirahat cukup, dan minum obat teratur.',
       jadwal_kontrol: caseTemplate.kontrol || '1 Minggu kemudian ke Poli Terkait',
-      tte_status: 'Tersertifikasi BSrE',
+      tte_status: 'Konfirmasi Internal',
       tte_timestamp: '2026-08-24 11:30:00 WIB'
     };
 

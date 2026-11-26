@@ -429,7 +429,7 @@ export function PengaturanRS() {
             <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50 flex items-start gap-3">
               <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
               <div className="text-xs text-blue-800 dark:text-blue-200">
-                <span className="font-bold">Keabsahan Tanda Tangan Digital:</span> Sistem MYITARU mendukung sertifikasi tanda tangan elektronik (TTE) BSrE / Sertisign yang diverifikasi langsung dengan data penanggung jawab di atas.
+                <span className="font-bold">Keabsahan Tanda Tangan Digital:</span> Integrasi tanda tangan elektronik tersertifikasi (BSrE / Sertisign) belum aktif. Data penanggung jawab di atas belum diverifikasi oleh penyelenggara sertifikasi elektronik.
               </div>
             </div>
           </div>

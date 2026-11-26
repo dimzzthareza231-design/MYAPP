@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   HardDrive, DownloadCloud, RotateCcw, AlertTriangle, PlayCircle, ShieldCheck, 
   CheckCircle2, Clock, Server, Cloud, RefreshCw, Database, FileArchive, Check, ArrowRight
@@ -6,8 +6,27 @@ import {
 import { useToast } from '../../contexts/ToastContext';
 import { useAuditTrail } from '../../contexts/AuditTrailContext';
 
+// null = masih memuat; configured false = server menolak / belum ada layanan backup.
+type BackupStatus = { configured: boolean; message: string } | null;
+
 export function BackupManagement() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'jobs' | 'restore' | 'dr'>('dashboard');
+  const [backup, setBackup] = useState<BackupStatus>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/v1/backup/status', { credentials: 'same-origin' })
+      .then(async res => {
+        const body = await res.json().catch(() => ({}));
+        if (!active) return;
+        setBackup({
+          configured: res.ok && body?.success !== false,
+          message: body?.message || (res.ok ? '' : `Status backup tidak tersedia (HTTP ${res.status}).`),
+        });
+      })
+      .catch(() => { if (active) setBackup({ configured: false, message: 'Status backup tidak dapat dimuat dari server.' }); });
+    return () => { active = false; };
+  }, []);
 
   const tabs = [
     { id: 'dashboard', label: 'Backup Dashboard', icon: HardDrive },
@@ -31,6 +50,17 @@ export function BackupManagement() {
         </div>
       </div>
 
+      {backup && !backup.configured && (
+        <div role="alert" className="p-4 rounded-2xl border border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:border-amber-700 dark:text-amber-200 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
+          <div className="text-sm">
+            <p className="font-bold">Backup belum dikonfigurasi</p>
+            <p>{backup.message}</p>
+            <p className="text-xs mt-1">Angka, jadwal, titik restore, dan arsitektur DR di halaman ini hanya contoh tampilan, bukan data backup nyata.</p>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-2 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-xl overflow-x-auto custom-scrollbar">
         {tabs.map(tab => (
@@ -51,7 +81,7 @@ export function BackupManagement() {
 
       {/* Tab Panels */}
       <div>
-        {activeTab === 'dashboard' && <DashboardTab onNavigateJobs={() => setActiveTab('jobs')} onNavigateRestore={() => setActiveTab('restore')} />}
+        {activeTab === 'dashboard' && <DashboardTab configured={backup?.configured === true} onNavigateJobs={() => setActiveTab('jobs')} onNavigateRestore={() => setActiveTab('restore')} />}
         {activeTab === 'jobs' && <JobsTab />}
         {activeTab === 'restore' && <RestoreTab />}
         {activeTab === 'dr' && <DrTab />}
@@ -60,10 +90,11 @@ export function BackupManagement() {
   );
 }
 
-function DashboardTab({ onNavigateJobs, onNavigateRestore }: { onNavigateJobs: () => void; onNavigateRestore: () => void }) {
+function DashboardTab({ configured, onNavigateJobs, onNavigateRestore }: { configured: boolean; onNavigateJobs: () => void; onNavigateRestore: () => void }) {
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      {/* Kartu status disembunyikan selama server belum melaporkan backup nyata. */}
+      {configured && <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-6 border border-slate-200 dark:border-slate-700 border-l-4 border-l-emerald-500 space-y-2">
           <div className="flex justify-between items-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             <span>Status Backup Terakhir</span>
@@ -90,7 +121,7 @@ function DashboardTab({ onNavigateJobs, onNavigateRestore }: { onNavigateJobs: (
           <div className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400">&le; 1 Jam</div>
           <div className="text-xs text-slate-500 dark:text-slate-400">Incremental WAL replication setiap 15 menit</div>
         </div>
-      </div>
+      </div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-6 border border-slate-200 dark:border-slate-700 space-y-4">
@@ -171,15 +202,22 @@ function JobsTab() {
     { id: 'JOB-CFG-01', name: 'Cadangan Konfigurasi SIMK & Akun', schedule: 'Setiap 6 Jam', type: 'Config/JSON', status: 'Aktif', lastRun: '1 jam lalu', size: '12 MB' },
   ]);
 
-  const triggerManual = () => {
+  const triggerManual = async () => {
     setIsRunning(true);
-    toast.info('Memulai proses pencadangan database manual...');
-
-    setTimeout(() => {
-      setIsRunning(false);
+    try {
+      const res = await fetch('/api/v1/backup/create', { method: 'POST', credentials: 'same-origin' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.success === false) {
+        toast.error(body?.message || `Backup gagal (HTTP ${res.status}).`);
+        return;
+      }
       logActivity('admin', 'Manual Backup', 'Backup & DR', 'Database', 'ALL');
-      toast.success('Pencadangan data manual berhasil diselesaikan!');
-    }, 2500);
+      toast.success(body?.message || 'Backup dimulai.');
+    } catch {
+      toast.error('Server backup tidak dapat dihubungi.');
+    } finally {
+      setIsRunning(false);
+    }
   };
 
   return (
@@ -247,7 +285,6 @@ function RestoreTab() {
   const [step, setStep] = useState(1);
   const [selectedPoint, setSelectedPoint] = useState('rp-1');
   const [isConfirmed, setIsConfirmed] = useState(false);
-  const [isRestoring, setIsRestoring] = useState(false);
 
   const restorePoints = [
     { id: 'rp-1', label: 'Hari Ini, 02:00 WIB (Full Snapshot Terakhir)', size: '2.8 TB', type: 'Full DB' },
@@ -261,14 +298,8 @@ function RestoreTab() {
       return;
     }
 
-    setIsRestoring(true);
-    toast.info('Memulai pemulihan database dari restore point...');
-
-    setTimeout(() => {
-      setIsRestoring(false);
-      setStep(3);
-      toast.success('Database berhasil dipulihkan!');
-    }, 3000);
+    // Belum ada API restore di server; jangan pernah mengklaim restore berhasil.
+    toast.error('Restore tidak tersedia: layanan backup belum dikonfigurasi.');
   };
 
   return (
@@ -367,40 +398,22 @@ function RestoreTab() {
           <div className="flex gap-3 pt-2">
             <button
               onClick={() => setStep(1)}
-              disabled={isRestoring}
               className="flex-1 py-2.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700"
             >
               Kembali
             </button>
             <button
               onClick={handleRestore}
-              disabled={!isConfirmed || isRestoring}
+              disabled={!isConfirmed}
               className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
             >
-              {isRestoring ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-              {isRestoring ? 'Memulihkan Data...' : 'Mulai Restore Data'}
+              <RotateCcw className="w-4 h-4" />
+              Mulai Restore Data
             </button>
           </div>
         </div>
       )}
 
-      {step === 3 && (
-        <div className="text-center space-y-4 py-6">
-          <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-            <ShieldCheck className="w-8 h-8" />
-          </div>
-          <h3 className="font-bold text-emerald-600 dark:text-emerald-400 text-lg">Pemulihan Data Selesai!</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-            Seluruh tabel basis data, master data, dan relasi transaksi telah berhasil dikembalikan ke keadaan snapshot terpilih.
-          </p>
-          <button
-            onClick={() => { setStep(1); setIsConfirmed(false); }}
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors shadow-sm"
-          >
-            Kembali ke Beranda Backup
-          </button>
-        </div>
-      )}
     </div>
   );
 }

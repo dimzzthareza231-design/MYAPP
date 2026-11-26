@@ -492,7 +492,7 @@ export function PatientQRCodeModal({
                       <span className="text-[8px] font-bold uppercase text-slate-700 mt-2 tracking-tight text-center">
                         PINDAI AKSES CEPAT RME
                       </span>
-                      <span className="text-[7px] text-slate-400 font-mono">BSrE Secure Verified</span>
+                      <span className="text-[7px] text-slate-500 font-mono">Bukan TTE tersertifikasi</span>
                     </div>
                   </div>
 

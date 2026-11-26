@@ -438,10 +438,10 @@ export function RadiologyTab({ patientData }: { patientData: any }) {
                   <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5 mt-0.5">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> {activeOrder.radiologist || 'dr. Hendra Wijaya, Sp.Rad'}
                   </p>
-                  <p className="text-[10px] text-slate-400">TTE Terverifikasi • {activeOrder.verifiedAt || '30 Aug 2026'}</p>
+                  <p className="text-[10px] text-slate-400">Diverifikasi internal • {activeOrder.verifiedAt || '30 Aug 2026'}</p>
                 </div>
                 <div className="w-12 h-12 border-2 border-emerald-500/40 rounded-lg flex items-center justify-center text-[10px] font-mono text-emerald-600 font-bold p-1 text-center leading-tight">
-                  TTE BSrE VALID
+                  BELUM TTE
                 </div>
               </div>
 
