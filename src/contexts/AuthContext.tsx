@@ -32,6 +32,7 @@ export interface User {
   aktif: boolean;
   dibuatPada: string;
   isGoogleAuth?: boolean;
+  mustChangePassword?: boolean;
 }
 
 interface AuthContextType {
@@ -78,7 +79,8 @@ function parseLocalUser(value: unknown): User | null {
     email: record.email,
     roleId: record.roleId,
     aktif: record.aktif,
-    dibuatPada: typeof record.dibuatPada === 'string' ? record.dibuatPada : ''
+    dibuatPada: typeof record.dibuatPada === 'string' ? record.dibuatPada : '',
+    ...(typeof record.mustChangePassword === 'boolean' ? { mustChangePassword: record.mustChangePassword } : {})
   };
 }
 

@@ -39,6 +39,8 @@ export interface LocalAuthPublicUser {
   roleId: string;
   aktif: boolean;
   dibuatPada: string;
+  /** true jika pengguna masih menggunakan sandi bawaan dan wajib menggantinya. */
+  mustChangePassword?: boolean;
 }
 
 export interface LocalAuthLoginResult {
@@ -212,6 +214,7 @@ function accountId(username: string): string {
 }
 
 function asPublicUser(user: LocalStaffUserRecord): LocalAuthPublicUser {
+  const mustChangePassword = user.passwordSeed === PASSWORD_SEED || undefined;
   return {
     id: user.id,
     username: user.username,
@@ -219,7 +222,8 @@ function asPublicUser(user: LocalStaffUserRecord): LocalAuthPublicUser {
     nama: user.nama,
     roleId: user.roleId,
     aktif: user.aktif,
-    dibuatPada: user.dibuatPada
+    dibuatPada: user.dibuatPada,
+    ...(mustChangePassword ? { mustChangePassword: true } : {})
   };
 }
 

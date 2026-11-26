@@ -396,6 +396,7 @@ describe('ganti kata sandi', () => {
     await service.initialize();
     const session = await loginWithMfa(service, store, 'kasir', 'kasir123');
     assert.ok(session);
+    assert.equal(session.user.mustChangePassword, true);
     assert.equal(await service.changePassword(session.token, 'salah', 'SandiBaru-2026'), 'WRONG_PASSWORD');
     assert.equal(await service.changePassword(session.token, 'kasir123', 'pendek'), 'WEAK_PASSWORD');
     assert.equal(await service.changePassword(session.token, 'kasir123', 'SandiBaru-2026'), 'OK');
@@ -404,7 +405,9 @@ describe('ganti kata sandi', () => {
     const restarted = new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) });
     await restarted.initialize();
     assert.equal(await restarted.login('kasir', 'kasir123'), null);
-    assert.equal((await loginWithMfa(restarted, store, 'kasir', 'SandiBaru-2026'))?.principal.roleId, 'kasir');
+    const freshLogin = await loginWithMfa(restarted, store, 'kasir', 'SandiBaru-2026');
+    assert.equal(freshLogin?.principal.roleId, 'kasir');
+    assert.ok(!freshLogin?.user.mustChangePassword, 'mustChangePassword harus falsy setelah ganti sandi');
   });
 
   test('reset sandi admin mencabut semua sesi user', async () => {
