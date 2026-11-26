@@ -255,7 +255,9 @@ export async function createApps(
     res.on('finish', () => {
       const duration = Date.now() - startTime;
       if (req.path.startsWith('/api')) {
-        console.log(`[${logTag}] ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`);
+        // Pola route (/api/v1/patients/:idOrRm), bukan path asli yang berisi No. RM pasien.
+        const routePath = req.route?.path ? `${req.baseUrl}${req.route.path}` : req.path.replace(/RM-[\w-]+/gi, 'RM-*');
+        console.log(`[${logTag}] ${req.method} ${routePath} -> ${res.statusCode} (${duration}ms)`);
       }
     });
     next();
