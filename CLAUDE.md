@@ -39,5 +39,6 @@ Cloudflare diurus pengguna sendiri. Job `deploy` di `.github/workflows/ci.yml` h
 
 ## Kolaborasi Multi-Agent (`AGENTS.md`)
 
-- **Claude** menjadi lead untuk **kasus berat/kompleks** (arsitektur, keamanan/auth, migrasi, refactor lintas modul) dan berkolaborasi dengan **GitHub Copilot CLI**, **Antigravity**, serta **Gemini CLI** untuk riset, test, verifikasi, dan tugas ringan.
+- **Claude** menjadi lead untuk **kasus berat/kompleks** (arsitektur, keamanan/auth, migrasi, refactor lintas modul) dan berkolaborasi dengan **GitHub Copilot CLI**, **Antigravity**, serta **Gemini CLI**.
+- **Hemat Token Claude (Wajib Delegasi)**: Untuk riset codebase, tugas ringan, penulisan test, dan verifikasi build/test, delegasikan ke subagent di `.claude/agents/` (`gemini-worker`, `copilot-worker`, `verify-runner`) atau jalankan `npm run agent:parallel` / `npm run agent:assist` / `npm run agent:light` / `npm run agent:check` agar konteks utama Claude hanya fokus pada keputusan inti.
 - Ikuti konvensi bersama di `AGENTS.md`.

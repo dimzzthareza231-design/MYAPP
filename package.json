@@ -32,7 +32,10 @@
     "cf:deploy": "npm run cf:build && wrangler deploy --env public && wrangler deploy --env core",
     "agent:check": "node scripts/agent-dispatch.mjs check",
     "agent:light": "node scripts/agent-dispatch.mjs light",
-    "agent:assist": "node scripts/agent-dispatch.mjs assist"
+    "agent:assist": "node scripts/agent-dispatch.mjs assist",
+    "agent:auto": "node scripts/agent-dispatch.mjs auto",
+    "agent:parallel": "node scripts/agent-dispatch.mjs parallel",
+    "hooks:install": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "@google/genai": "^3.3.0",
