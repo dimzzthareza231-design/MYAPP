@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { hasScope, scopeForPath } from '../src/server/coreAuth';
+import { hasScope, isModuleDataConfigKey, moduleDataScopeForKey, scopeForPath } from '../src/server/coreAuth';
 
 const get = { method: 'GET' } as never;
 
@@ -13,6 +13,16 @@ describe('scope jalur API inti', () => {
   it('role tanpa modul pasien ditolak, super_admin lolos', () => {
     assert.equal(hasScope('super_admin', 'data-pasien'), true);
     assert.equal(hasScope('role_tidak_ada', 'data-pasien'), false);
+  });
+
+  it('module-data memakai izin modul yang memiliki key dan menolak key konfigurasi', () => {
+    const soapScope = scopeForPath('/api/v1/module-data/simrs_rme_soap', get);
+    assert.equal(soapScope, 'rekam-medis');
+    assert.equal(hasScope('kasir', soapScope!), false);
+    assert.equal(hasScope('dokter', soapScope!), true);
+    assert.equal(moduleDataScopeForKey('hospital_icu_observasi'), 'icu');
+    assert.equal(isModuleDataConfigKey('simrs_satusehat_config'), true);
+    assert.equal(scopeForPath('/api/v1/module-data', get), 'data-pasien');
   });
 
   it('ubah status antrean: farmasi, kasir, dokter, perawat boleh; laboran tidak', () => {

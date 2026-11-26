@@ -139,9 +139,9 @@ npm run dev
 
 - Web publik: http://localhost:3000
 - Aplikasi inti: http://localhost:3001.
-- Untuk mode intranet tanpa Firebase, pertahankan `AUTH_MODE=local`, `VITE_AUTH_MODE=local`, dan `STORAGE_MODE=mysql`. Server membuat satu akun per role RBAC (`src/data/roles.ts`) dan menyimpan hash scrypt ke `local_auth_users`. Sandi bawaan = `<username>123`: `admin`/`admin123`, `dokter`/`dokter123`, `perawat`/`perawat123`, `rmik`/`rmik123`, `apoteker`/`apoteker123`, `kasir`/`kasir123`, `lab`/`lab123`, `super_admin`, `viewer`, `direksi`, `bidan`, `pendaftaran`, `radiografer`, `manajemen_mutu`, `rehab_medik`, `gizi`, `it_support` (pola sama). Akun lama di-reset sekali ke sandi ini. Email admin dapat diubah lewat `LOCAL_AUTH_ADMIN_EMAIL`.
+- Untuk mode intranet tanpa Firebase, pertahankan `AUTH_MODE=local`, `VITE_AUTH_MODE=local`, dan `STORAGE_MODE=mysql`. Pada development, server membuat akun per role RBAC dengan sandi demo `<username>123`; jangan gunakan sandi tersebut di produksi. Produksi tidak membuat akun demo dan wajib menerima `LOCAL_AUTH_BOOTSTRAP_USERS_JSON` berisi setidaknya satu akun `admin` atau `super_admin` dengan sandi minimal 16 karakter yang mencakup huruf kecil, huruf besar, angka, dan simbol. Simpan konfigurasi bootstrap sebagai secret environment, bukan di repository. Akun lama yang masih bertanda sandi demo akan dinonaktifkan di produksi kecuali akun itu dikonfigurasi ulang lewat bootstrap. Admin dapat mengelola akun lokal lewat halaman Manajemen User & Role.
 - Untuk Firebase, set `AUTH_MODE=firebase`, `VITE_AUTH_MODE=firebase`, isi `VITE_FIREBASE_API_KEY` serta konfigurasi Firebase Admin, dan provision akun beserta MFA TOTP. Tombol Google hanya tampil bila konfigurasi Firebase tersedia.
-- `ALLOW_INSECURE_DEMO_AUTH=true` hanya membuka jalur autentikasi demo pasien dan gateway karyawan untuk pengujian lokal. Jangan pernah mengaktifkannya di produksi; API inti tetap memerlukan identitas Firebase.
+- `ALLOW_INSECURE_DEMO_AUTH=true` hanya membuka jalur autentikasi demo pasien dan gateway karyawan untuk pengujian lokal. Jangan pernah mengaktifkannya di produksi; API inti selalu memerlukan sesi lokal atau identitas Firebase yang sah.
 
 ## Variabel lingkungan
 
@@ -150,8 +150,9 @@ npm run dev
 | `SESSION_SECRET` | Produksi | Kunci tanda tangan token sesi; gunakan nilai acak minimal 32 karakter. |
 | `AUTH_MODE` / `VITE_AUTH_MODE` | Tidak | Gunakan `local` untuk intranet (tanpa Firebase) atau `firebase`; keduanya harus selaras. Tanpa `VITE_FIREBASE_API_KEY`, klien memilih mode lokal. |
 | `LOCAL_AUTH_ADMIN_EMAIL` | Tidak | Alamat email akun admin lokal; bawaan `admin@myitaru.local`. |
+| `LOCAL_AUTH_BOOTSTRAP_USERS_JSON` | Produksi lokal | Array JSON akun bootstrap lokal. Sandi wajib minimal 16 karakter dengan huruf kecil, huruf besar, angka, dan simbol; rahasiakan nilainya. |
 | `MYITARU_QR_SECRET` | Produksi | Kunci enkripsi QR khusus server; bila kosong, QR memakai `SESSION_SECRET`. |
-| `STORAGE_MODE` / `VITE_STORAGE_MODE` | Produksi | Set nilainya sama. Cloudflare memakai `d1`; mode lokal memakai `mysql`; Firebase/hybrid untuk integrasi cloud, sedangkan `memory` hanya untuk demo dan tes. |
+| `STORAGE_MODE` / `VITE_STORAGE_MODE` | Produksi | Set nilainya selaras. Cloudflare mengikuti `wrangler.jsonc` (saat ini `firestore`); mode lokal memakai `mysql`; `memory` hanya untuk demo dan tes. |
 | `DB_HOST` / `DB_PORT` | Jika MySQL aktif | Host dan port MySQL/MariaDB (bawaan `127.0.0.1:3306`). |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Jika MySQL aktif | Kredensial dan nama database (bawaan database `db_myitaru`). |
 | `FIREBASE_PROJECT_ID` | Mode Firebase | ID project Firebase Admin untuk verifikasi sesi staf. |
@@ -161,6 +162,7 @@ npm run dev
 | `CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME` | Jika Turnstile aktif | Hostname yang harus dikembalikan Cloudflare. |
 | `CLOUDFLARE_TURNSTILE_EXPECTED_ACTION` | Tidak | Aksi widget yang diharapkan (bawaan `login`). |
 | `GEMINI_API_KEY` | Tidak | Kunci Google Gemini. Tanpa kunci, fitur AI memakai mesin aturan. |
+| `GEMINI_PRIMARY_MODEL` / `GEMINI_FALLBACK_MODEL` | Tidak | Model Gemini utama dan cadangan; bawaan `gemini-2.5-flash` dan `gemini-3.1-flash-lite`. Tiap panggilan dibatasi 20 detik. |
 | `APP_TARGET` | Vercel/Cloudflare | `public` untuk web publik, `core` untuk aplikasi inti. Di Cloudflare sudah diatur per env di `wrangler.jsonc`. |
 | `PUBLIC_PORT` / `CORE_PORT` | Tidak | Port lokal/Docker, bawaan `3000` dan `3001`. |
 | `VITE_FIREBASE_*` | Mode Firebase | Konfigurasi klien Firebase. Bila `VITE_FIREBASE_API_KEY` kosong, Firebase Auth tidak diinisialisasi. |

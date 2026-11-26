@@ -8,6 +8,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { GoogleGenAI, Type } from '@google/genai';
+import { safeErrorDetails } from './scrubPhi';
 
 export interface AiExecutionResult<T = any> {
   data: T;
@@ -17,8 +18,9 @@ export interface AiExecutionResult<T = any> {
   latencyMs: number;
 }
 
-export const GEMINI_PRIMARY_MODEL = 'gemini-2.5-flash';
-export const GEMINI_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
+export const GEMINI_PRIMARY_MODEL = process.env.GEMINI_PRIMARY_MODEL?.trim() || 'gemini-2.5-flash';
+export const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL?.trim() || 'gemini-3.1-flash-lite';
+export const GEMINI_REQUEST_TIMEOUT_MS = 20_000;
 
 export function getGeminiModelFallbackChain(preferredModel?: string): string[] {
   return [...new Set([preferredModel || GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL])];
@@ -77,6 +79,7 @@ export async function executeResilientGemini(params: {
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
     httpOptions: {
+      timeout: GEMINI_REQUEST_TIMEOUT_MS,
       headers: {
         'User-Agent': 'aistudio-build'
       }
@@ -109,8 +112,8 @@ export async function executeResilientGemini(params: {
         return { text: response.text, modelUsed: model };
       }
     } catch (err: any) {
-      const errMsg = String(err?.message || err);
-      console.warn(`[AI Engine] Model ${model} failed: ${errMsg.slice(0, 140)}... Trying next tier.`);
+      const { type, message } = safeErrorDetails(err);
+      console.warn(`[AI Engine] Model ${model} failed (${type}): ${message.slice(0, 140)}. Trying next tier.`);
     }
   }
 
@@ -736,7 +739,8 @@ export function auditBpjsClaimDeterministic(input: {
 // 4. AI PHARMACOVIGILANCE & DRUG INTERACTION ENGINE
 // ═══════════════════════════════════════════════════════════════════════════
 export function checkDrugInteractionsDeterministic(medications: any[], patientContext?: any) {
-  const medNames = medications.map(m => (typeof m === 'string' ? m : m.nama || m.name || '').toLowerCase());
+  const medNames = (Array.isArray(medications) ? medications : [])
+    .map(m => (typeof m === 'string' ? m : m?.nama || m?.name || '').toLowerCase());
   const interactions: Array<{ drugA: string; drugB: string; severity: 'Kontraindikasi' | 'Mayor' | 'Moderat' | 'Minor' | 'Aman'; mechanism: string; action: string }> = [];
 
   // Check known drug interaction pairs
@@ -764,15 +768,16 @@ export function checkDrugInteractionsDeterministic(medications: any[], patientCo
   checkPair('aspirin|asetosal|asam asetilsalisilat', 'ibuprofen', 'Mayor', 'Ibuprofen mengantagonis efek antiplatelet irreversibel Aspirin kardioprotektif serta meningkatkan risiko perdarahan GI.', 'Gunakan Paracetamol untuk analgesik alternatif atau berikan Aspirin minimal 2 jam sebelum Ibuprofen.');
 
   const hasCritical = interactions.some(i => i.severity === 'Kontraindikasi' || i.severity === 'Mayor');
-  const safetyIndex = hasCritical ? 72 : (interactions.length > 0 ? 86 : 98);
-
   return {
-    safetyIndex: safetyIndex,
+    safetyIndex: null,
+    verified: false,
+    fallback: true,
     hasCriticalInteraction: hasCritical,
     interactions: interactions,
-    recommendations: interactions.length > 0
-      ? interactions.map(i => `${i.drugA} + ${i.drugB}: ${i.action}`)
-      : ['Resep terverifikasi aman. Tidak ditemukan interaksi obat yang membahayakan pasien.']
+    recommendations: [
+      'Tidak terverifikasi; telaah manual oleh apoteker sebelum dispensing.',
+      ...interactions.map(i => `${i.drugA} + ${i.drugB}: ${i.action}`)
+    ]
   };
 }
 

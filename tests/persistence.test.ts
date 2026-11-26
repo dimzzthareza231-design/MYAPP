@@ -55,6 +55,15 @@ class FakePrimaryRepository implements PrimaryPersistenceRepository {
     }));
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    const records = await this.list<T>(entity);
+    return {
+      records: records.slice(offset, offset + limit),
+      total: records.length,
+      hasMore: offset + limit < records.length
+    };
+  }
+
   async commit(changes: PersistenceChange[]): Promise<void> {
     if (!this.online) throw new Error('simulated MySQL outage');
     for (const change of changes) {
@@ -62,6 +71,16 @@ class FakePrimaryRepository implements PrimaryPersistenceRepository {
       if (change.data === null) entityRecords.delete(change.id);
       else entityRecords.set(change.id, structuredClone(change.data));
     }
+  }
+
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    if (!this.online) throw new Error('simulated MySQL outage');
+    const records = this.records.get(entity)!;
+    const current = records.get(id);
+    if (expected === null ? current !== undefined : current === undefined ||
+        JSON.stringify(current) !== JSON.stringify(expected)) return false;
+    records.set(id, structuredClone(data));
+    return true;
   }
 
   async commitWithOutbox(localChanges: PersistenceChange[], cloudChanges: PersistenceChange[]): Promise<void> {
@@ -121,6 +140,11 @@ class FakeCloudRepository implements CloudPersistenceRepository {
     return this.records.list<T>(entity);
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    if (!this.online) throw new Error('simulated offline state');
+    return this.records.listPage<T>(entity, offset, limit);
+  }
+
   async listBookings(): Promise<Array<StoredRecord<unknown>>> {
     return this.list('bookings');
   }
@@ -128,6 +152,11 @@ class FakeCloudRepository implements CloudPersistenceRepository {
   async commit(changes: PersistenceChange[]): Promise<void> {
     if (!this.online) throw new Error('simulated offline state');
     await this.records.commit(changes);
+  }
+
+  compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    if (!this.online) throw new Error('simulated offline state');
+    return this.records.compareAndSwap(entity, id, expected, data);
   }
 
   async close(): Promise<void> {}
@@ -240,12 +269,27 @@ describe('integrasi Express dengan persistence', () => {
       vercel: process.env.VERCEL,
       nodeEnv: process.env.NODE_ENV,
       sessionSecret: process.env.SESSION_SECRET,
-      demoAuth: process.env.ALLOW_INSECURE_DEMO_AUTH
+      demoAuth: process.env.ALLOW_INSECURE_DEMO_AUTH,
+      turnstileSecret: process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY,
+      turnstileHostname: process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME
     };
     process.env.VERCEL = '1';
     process.env.NODE_ENV = 'test';
     process.env.SESSION_SECRET = 'persistence-integration-test-secret';
     process.env.ALLOW_INSECURE_DEMO_AUTH = 'true';
+    process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY = 'persistence-test-secret';
+    process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME = 'persistence-test.local';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (String(input) === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
+        return new Response(JSON.stringify({
+          success: true,
+          action: 'patient_booking',
+          hostname: 'persistence-test.local'
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return originalFetch(input, init);
+    };
     const durableStore = new FakePrimaryRepository();
     const token = 'persistence-test-token';
     const auth = {
@@ -272,6 +316,15 @@ describe('integrasi Express dengan persistence', () => {
       const first = await createApps(auth, { mode: 'mysql', mysql: durableStore });
       addErrorHandler(first.app);
       const firstUrl = await start(first.app);
+      const employeePortal = await fetch(`${firstUrl}/api/gateway/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ divisionId: 'sdm-umum' })
+      });
+      assert.equal(employeePortal.status, 503);
+      assert.equal((await employeePortal.json() as { code: string }).code, 'EMPLOYEE_PORTAL_UNAVAILABLE');
+      assert.equal(await durableStore.get('system_data', 'employee_gateway_state'), null);
+
       const created = await fetch(`${firstUrl}/api/v1/patients`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -282,7 +335,7 @@ describe('integrasi Express dengan persistence', () => {
           alamat: 'Alamat Uji'
         })
       });
-      const createdBody = await created.json() as { data: { id: string; nama: string } };
+      const createdBody = await created.json() as { data: { id: string; nama: string; no_rm: string; tanggal_lahir: string } };
       assert.equal(created.status, 201);
       assert.deepEqual(await durableStore.get('patients', createdBody.data.id), createdBody.data);
 
@@ -319,6 +372,96 @@ describe('integrasi Express dengan persistence', () => {
         'Diperiksa'
       );
 
+      const dispatch = await fetch(`${firstUrl}/api/v1/patient-notifications/dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ no_rm: createdBody.data.no_rm, type: 'queue_call' })
+      });
+      assert.equal(dispatch.status, 200);
+      assert.equal(
+        (await durableStore.get<{ status: string }>('registrations', appointmentBody.data.id))?.status,
+        'Panggil'
+      );
+
+      addErrorHandler(first.publicApp);
+      const firstPublicUrl = await start(first.publicApp);
+      const catalogResponse = await fetch(`${firstPublicUrl}/api/public/hospital-catalog`);
+      const catalog = await catalogResponse.json() as { doctors: Array<{ id: string; poli_id: string; kuota_tersisa: number }> };
+      const doctor = catalog.doctors[0];
+      const remainingBeforeBooking = doctor.kuota_tersisa;
+      const todayInJakarta = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+      const booking = await fetch(`${firstPublicUrl}/api/patient/appointments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          turnstileToken: 'persistence-test-token',
+          no_rm: createdBody.data.no_rm,
+          tanggal_lahir: createdBody.data.tanggal_lahir,
+          no_hp: '08123456789',
+          poli_id: doctor.poli_id,
+          dokter_id: doctor.id,
+          tanggal: todayInJakarta
+        })
+      });
+      const bookingBody = await booking.json() as { message?: string };
+      assert.equal(booking.status, 201, bookingBody.message);
+      const catalogAfterBooking = await fetch(`${firstPublicUrl}/api/public/hospital-catalog`);
+      const updatedCatalog = await catalogAfterBooking.json() as { doctors: typeof catalog.doctors };
+      assert.equal(updatedCatalog.doctors.find((item) => item.id === doctor.id)?.kuota_tersisa, remainingBeforeBooking - 1);
+
+      const verifiedPatient = await fetch(`${firstPublicUrl}/api/patient/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          no_rm: createdBody.data.no_rm,
+          tanggal_lahir: createdBody.data.tanggal_lahir
+        })
+      });
+      const patientSession = await verifiedPatient.json() as { token: string };
+      assert.equal(verifiedPatient.status, 200);
+      const tokenSaved = await fetch(`${firstPublicUrl}/api/patient/fcm-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${patientSession.token}` },
+        body: JSON.stringify({ token: 'persistent-device-token' })
+      });
+      assert.equal(tokenSaved.status, 200);
+      const labDispatch = await fetch(`${firstUrl}/api/v1/patient-notifications/dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          no_rm: createdBody.data.no_rm,
+          type: 'lab_ready',
+          lab_order_id: 'LAB-PERSIST-001',
+          pemeriksaan: 'Hasil uji lab',
+          hasil: 'Hasil tersimpan lintas restart.'
+        })
+      });
+      assert.equal(labDispatch.status, 200);
+
+      const dossier = await fetch(`${firstUrl}/api/v1/dossier/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          no_rm: 'RM-TEST-1',
+          pasien_nama: 'Pasien Persisten',
+          doc_type: 'CatatanUji',
+          title: 'Dokumen Persisten',
+          data: { catatan: 'Catatan uji persistensi.' }
+        })
+      });
+      const dossierBody = await dossier.json() as { data: { id: string } };
+      assert.equal(dossier.status, 201);
+      assert.ok(await durableStore.get('documents', dossierBody.data.id));
+
+      const audit = await fetch(`${firstUrl}/api/v1/audit/logs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'PERSISTENCE_TEST', module: 'test' })
+      });
+      const auditBody = await audit.json() as { data: { id: string } };
+      assert.equal(audit.status, 201);
+      assert.ok(await durableStore.get('audit_logs', auditBody.data.id));
+
       const systemDataValue = JSON.stringify([{ id: 'POL-TEST', nama: 'Poli Persisten' }]);
       const systemDataWrite = await fetch(`${firstUrl}/api/v1/system-data/hospital_poli_master`, {
         method: 'PUT',
@@ -339,6 +482,26 @@ describe('integrasi Express dengan persistence', () => {
       const restarted = await createApps(auth, { mode: 'mysql', mysql: durableStore });
       addErrorHandler(restarted.app);
       const restartedUrl = await start(restarted.app);
+      addErrorHandler(restarted.publicApp);
+      const restartedPublicUrl = await start(restarted.publicApp);
+      const restartedCatalog = await fetch(`${restartedPublicUrl}/api/public/hospital-catalog`);
+      const restartedCatalogBody = await restartedCatalog.json() as { doctors: typeof catalog.doctors };
+      assert.equal(restartedCatalogBody.doctors.find((item) => item.id === doctor.id)?.kuota_tersisa, remainingBeforeBooking - 1);
+      const patientHeaders = { Authorization: `Bearer ${patientSession.token}` };
+      const restartedDossier = await fetch(`${restartedPublicUrl}/api/patient/dossier`, { headers: patientHeaders });
+      const restartedDossierBody = await restartedDossier.json() as {
+        dossier: { labRadResults: Array<{ id: string; hasil: string }> };
+      };
+      assert.ok(restartedDossierBody.dossier.labRadResults.some((result) =>
+        result.id === 'LAB-PERSIST-001' && result.hasil === 'Hasil tersimpan lintas restart.'
+      ));
+      const restartedNotifications = await fetch(`${restartedPublicUrl}/api/patient/notifications`, { headers: patientHeaders });
+      const restartedNotificationsBody = await restartedNotifications.json() as {
+        registeredDevices: number;
+        notifications: Array<{ lab_order_id?: string }>;
+      };
+      assert.equal(restartedNotificationsBody.registeredDevices, 1);
+      assert.ok(restartedNotificationsBody.notifications.some((notification) => notification.lab_order_id === 'LAB-PERSIST-001'));
       const listed = await fetch(`${restartedUrl}/api/v1/patients?q=Pasien%20Persisten`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -390,6 +553,11 @@ describe('integrasi Express dengan persistence', () => {
       else process.env.SESSION_SECRET = previousEnv.sessionSecret;
       if (previousEnv.demoAuth === undefined) delete process.env.ALLOW_INSECURE_DEMO_AUTH;
       else process.env.ALLOW_INSECURE_DEMO_AUTH = previousEnv.demoAuth;
+      if (previousEnv.turnstileSecret === undefined) delete process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
+      else process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY = previousEnv.turnstileSecret;
+      if (previousEnv.turnstileHostname === undefined) delete process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME;
+      else process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME = previousEnv.turnstileHostname;
+      globalThis.fetch = originalFetch;
     }
   });
 });

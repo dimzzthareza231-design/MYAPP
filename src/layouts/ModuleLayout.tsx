@@ -193,8 +193,8 @@ export default function ModuleLayout() {
   
   // Context-Aware Sidebar state: 'focus' hides secondary clutter for medical tasks, 'all' reveals all
   const [focusMode, setFocusMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('myitaru_sidebar_focus_mode');
-    return saved !== null ? JSON.parse(saved) : true;
+    const saved = localStorage.getItem('myitaru_sidebar_focus_mode_v2');
+    return saved !== null ? JSON.parse(saved) : false;
   });
 
   // Category Accordion State
@@ -206,7 +206,7 @@ export default function ModuleLayout() {
   const { moduleId: paramModuleId } = useParams();
 
   useEffect(() => {
-    localStorage.setItem('myitaru_sidebar_focus_mode', JSON.stringify(focusMode));
+    localStorage.setItem('myitaru_sidebar_focus_mode_v2', JSON.stringify(focusMode));
   }, [focusMode]);
 
   // Extract module ID from URL (e.g. /modul/pendaftaran -> pendaftaran)

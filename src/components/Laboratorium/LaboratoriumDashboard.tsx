@@ -9,6 +9,7 @@ import { KatalogLabTab } from './KatalogLabTab';
 import { QualityControlTab } from './QualityControlTab';
 import { BankDarahTab } from './BankDarahTab';
 import { CetakHasilModal } from './CetakHasilModal';
+import { usesServerPersistence } from '../../lib/firestoreService';
 import { 
   TestTube, Cpu, ShieldCheck, BookOpen, 
   Activity, Droplet, Sparkles, RefreshCw
@@ -33,7 +34,7 @@ export function LaboratoriumDashboard() {
         console.warn(e);
       }
     }
-    return INITIAL_LAB_ORDERS_MOCK;
+    return usesServerPersistence ? [] : INITIAL_LAB_ORDERS_MOCK;
   });
 
   useEffect(() => {

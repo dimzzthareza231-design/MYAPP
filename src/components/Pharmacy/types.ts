@@ -164,7 +164,7 @@ export interface AIDrugInteractionAlert {
 }
 
 export interface AIClinicalScreening {
-  status_keamanan: 'Aman' | 'Peringatan Moderat' | 'Bahaya / Kontraindikasi';
+  status_keamanan: 'Aman' | 'Peringatan Moderat' | 'Bahaya / Kontraindikasi' | 'Belum terverifikasi';
   interaksi_terdeteksi: AIDrugInteractionAlert[];
   peringatan_alergi: string[];
   penyesuaian_dosis_gfr?: string;

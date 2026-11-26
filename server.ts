@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import {
   executeResilientGemini,
   getGeminiModelFallbackChain,
+  GEMINI_REQUEST_TIMEOUT_MS,
   parseSafeJson,
   analyzeClinicalNoteDeterministic,
   generateClinicalDecisionSupportDeterministic,
@@ -20,18 +21,23 @@ import {
 } from './src/server/aiIntelligenceEngine';
 import { registerPatientPortalRoutes } from './src/server/patientPortalService';
 import { registerEmployeePortalGateway } from './src/server/employeePortalGateway';
+import { registerClinicalRecordApi } from './src/server/clinicalRecordApi';
+import { jakartaDate } from './src/utils/jakartaDate';
+import { TurnstileNotConfiguredError, verifyTurnstileToken } from './src/server/turnstile';
 import {
   assertProductionAuthConfiguration,
   getCoreAuthMode,
   registerCoreAuthentication,
   hasScope,
+  isModuleDataConfigKey,
+  moduleDataScopeForKey,
   type CoreAuthRequest,
   type CoreAuthOptions
 } from './src/server/coreAuth';
 import { LocalAuthService } from './src/server/localAuth';
 import { clientIp } from './src/server/clientIp';
 import { nextRmNumber } from './src/server/rmNumber';
-import { scrubPhi } from './src/server/scrubPhi';
+import { safeErrorDetails, scrubPhi, scrubPhiData } from './src/server/scrubPhi';
 import {
   createSecurePatientQrToken,
   getDocumentQrScope,
@@ -50,13 +56,31 @@ import {
 
 dotenv.config();
 
+function logSafeError(context: string, error: unknown): void {
+  console.error(context, safeErrorDetails(error));
+}
+
 interface PersistentArrayBinding {
   entity: PersistenceEntity;
   records: Array<{ id: string }>;
 }
 
+type PersistentArraySnapshot =
+  | { binding: PersistentArrayBinding; mode: 'copy'; records: Array<{ id: string }> }
+  | { binding: PersistentArrayBinding; mode: 'prepend'; originalLength: number };
+
+const MAX_RECENT_APPOINTMENTS = 5000;
+
 function arraySnapshot(records: Array<{ id: string }>): Array<{ id: string }> {
   return JSON.parse(JSON.stringify(records)) as Array<{ id: string }>;
+}
+
+function snapshotPersistentArray(binding: PersistentArrayBinding): PersistentArraySnapshot {
+  // These collections only receive new records at the front; keep their growing history out of snapshots.
+  if (binding.entity === 'documents' || binding.entity === 'audit_logs') {
+    return { binding, mode: 'prepend', originalLength: binding.records.length };
+  }
+  return { binding, mode: 'copy', records: arraySnapshot(binding.records) };
 }
 
 function diffPersistentArrays(
@@ -81,13 +105,59 @@ function diffPersistentArrays(
   return changes;
 }
 
-function restorePersistentArrays(
-  bindings: PersistentArrayBinding[],
-  snapshots: Array<Array<{ id: string }>>
-): void {
-  bindings.forEach((binding, index) => {
-    binding.records.splice(0, binding.records.length, ...snapshots[index]);
-  });
+function diffPersistentSnapshot(snapshot: PersistentArraySnapshot): PersistenceChange[] {
+  if (snapshot.mode === 'prepend') {
+    const added = snapshot.binding.records.length - snapshot.originalLength;
+    return snapshot.binding.records.slice(0, added).map((record) => ({
+      entity: snapshot.binding.entity,
+      id: record.id,
+      data: record
+    }));
+  }
+  return diffPersistentArrays(snapshot.binding.entity, snapshot.records, snapshot.binding.records);
+}
+
+function restorePersistentArrays(snapshots: PersistentArraySnapshot[]): void {
+  for (const snapshot of snapshots) {
+    if (snapshot.mode === 'prepend') {
+      const added = Math.max(0, snapshot.binding.records.length - snapshot.originalLength);
+      if (added) snapshot.binding.records.splice(0, added);
+    } else {
+      snapshot.binding.records.splice(0, snapshot.binding.records.length, ...snapshot.records);
+    }
+  }
+}
+
+function bindingsForMutation(
+  method: string,
+  path: string,
+  bindings: PersistentArrayBinding[]
+): PersistentArrayBinding[] {
+  const entities = new Set<PersistenceEntity>();
+  const add = (...items: PersistenceEntity[]) => items.forEach((item) => entities.add(item));
+
+  if (method === 'POST') {
+    if (path === '/api/v1/dossier/document-qr/issue' || path === '/api/v1/patient-qr/issue') add('qr_tokens', 'audit_logs');
+    else if (path === '/api/v1/patient-qr/resolve') add('audit_logs');
+    else if (path === '/api/v1/patient-qr/redeem') add('registrations', 'qr_tokens', 'audit_logs');
+    else if (path === '/api/v1/patients') add('patients', 'audit_logs');
+    else if (path === '/api/v1/appointments') add('registrations');
+    else if (path === '/api/v1/inventory/dispense') add('inventory', 'audit_logs');
+    else if (path === '/api/v1/dossier/documents') add('documents');
+    else if (path === '/api/v1/audit/logs' || path === '/api/patient/verify') add('audit_logs');
+    else if (path === '/api/patient/appointments') add('patients', 'registrations', 'qr_tokens', 'audit_logs');
+    else if (path === '/api/patient/notifications/test') add('registrations', 'audit_logs');
+    else if (path === '/api/v1/patient-notifications/dispatch') add('registrations', 'audit_logs');
+    else if (path.startsWith('/api/gateway/')) add('audit_logs');
+  } else if (method === 'PATCH') {
+    if (path.startsWith('/api/v1/patients/')) add('patients');
+    else if (path.startsWith('/api/v1/appointments/')) add('registrations');
+    else if (path.startsWith('/api/gateway/')) add('audit_logs');
+  } else if (method === 'PUT' || method === 'DELETE') {
+    if (path.startsWith('/api/gateway/')) add('audit_logs');
+  }
+
+  return bindings.filter((binding) => entities.has(binding.entity));
 }
 
 function installPersistenceMiddleware(
@@ -110,13 +180,25 @@ function installPersistenceMiddleware(
         req.path.startsWith('/api/auth/')
       ) return next();
 
+      const affectedBindings = bindingsForMutation(req.method, req.path, bindings);
+      const needsSerialization = affectedBindings.length > 0 ||
+        req.path === '/api/auth/login' ||
+        req.path === '/api/auth/logout' ||
+        req.path === '/api/auth/password' ||
+        req.path.startsWith('/api/v1/module-data/') ||
+        req.path.startsWith('/api/v1/clinical-records/') ||
+        req.path.startsWith('/api/auth/mfa/') ||
+        req.path.startsWith('/api/gateway/') ||
+        req.path.startsWith('/api/v1/auth/users');
+      if (!needsSerialization) return next();
+
       let release!: () => void;
       const currentWrite = new Promise<void>((resolve) => { release = resolve; });
       const previousWrite = writeQueue;
       writeQueue = currentWrite;
       await previousWrite;
 
-      const snapshots = bindings.map((binding) => arraySnapshot(binding.records));
+      const snapshots = affectedBindings.map(snapshotPersistentArray);
       const sendJson = res.json.bind(res);
       let finalized = false;
       const finish = (body: unknown) => {
@@ -124,18 +206,16 @@ function installPersistenceMiddleware(
         finalized = true;
         void (async () => {
           if (res.statusCode >= 400) {
-            restorePersistentArrays(bindings, snapshots);
+            restorePersistentArrays(snapshots);
             sendJson(body);
             return;
           }
-          const changes = bindings.flatMap((binding, index) =>
-            diffPersistentArrays(binding.entity, snapshots[index], binding.records)
-          );
-          await persistence.commit(changes);
+          const changes = snapshots.flatMap(diffPersistentSnapshot);
+          if (changes.length) await persistence.commit(changes);
           sendJson(body);
         })().catch((error: unknown) => {
-          restorePersistentArrays(bindings, snapshots);
-          console.error('[Persistence] Write-through failed; API mutation rolled back.', error);
+          restorePersistentArrays(snapshots);
+          logSafeError('[Persistence] Write-through failed; API mutation rolled back.', error);
           if (!res.headersSent) {
             res.status(503);
             sendJson({
@@ -152,7 +232,7 @@ function installPersistenceMiddleware(
       res.once('close', () => {
         if (finalized) return;
         finalized = true;
-        restorePersistentArrays(bindings, snapshots);
+        restorePersistentArrays(snapshots);
         release();
       });
       return next();
@@ -191,18 +271,19 @@ export async function createApps(
     if (persistence.mode === 'firebase' || persistence.mode === 'hybrid') {
       throw new Error('AUTH_MODE=local supports only MySQL, D1 or in-memory development storage; Firebase and hybrid storage are not supported for offline local authentication.');
     }
-    resolvedAuthOptions.localAuth ||= new LocalAuthService(persistence);
-    await resolvedAuthOptions.localAuth.initialize();
+    const localAuth = resolvedAuthOptions.localAuth || new LocalAuthService(persistence);
+    resolvedAuthOptions.localAuth = localAuth;
+    await localAuth.initialize();
   }
 
+  const standardJsonParser = express.json({ limit: '100kb' });
+  const largeJsonParser = express.json({ limit: '2mb' });
   for (const target of [app, publicApp]) {
-  target.use(express.json({ limit: '5mb' }));
-  target.use(express.urlencoded({ extended: false, limit: '256kb', parameterLimit: 100 }));
   target.use('/api', (req, res, next) => {
     const limits: Record<string, { max: number; windowMs: number }> = {
       '/auth/session': { max: 20, windowMs: 15 * 60 * 1000 },
-      '/auth/login': { max: 10, windowMs: 15 * 60 * 1000 },
       '/auth/logout': { max: 20, windowMs: 15 * 60 * 1000 },
+      '/auth/mfa/complete': { max: 5, windowMs: 15 * 60 * 1000 },
       '/patient/verify': { max: 10, windowMs: 15 * 60 * 1000 },
       '/patient/google-session': { max: 10, windowMs: 15 * 60 * 1000 },
       '/patient/appointments': { max: 20, windowMs: 15 * 60 * 1000 },
@@ -242,13 +323,31 @@ export async function createApps(
     return next();
   });
 
+  target.use((req, res, next) => {
+    const path = req.path.toLowerCase();
+    const needsLargeBody = target === app && (
+      (req.method === 'PUT' && (
+        path.startsWith('/api/v1/module-data/') ||
+        path.startsWith('/api/v1/system-data/') ||
+        /^\/api\/v1\/clinical-records\/[^/]+\/[^/]+$/.test(path)
+      )) ||
+      (req.method === 'POST' && path === '/api/v1/dossier/documents')
+    );
+    return (needsLargeBody ? largeJsonParser : standardJsonParser)(req, res, next);
+  });
+  target.use(express.urlencoded({ extended: false, limit: '100kb', parameterLimit: 100 }));
+
   // Security Headers Middleware
   target.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
-    res.setHeader('Content-Security-Policy', "base-uri 'self'; object-src 'none'; frame-ancestors 'none'");
+    const localHmrSource = process.env.NODE_ENV === 'production' ? '' : ' ws://localhost:*';
+    res.setHeader(
+      'Content-Security-Policy',
+      `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://accounts.google.com; script-src 'self' https://challenges.cloudflare.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self'${localHmrSource} https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://firebasestorage.googleapis.com https://challenges.cloudflare.com wss://*.firebaseio.com; frame-src 'self' https://accounts.google.com https://*.firebaseapp.com https://challenges.cloudflare.com; worker-src 'self' blob:`
+    );
     next();
   });
 
@@ -458,7 +557,7 @@ export async function createApps(
       no_rm: 'RM-260101-0001',
       poli: 'Poli Penyakit Dalam',
       dokter: 'dr. Hendra Wijaya, Sp.PD',
-      tanggal: new Date().toISOString().split('T')[0],
+      tanggal: jakartaDate(),
       jam_praktek: '09:00 - 12:00',
       nomor_antrian: 'PD-001',
       status: 'Menunggu',
@@ -472,7 +571,7 @@ export async function createApps(
       no_rm: 'RM-260103-0003',
       poli: 'Instalasi Gawat Darurat (IGD)',
       dokter: 'dr. Sarah Amanda, Sp.A',
-      tanggal: new Date().toISOString().split('T')[0],
+      tanggal: jakartaDate(),
       jam_praktek: '24 Jam',
       nomor_antrian: 'IGD-004',
       status: 'Diperiksa',
@@ -591,8 +690,15 @@ export async function createApps(
         }
         // Paralel: cold start dulu membaca koleksi satu per satu (~8 detik di Firestore).
         const loadStartedAt = Date.now();
-        const loaded = await Promise.all(persistentBindings
-          .map(async (binding) => ({ binding, stored: await persistence.list<Record<string, unknown>>(binding.entity) })));
+        const loaded = await Promise.all(persistentBindings.map(async (binding) => {
+          if (binding.entity === 'audit_logs') return { binding, stored: [], hasMore: false };
+          if (binding.entity === 'registrations') {
+            const page = await persistence.listPage<Record<string, unknown>>(binding.entity, 0, MAX_RECENT_APPOINTMENTS);
+            return { binding, stored: page.records, hasMore: page.hasMore };
+          }
+          return { binding, stored: await persistence.list<Record<string, unknown>>(binding.entity), hasMore: false };
+        }));
+        const appointmentHistoryTruncated = loaded.find(({ binding }) => binding.entity === 'registrations')?.hasMore || false;
         for (const { binding, stored } of loaded) {
           for (const record of stored) {
             if (!record.data || typeof record.data !== 'object' || Array.isArray(record.data)) {
@@ -601,6 +707,7 @@ export async function createApps(
             binding.records.push({ ...record.data, id: record.id });
           }
         }
+        app.locals.appointmentHistoryTruncated = appointmentHistoryTruncated;
         console.info(`[Persistence] Loaded ${loaded.map(({ binding, stored }) => `${binding.entity}=${stored.length}`).join(' ')} in ${Date.now() - loadStartedAt}ms`);
       } catch (error) {
         await persistence.close();
@@ -801,7 +908,7 @@ export async function createApps(
     if (!appointment || appointment.status === 'Dibatalkan') {
       return res.status(404).json({ success: false, code: 'RESERVATION_NOT_FOUND' });
     }
-    if (appointment.tanggal !== new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })) {
+    if (appointment.tanggal !== jakartaDate()) {
       return res.status(409).json({ success: false, code: 'CHECKIN_DATE_MISMATCH' });
     }
     if (appointment.checked_in_at) {
@@ -845,6 +952,8 @@ export async function createApps(
   // 🚀 REST API V1 ENDPOINTS (Enterprise Klinik Information System Backend)
   // =========================================================================
 
+  registerClinicalRecordApi(app, persistence);
+
   // 1. System Health Check Endpoint
   app.get('/api/v1/health', async (req, res) => {
     const storage = await persistence.health();
@@ -856,7 +965,7 @@ export async function createApps(
   });
 
   // Data modul yang dulu hanya di localStorage tiap browser (billing, farmasi, dossier RME, lab, ...).
-  // shortcut: satu dokumen per kunci, yang terakhir menyimpan menang; ganti dengan API per modul bila perlu kontrol konflik.
+  // shortcut: satu dokumen per kunci; critical transactional modules should move to dedicated APIs.
   // Spasi dipakai komponen (mis. "hospital_igd_Penanganan IGD"); garis miring ditolak karena memecah path dokumen.
   const MODULE_DATA_KEY = /^(hospital_|simrs_|klinik_|bpjs_|myitaru_igd_)[A-Za-z0-9._:\- &()]{1,100}$/;
   const MODULE_INDEX_ID = 'module-index';
@@ -865,68 +974,96 @@ export async function createApps(
   type ModuleIndex = Record<string, string>;
   const readModuleIndex = async () =>
     (await persistence.get<{ index?: ModuleIndex }>('system_data', MODULE_INDEX_ID))?.index ?? {};
+  const canAccessModuleData = (req: CoreAuthRequest, key: string) =>
+    !isModuleDataConfigKey(key) && Boolean(req.corePrincipal && hasScope(req.corePrincipal.roleId, moduleDataScopeForKey(key)));
 
-  app.get('/api/v1/module-data', async (req, res) => {
+  app.get('/api/v1/module-data', async (req: CoreAuthRequest, res) => {
     try {
       // ?keys=a,b,c: ambil banyak kunci sekaligus (paralel) — browser baru menarik ~30 kunci saat login.
       if (typeof req.query.keys === 'string') {
-        const keys = req.query.keys.split(',').filter((key) => MODULE_DATA_KEY.test(key)).slice(0, 200);
+        const keys = req.query.keys.split(',').filter((key) =>
+          MODULE_DATA_KEY.test(key) && canAccessModuleData(req, key)
+        ).slice(0, 200);
         const records = await Promise.all(keys.map(async (key) =>
-          [key, await persistence.get<{ data: string; updatedAt: string }>('system_data', moduleDocId(key))] as const));
-        return res.json({ success: true, records: Object.fromEntries(records.filter(([, record]) => record).map(([key, record]) => [key, { data: record!.data, updatedAt: record!.updatedAt }])) });
+          [key, await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(key))] as const));
+        return res.json({ success: true, records: Object.fromEntries(records.filter(([, record]) => record).map(([key, record]) => [key, { data: record!.data, updatedAt: record!.updatedAt, version: record!.version || record!.updatedAt }])) });
       }
-      return res.json({ success: true, index: await readModuleIndex() });
+      const index = await readModuleIndex();
+      return res.json({ success: true, index: Object.fromEntries(Object.entries(index).filter(([key]) => canAccessModuleData(req, key))) });
     } catch (error) {
-      console.error('[Persistence] Could not read module index.', error);
+      logSafeError('[Persistence] Could not read module index.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
     }
   });
 
   app.get('/api/v1/module-data/:key', async (req, res) => {
-    if (!MODULE_DATA_KEY.test(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
+    if (!MODULE_DATA_KEY.test(req.params.key) || isModuleDataConfigKey(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
     try {
-      const record = await persistence.get<{ data: string; updatedAt: string }>('system_data', moduleDocId(req.params.key));
+      const record = await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(req.params.key));
       if (!record) return res.status(404).json({ success: false, code: 'MODULE_DATA_NOT_FOUND' });
-      return res.json({ success: true, data: record.data, updatedAt: record.updatedAt });
+      return res.set('ETag', `"${record.version || record.updatedAt}"`).json({ success: true, data: record.data, updatedAt: record.updatedAt, version: record.version || record.updatedAt });
     } catch (error) {
-      console.error('[Persistence] Could not read module data.', error);
+      logSafeError('[Persistence] Could not read module data.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
     }
   });
 
   const writeModuleData = async (key: string, data: string | null) => {
     const updatedAt = new Date().toISOString();
+    const version = randomUUID();
     const index = await readModuleIndex();
     if (data === null) delete index[key];
-    else index[key] = updatedAt;
+    else index[key] = version;
     await persistence.commit([
-      { entity: 'system_data', id: moduleDocId(key), data: data === null ? null : { key, data, updatedAt } },
+      { entity: 'system_data', id: moduleDocId(key), data: data === null ? null : { key, data, updatedAt, version } },
       { entity: 'system_data', id: MODULE_INDEX_ID, data: { key: MODULE_INDEX_ID, index, updatedAt } }
     ]);
-    return updatedAt;
+    return { updatedAt, version };
   };
 
   app.put('/api/v1/module-data/:key', async (req, res) => {
     const data = req.body?.data;
-    if (!MODULE_DATA_KEY.test(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
+    if (!MODULE_DATA_KEY.test(req.params.key) || isModuleDataConfigKey(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
     if (typeof data !== 'string' || Buffer.byteLength(data, 'utf8') > 900_000) {
       return res.status(413).json({ success: false, code: 'INVALID_MODULE_PAYLOAD' });
     }
     try {
-      return res.json({ success: true, updatedAt: await writeModuleData(req.params.key, data) });
+      const ifMatch = req.get('if-match');
+      const createOnly = req.get('if-none-match') === '*';
+      if ((!ifMatch && !createOnly) || (ifMatch && createOnly)) {
+        return res.status(428).json({ success: false, code: 'MODULE_DATA_PRECONDITION_REQUIRED' });
+      }
+      const current = await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(req.params.key));
+      const currentVersion = current?.version || current?.updatedAt;
+      if ((createOnly && current) || (ifMatch && ifMatch !== `"${currentVersion}"`)) {
+        const conflict = res.status(412);
+        if (currentVersion) conflict.set('ETag', `"${currentVersion}"`);
+        return conflict.json({ success: false, code: 'MODULE_DATA_CONFLICT', updatedAt: current?.updatedAt ?? null, version: currentVersion ?? null });
+      }
+      const saved = await writeModuleData(req.params.key, data);
+      return res.set('ETag', `"${saved.version}"`).json({ success: true, ...saved });
     } catch (error) {
-      console.error('[Persistence] Could not write module data.', error);
+      logSafeError('[Persistence] Could not write module data.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
     }
   });
 
   app.delete('/api/v1/module-data/:key', async (req, res) => {
-    if (!MODULE_DATA_KEY.test(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
+    if (!MODULE_DATA_KEY.test(req.params.key) || isModuleDataConfigKey(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
     try {
+      const ifMatch = req.get('if-match');
+      if (!ifMatch) return res.status(428).json({ success: false, code: 'MODULE_DATA_PRECONDITION_REQUIRED' });
+      const current = await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(req.params.key));
+      const currentVersion = current?.version || current?.updatedAt;
+      if (!current || ifMatch !== `"${currentVersion}"`) {
+        const conflict = res.status(412);
+        if (currentVersion) conflict.set('ETag', `"${currentVersion}"`);
+        return conflict.json({ success: false, code: 'MODULE_DATA_CONFLICT', updatedAt: current?.updatedAt ?? null, version: currentVersion ?? null });
+      }
       await writeModuleData(req.params.key, null);
       return res.json({ success: true });
     } catch (error) {
-      console.error('[Persistence] Could not delete module data.', error);
+      logSafeError('[Persistence] Could not delete module data.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
     }
   });
@@ -941,7 +1078,7 @@ export async function createApps(
       if (!record) return res.status(404).json({ success: false, code: 'SYSTEM_DATA_NOT_FOUND' });
       return res.json({ success: true, ...record });
     } catch (error) {
-      console.error('[Persistence] Could not read system data.', error);
+      logSafeError('[Persistence] Could not read system data.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
     }
   });
@@ -960,7 +1097,7 @@ export async function createApps(
       await persistence.commit([{ entity: 'system_data', id: key, data: record }]);
       return res.json({ success: true, updatedAt: record.updatedAt });
     } catch (error) {
-      console.error('[Persistence] Could not write system data.', error);
+      logSafeError('[Persistence] Could not write system data.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
     }
   });
@@ -985,8 +1122,8 @@ export async function createApps(
         totalSkus: inventoryStore.length,
         lowStockAlerts: lowStockItems
       },
-      satusehatSyncRate: '99.4%',
-      bpjsClaimApprovalRate: '98.8%',
+      satusehatSyncRate: null,
+      bpjsClaimApprovalRate: null,
       timestamp: new Date().toISOString()
     });
   });
@@ -1201,10 +1338,18 @@ export async function createApps(
       list = list.filter(a => a.status.toLowerCase() === status.toLowerCase());
     }
 
+    const pageNum = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limitNum = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '100'), 10) || 100));
+    const startIndex = (pageNum - 1) * limitNum;
     res.json({
       success: true,
       total: list.length,
-      data: list
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(list.length / limitNum),
+      hasMore: startIndex + limitNum < list.length,
+      historyTruncated: Boolean(app.locals.appointmentHistoryTruncated),
+      data: list.slice(startIndex, startIndex + limitNum)
     });
   });
 
@@ -1220,7 +1365,7 @@ export async function createApps(
     if (!patient) return res.status(400).json({ success: false, code: 'PATIENT_NOT_FOUND', error: 'Pasien belum terdaftar.' });
     const pasien_nama = patient.nama;
     const patientRm = patient.no_rm;
-    const tanggal = String(req.body.tanggal || new Date().toISOString()).slice(0, 10);
+    const tanggal = String(req.body.tanggal || jakartaDate()).slice(0, 10);
 
     const queuePrefix = poli.includes('Dalam') ? 'PD' : poli.includes('Jantung') ? 'JT' : poli.includes('Anak') ? 'AN' : 'Q';
     // Nomor antrean mulai dari 001 setiap hari per poli.
@@ -1331,7 +1476,7 @@ export async function createApps(
           if (local && Number.isFinite(data.stok)) local.stok = data.stok;
         }
       } catch (error) {
-        console.error('[Persistence] Could not refresh inventory stock.', error);
+        logSafeError('[Persistence] Could not refresh inventory stock.', error);
         return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
       }
     }
@@ -1472,22 +1617,40 @@ export async function createApps(
   });
 
   // 13. Audit Trail API
-  app.get('/api/v1/audit/logs', (req, res) => {
+  app.get('/api/v1/audit/logs', async (req, res) => {
     const { module, user, limit = '50' } = req.query;
-    let logs = [...auditLogsStore];
-
-    if (module && typeof module === 'string') {
-      logs = logs.filter(l => l.module.toLowerCase().includes(module.toLowerCase()));
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(String(limit), 10) || 50));
+    const matchesFilters = (entry: AuditLogEntry) =>
+      (!module || typeof module !== 'string' || entry.module.toLowerCase().includes(module.toLowerCase())) &&
+      (!user || typeof user !== 'string' || entry.user.toLowerCase().includes(user.toLowerCase()));
+    let logs: AuditLogEntry[];
+    let total: number | null;
+    let hasMore: boolean;
+    try {
+      if (persistence.mode === 'memory') {
+        const filtered = auditLogsStore.filter(matchesFilters);
+        total = filtered.length;
+        hasMore = (page - 1) * limitNum + limitNum < total;
+        logs = filtered.slice((page - 1) * limitNum, page * limitNum);
+      } else {
+        const result = await persistence.listPage<AuditLogEntry>('audit_logs', (page - 1) * limitNum, limitNum);
+        logs = result.records.map(({ id, data }) => ({ ...data, id })).filter(matchesFilters);
+        total = module || user ? null : result.total;
+        hasMore = result.hasMore;
+      }
+    } catch (error) {
+      logSafeError('[Persistence] Could not list audit logs.', error);
+      return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
     }
-    if (user && typeof user === 'string') {
-      logs = logs.filter(l => l.user.toLowerCase().includes(user.toLowerCase()));
-    }
 
-    const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
     res.json({
       success: true,
-      total: logs.length,
-      data: logs.slice(0, limitNum)
+      total,
+      page,
+      limit: limitNum,
+      hasMore,
+      data: logs
     });
   });
 
@@ -1527,13 +1690,13 @@ export async function createApps(
   });
 
   // =========================================================================
-  // 🧠 AI MEDICAL INTELLIGENCE ENDPOINTS (Powered by Google Gemini 4)
+  // AI medical intelligence endpoints use the configured Gemini model fallback chain.
   // =========================================================================
 
   // AI Medical Assistant Endpoint
   app.post('/api/ai/analyze', async (req, res) => {
     try {
-      const { clinicalNote } = req.body;
+      const clinicalNote = scrubPhi(req.body?.clinicalNote, 8000);
 
       if (!clinicalNote) {
         return res.status(400).json({ error: 'Clinical note is required.' });
@@ -1611,8 +1774,8 @@ IMPORTANT: You are an assistant, NOT a doctor. Ensure you state that this is for
       const fallback = analyzeClinicalNoteDeterministic(clinicalNote);
       return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
-      console.warn('AI Analysis Warning/Fallback triggered:', error?.message || error);
-      const fallback = analyzeClinicalNoteDeterministic(req.body?.clinicalNote || '');
+      logSafeError('[AI] Clinical analysis fallback triggered.', error);
+      const fallback = analyzeClinicalNoteDeterministic(scrubPhi(req.body?.clinicalNote, 8000));
       return res.json({ ...fallback, fallback: true });
     }
   });
@@ -1621,8 +1784,14 @@ IMPORTANT: You are an assistant, NOT a doctor. Ensure you state that this is for
   app.post('/api/ai/clinical-decision-support', async (req, res) => {
     try {
       const { patient, vitals, symptoms, clinicalNotes } = req.body;
+      const safeClinicalNotes = scrubPhi(clinicalNotes, 8000);
+      const safeAllergies = scrubPhi(patient?.allergies || 'Tidak ada riwayat alergi', 8000);
+      const safeHistory = scrubPhi(patient?.history || 'Tidak ada riwayat penyakit sebelumnya', 8000);
+      const safeChiefComplaint = scrubPhi(symptoms?.chiefComplaint || safeClinicalNotes || '-', 8000);
+      const safeDuration = scrubPhi(symptoms?.duration || '-', 8000);
+      const safeAdditionalSymptoms = scrubPhi(symptoms?.additionalSymptoms || '-', 8000);
 
-      if (!symptoms?.chiefComplaint && !clinicalNotes) {
+      if (!symptoms?.chiefComplaint && !safeClinicalNotes) {
         return res.status(400).json({ error: 'Keluhan utama (chief complaint) atau catatan klinis diperlukan.' });
       }
 
@@ -1631,11 +1800,9 @@ You are MY ITARU Clinical Decision Support System (CDSS), an advanced medical in
 Analyze the following patient's vital signs and symptoms to provide evidence-based clinical decision support and accurate ICD-10 diagnosis recommendations.
 
 Patient Context:
-- Patient Name: ${patient?.name || 'Pasien Anonim'}
-- Medical Record Number (No. RM): ${patient?.noRm || '-'}
 - Age / Gender: ${patient?.age || 'Dewasa'} / ${patient?.gender || '-'}
-- Known Allergies: ${patient?.allergies || 'Tidak ada riwayat alergi'}
-- Relevant Medical History: ${patient?.history || 'Tidak ada riwayat penyakit sebelumnya'}
+- Known Allergies: ${safeAllergies}
+- Relevant Medical History: ${safeHistory}
 
 Vital Signs:
 - Blood Pressure: ${vitals?.systolic || '-'}/${vitals?.diastolic || '-'} mmHg
@@ -1649,10 +1816,10 @@ Vital Signs:
 - Weight / Height: ${vitals?.weight || '-'} kg / ${vitals?.height || '-'} cm
 
 Symptoms & Clinical Findings:
-- Chief Complaint (Keluhan Utama): "${symptoms?.chiefComplaint || clinicalNotes || '-'}"
-- Duration of Symptoms: "${symptoms?.duration || '-'}"
-- Associated Symptoms (Gejala Penyerta): "${symptoms?.additionalSymptoms || '-'}"
-- Clinical Notes / Physical Findings: "${clinicalNotes || '-'}"
+- Chief Complaint (Keluhan Utama): "${safeChiefComplaint}"
+- Duration of Symptoms: "${safeDuration}"
+- Associated Symptoms (Gejala Penyerta): "${safeAdditionalSymptoms}"
+- Clinical Notes / Physical Findings: "${safeClinicalNotes || '-'}"
 
 Task:
 1. Synthesize a professional clinical case summary in Indonesian.
@@ -1786,7 +1953,7 @@ Task:
       const fallbackResult = generateClinicalDecisionSupportDeterministic(req.body);
       return res.json({ ...fallbackResult, fallback: true });
     } catch (error: any) {
-      console.warn('Clinical Decision Support Fallback triggered:', error?.message || error);
+      logSafeError('[AI] Clinical decision support fallback triggered.', error);
       const fallbackResult = generateClinicalDecisionSupportDeterministic(req.body || {});
       return res.json({ ...fallbackResult, fallback: true });
     }
@@ -1794,10 +1961,9 @@ Task:
 
   // ⭐ ENDPOINT BARU: AI Medical Intelligence & Clinical Search Grounding
   app.post('/api/ai/grounded-search', async (req, res) => {
+    const query = scrubPhi(req.body?.query, 8000);
+    const context = scrubPhi(req.body?.context, 8000);
     try {
-      const query = scrubPhi(req.body?.query, 500);
-      const context = scrubPhi(req.body?.context);
-
       if (!query) {
         return res.status(400).json({ error: 'Query is required.' });
       }
@@ -1809,6 +1975,7 @@ Task:
       const ai = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY,
         httpOptions: {
+          timeout: GEMINI_REQUEST_TIMEOUT_MS,
           headers: {
             'User-Agent': 'aistudio-build'
           }
@@ -1844,7 +2011,7 @@ Instructions:
           });
           if (response?.text) break;
         } catch (modelErr: any) {
-          console.warn(`[Grounded Search] Model ${modelName} failed:`, modelErr?.message || modelErr);
+          logSafeError(`[Grounded Search] Model ${modelName} failed.`, modelErr);
         }
       }
 
@@ -1875,8 +2042,8 @@ Instructions:
         groundingMetadata: response.candidates?.[0]?.groundingMetadata || null
       });
     } catch (error: any) {
-      console.warn('AI Grounded Search Warning/Fallback triggered:', error?.message || error);
-      return res.json({ ...generateMedicalSearchEvidenceDeterministic(req.body?.query || "", req.body?.context), fallback: true });
+      logSafeError('[AI] Grounded search fallback triggered.', error);
+      return res.json({ ...generateMedicalSearchEvidenceDeterministic(query, context), fallback: true });
     }
   });
 
@@ -1884,7 +2051,8 @@ Instructions:
   app.post('/api/ai/maps-grounding', async (req, res) => {
     try {
       const { latitude, longitude, category } = req.body;
-      const query = scrubPhi(req.body?.query, 500);
+      const query = scrubPhi(req.body?.query, 8000);
+      const safeCategory = scrubPhi(category, 500);
 
       if (!query) {
         return res.status(400).json({ error: 'Query is required for Google Maps search.' });
@@ -1897,6 +2065,7 @@ Instructions:
       const ai = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY,
         httpOptions: {
+          timeout: GEMINI_REQUEST_TIMEOUT_MS,
           headers: {
             'User-Agent': 'aistudio-build'
           }
@@ -1908,7 +2077,7 @@ You are MY ITARU Geospatial Health & Medical Facility Locator.
 Use Google Maps data to provide precise, real-time geographical information for healthcare facilities, referral hospitals, BPJS faskes, 24/7 pharmacies, emergency rooms, ambulance hubs, or clinics in Indonesia.
 
 Query: "${query}"
-${category ? `Facility Category: ${category}\n` : ''}
+${safeCategory ? `Facility Category: ${safeCategory}\n` : ''}
 ${latitude && longitude ? `User Coordinates: Lat ${latitude}, Lng ${longitude}\n` : ''}
 
 Instructions:
@@ -1943,7 +2112,7 @@ Instructions:
           });
           if (response?.text) break;
         } catch (modelErr: any) {
-          console.warn(`[Maps Grounding] Model ${modelName} failed:`, modelErr?.message || modelErr);
+          logSafeError(`[Maps Grounding] Model ${modelName} failed.`, modelErr);
         }
       }
 
@@ -1987,9 +2156,9 @@ Instructions:
         groundingMetadata: response.candidates?.[0]?.groundingMetadata || null
       });
     } catch (error: any) {
-      console.warn('Google Maps Grounding Warning/Fallback triggered:', error?.message || error);
-      
-      const q = String(req.body.query || '');
+      logSafeError('[AI] Maps grounding fallback triggered.', error);
+
+      const q = scrubPhi(req.body?.query, 8000);
       const userLat = Number(req.body.latitude) || -6.2088;
       const userLng = Number(req.body.longitude) || 106.8456;
       const category = String(req.body.category || 'all');
@@ -2131,16 +2300,16 @@ Berdasarkan pencarian: **"${q}"** (Area sekitar koordinat ${userLat.toFixed(4)},
   app.post('/api/ai/bpjs-audit', async (req, res) => {
     try {
       const { billingId, patientName, diagnosis, items, totalBill, sepNo } = req.body;
+      const safeDiagnosis = scrubPhi(JSON.stringify(diagnosis || 'Hipertensi / Observasi Febris'), 8000);
+      const safeItems = scrubPhi(JSON.stringify(items || []), 8000);
 
       const prompt = `
 Anda adalah Auditor Ahli Casemix & AI INA-CBGs Validator pada MYITARU SIMK.
 Evaluasi kelayakan klaim BPJS Kesehatan berdasarkan rincian berikut:
 
-Nama Pasien: ${patientName || 'Pasien BPJS'}
-No SEP: ${sepNo || 'SEP-ELEKTRONIK-TERDAFTAR'}
-Diagnosis Utama & Sekunder: ${JSON.stringify(diagnosis || 'Hipertensi / Observasi Febris')}
+Diagnosis Utama & Sekunder: ${safeDiagnosis}
 Total Tagihan Kasir: Rp ${totalBill || 0}
-Item Tindakan & Obat: ${JSON.stringify(items || [])}
+Item Tindakan & Obat: ${safeItems}
 
 Tugas Anda:
 1. Hitung skor kelayakan klaim BPJS (0-100%).
@@ -2173,7 +2342,7 @@ Tugas Anda:
       const fallback = auditBpjsClaimDeterministic({ billingId, patientName, diagnosis, items, totalBill, sepNo });
       return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
-      console.warn('AI BPJS Audit Warning/Fallback triggered:', error?.message || error);
+      logSafeError('[AI] BPJS audit fallback triggered.', error);
       const fallback = auditBpjsClaimDeterministic(req.body);
       return res.json({ ...fallback, fallback: true });
     }
@@ -2183,14 +2352,17 @@ Tugas Anda:
   app.post('/api/ai/radiology-analyze', async (req, res) => {
     try {
       const { examinationName, modality, clinicalDiagnosis, patientAge, gender } = req.body;
+      const safeExaminationName = scrubPhi(examinationName, 500);
+      const safeModality = scrubPhi(modality, 100);
+      const safeClinicalDiagnosis = scrubPhi(clinicalDiagnosis, 8000);
 
       const prompt = `
 Anda adalah AI Radiologist Assistant & Computer Vision Diagnostic Engine pada MYITARU SIMK.
 Lakukan analisis temuan radiologis terstruktur berdasarkan data pemeriksaan:
 
-Nama Pemeriksaan: ${examinationName || 'Foto Thorax PA'}
-Modalitas: ${modality || 'X-Ray'}
-Diagnosa Kerja / Klinis: ${clinicalDiagnosis || 'Suspek Pneumonia / Batuk kronis'}
+Nama Pemeriksaan: ${safeExaminationName || 'Foto Thorax PA'}
+Modalitas: ${safeModality || 'X-Ray'}
+Diagnosa Kerja / Klinis: ${safeClinicalDiagnosis || 'Suspek Pneumonia / Batuk kronis'}
 Usia & Jenis Kelamin: ${patientAge || 'Dewasa'} / ${gender || 'L'}
 
 Berikan:
@@ -2224,7 +2396,7 @@ Berikan:
       const fallback = analyzeRadiologyDeterministic({ examinationName, modality, clinicalDiagnosis, patientAge, gender });
       return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
-      console.warn('AI Radiology Analysis Warning/Fallback triggered:', error?.message || error);
+      logSafeError('[AI] Radiology analysis fallback triggered.', error);
       const fallback = analyzeRadiologyDeterministic(req.body);
       return res.json({ ...fallback, fallback: true });
     }
@@ -2232,22 +2404,38 @@ Berikan:
 
   // ⭐ ENDPOINT: AI Pharmacovigilance & Drug Interaction
   app.post('/api/ai/drug-interaction', async (req, res) => {
+    const medications = req.body?.medications ?? req.body?.drugs;
+    const validMedication = (item: unknown) =>
+      typeof item === 'string' && item.trim().length > 0 && item.length <= 160 ||
+      item !== null && typeof item === 'object' && !Array.isArray(item) &&
+        ['nama', 'name'].some((key) => {
+          const value = (item as Record<string, unknown>)[key];
+          return typeof value === 'string' && value.trim().length > 0 && value.length <= 160;
+        });
+    if (!Array.isArray(medications) || medications.length > 50 || !medications.every(validMedication)) {
+      return res.status(medications?.length > 50 ? 413 : 400).json({
+        error: 'Provide up to 50 valid medication names.'
+      });
+    }
+    const patientContext = req.body?.patientContext || {
+      age: req.body?.patientAge,
+      allergies: req.body?.allergies,
+      diagnosis: req.body?.diagnosis
+    };
+    const safePatientContext = scrubPhi(JSON.stringify(scrubPhiData(patientContext)), 8000);
+    const safeMedications = medications.map((medication: any) =>
+      scrubPhi(typeof medication === 'string' ? medication : medication.nama || medication.name, 8000)
+    );
     try {
-      const { medications, patientContext } = req.body;
-
-      if (!medications || !Array.isArray(medications)) {
-        return res.status(400).json({ error: 'Medications array is required.' });
-      }
-
       const prompt = `
 Anda adalah AI Clinical Pharmacologist pada MYITARU SIMK.
 Analisis keamanan resep dan potensi interaksi obat berikut:
 
 Daftar Obat Resep:
-${medications.map((m: any) => `- ${typeof m === 'string' ? m : m.nama || m.name}`).join('\n')}
+${safeMedications.map((medication: string) => `- ${medication}`).join('\n')}
 
 Konteks Pasien:
-${patientContext ? JSON.stringify(patientContext) : 'Umum (Tanpa komorbiditas ginjal/hepar)'}
+${patientContext ? safePatientContext : 'Umum (Tanpa komorbiditas ginjal/hepar)'}
 
 Evaluasi:
 1. Keselamatan keseluruhan (Safety Index 0-100%).
@@ -2284,14 +2472,14 @@ Evaluasi:
 
       if (aiResult?.text) {
         const parsedDrug = parseSafeJson(aiResult.text);
-        if (parsedDrug) return res.json(parsedDrug);
+        if (parsedDrug) return res.json({ ...parsedDrug, verified: true, fallback: false });
       }
 
       const fallback = checkDrugInteractionsDeterministic(medications, patientContext);
       return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
-      console.warn('AI Drug Interaction Warning/Fallback triggered:', error?.message || error);
-      const fallback = checkDrugInteractionsDeterministic(req.body?.medications || [], req.body?.patientContext);
+      logSafeError('[AI] Drug interaction fallback triggered.', error);
+      const fallback = checkDrugInteractionsDeterministic(medications, patientContext);
       return res.json({ ...fallback, fallback: true });
     }
   });
@@ -2302,15 +2490,24 @@ Evaluasi:
       const { documentType, patientName, patientData, medicalNotes, fields, signatures } = req.body;
       const effectivePatientData = patientData || (patientName ? { nama: patientName } : {});
       const effectiveNotes = medicalNotes || fields || {};
+      const safePatientData = {
+        hasName: Boolean(patientName || effectivePatientData.nama || effectivePatientData.patientName),
+        hasMedicalRecordNumber: Boolean(effectivePatientData.no_rm || effectivePatientData.noRm || effectivePatientData.medicalRecordNumber),
+        hasNationalId: Boolean(effectivePatientData.nik),
+        hasBirthDate: Boolean(effectivePatientData.tanggal_lahir || effectivePatientData.birthDate),
+        hasGender: Boolean(effectivePatientData.jenis_kelamin || effectivePatientData.gender)
+      };
+      const safeNotes = scrubPhi(JSON.stringify(scrubPhiData(effectiveNotes)), 8000);
+      const safeSignatures = Object.values(signatures || {}).map(Boolean);
 
       const prompt = `
 Anda adalah Auditor Mutu Rekam Medis Elektronik (RME) dan Tim Verifikasi Akreditasi Fasilitas Kesehatan (KARS/LAM-KPRS) MYITARU SIMK berdasarkan Permenkes No. 24 Tahun 2022.
 Evaluasi kelengkapan berkas rekam medis berikut:
 
-Jenis Berkas: ${documentType || 'Resume Medis / Asesmen Rawat Inap'}
-Data Pasien: ${JSON.stringify(effectivePatientData)}
-Catatan Medis / Konten: ${JSON.stringify(effectiveNotes)}
-Status Tanda Tangan Elektronik: ${JSON.stringify(signatures || {})}
+Jenis Berkas: ${scrubPhi(documentType || 'Resume Medis / Asesmen Rawat Inap', 500)}
+Kelengkapan Identitas Pasien: ${JSON.stringify(safePatientData)}
+Catatan Medis / Konten: ${safeNotes}
+Status Tanda Tangan Elektronik: ${JSON.stringify(safeSignatures)}
 
 Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
 1. Kelengkapan Identitas Pasien (No. RM, Nama, NIK, Tgl Lahir, Jenis Kelamin).
@@ -2343,7 +2540,7 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
       const fallback = auditDocumentCompletenessDeterministic({ documentType, patientName, patientData: effectivePatientData, medicalNotes: effectiveNotes, signatures });
       return res.json({ ...fallback, fallback: true });
     } catch (error: any) {
-      console.warn('AI Document Completeness Warning/Fallback triggered:', error?.message || error);
+      logSafeError('[AI] Document completeness fallback triggered.', error);
       const fallback = auditDocumentCompletenessDeterministic(req.body || {});
       return res.json({ ...fallback, fallback: true });
     }
@@ -2351,46 +2548,19 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
 
   // Cloudflare Turnstile Verification API
   app.post('/api/cloudflare/verify-turnstile', async (req, res) => {
-    const secret = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
-    const expectedHostname = process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME;
-    if (!secret || !expectedHostname) {
-      return res.status(503).json({ success: false, code: 'TURNSTILE_NOT_CONFIGURED' });
-    }
-
     try {
       const { token } = req.body || {};
 
       if (typeof token !== 'string' || token.length === 0 || token.length > 4096) {
         return res.status(400).json({ success: false, message: 'Turnstile token is required.' });
       }
-
-      const formData = new URLSearchParams();
-      formData.append('secret', secret);
-      formData.append('response', token);
-      const ip = clientIp(req);
-      if (ip !== 'unknown') {
-        formData.append('remoteip', ip);
-      }
-
-      const cfResponse = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        signal: AbortSignal.timeout(10_000)
-      });
-
-      if (!cfResponse.ok) {
-        return res.status(502).json({ success: false, code: 'TURNSTILE_PROVIDER_ERROR' });
-      }
-      const cfData = await cfResponse.json() as { success?: boolean; hostname?: string; action?: string };
-      const valid = cfData.success === true &&
-        cfData.hostname === expectedHostname &&
-        cfData.action === (process.env.CLOUDFLARE_TURNSTILE_EXPECTED_ACTION || 'login');
-      return res.status(200).json({ success: valid });
+      const action = process.env.CLOUDFLARE_TURNSTILE_EXPECTED_ACTION || 'login';
+      return res.status(200).json({ success: await verifyTurnstileToken(token, clientIp(req), action) });
     } catch (err) {
-      console.error('Cloudflare Turnstile verification error:', err);
+      if (err instanceof TurnstileNotConfiguredError) {
+        return res.status(503).json({ success: false, code: 'TURNSTILE_NOT_CONFIGURED' });
+      }
+      logSafeError('Cloudflare Turnstile verification failed.', err);
       return res.status(502).json({ success: false, code: 'TURNSTILE_VERIFICATION_FAILED' });
     }
   });
@@ -2401,6 +2571,7 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
     appointmentsStore: appointmentsStore as any,
     bedsStore: bedsStore as any,
     qrTokensStore,
+    persistence,
     staffApp: app,
     useDemoData: persistence.mode === 'memory',
     createAuditLog: (entry) => {
@@ -2413,21 +2584,29 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
   });
 
   // Register Unified Employee Ecosystem API Gateway (/api/gateway/*)
-  registerEmployeePortalGateway(app, {
-    createAuditLog: (entry) => {
-      auditLogsStore.unshift({
-        id: `log-${randomUUID()}`,
-        timestamp: new Date().toISOString(),
-        user: entry.user_name || entry.user_id,
-        role: entry.user_id,
-        action: entry.action,
-        module: entry.module,
-        ip: entry.ip_address || '127.0.0.1',
-        status: entry.status,
-        details: entry.details
-      });
-    }
-  });
+  if (persistence.mode === 'memory') {
+    registerEmployeePortalGateway(app, {
+      createAuditLog: (entry) => {
+        auditLogsStore.unshift({
+          id: `log-${randomUUID()}`,
+          timestamp: new Date().toISOString(),
+          user: entry.user_name || entry.user_id,
+          role: entry.user_id,
+          action: entry.action,
+          module: entry.module,
+          ip: entry.ip_address || '127.0.0.1',
+          status: entry.status,
+          details: entry.details
+        });
+      }
+    }, persistence);
+  } else {
+    app.use('/api/gateway', (_req, res) => res.status(503).json({
+      success: false,
+      code: 'EMPLOYEE_PORTAL_UNAVAILABLE',
+      message: 'Portal karyawan belum tersedia pada penyimpanan persisten.'
+    }));
+  }
 
   for (const target of [app, publicApp]) {
     target.use('/api', (_req, res) => {
@@ -2440,11 +2619,11 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
 
 export function addErrorHandler(target: express.Application) {
   target.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error('Global Server Error:', err);
+    logSafeError('[HTTP] Request failed.', err);
     if (!res.headersSent) {
       // Kesalahan klien (JSON rusak 400, body besar 413) dilaporkan apa adanya; selain itu pesan internal tidak dibocorkan.
       const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
-      res.status(status).json({ error: status === 500 ? 'Terjadi kesalahan pada server.' : (err?.message || 'Permintaan tidak valid.') });
+      res.status(status).json({ error: status === 500 ? 'Terjadi kesalahan pada server.' : scrubPhi(err?.message || 'Permintaan tidak valid.', 500) });
     }
   });
 }
@@ -2493,7 +2672,7 @@ async function startServer() {
         }
       });
     } catch (err) {
-      console.error(`Vite dev server (${appTarget}) failed to start, falling back to static:`, err);
+      logSafeError(`Vite dev server (${appTarget}) failed to start, falling back to static.`, err);
       serveStatic();
     }
   };
@@ -2525,7 +2704,7 @@ async function startServer() {
 // Di Vercel/Cloudflare, server tidak listen sendiri; request masuk lewat api/index.ts atau worker/index.ts.
 if (!process.env.VERCEL && !process.env.CLOUDFLARE_WORKER) {
   startServer().catch((error) => {
-    console.error('Server startup failed:', error);
+    logSafeError('Server startup failed.', error);
     process.exitCode = 1;
   });
 }

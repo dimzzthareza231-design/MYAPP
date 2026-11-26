@@ -77,6 +77,10 @@ export function PembayaranTab({
   const isCashSufficient = method !== 'Tunai' || cashGiven >= amountToPay;
 
   const handleProcessPayment = () => {
+    if (import.meta.env.PROD && (method === 'QRIS' || (method === 'Split Payment' && (splitPrimaryMethod === 'QRIS' || splitSecondaryMethod === 'QRIS')))) {
+      toast.error('Pembayaran QRIS dinonaktifkan sampai penyedia pembayaran terhubung.');
+      return;
+    }
     if (method === 'Tunai' && cashGiven < amountToPay) {
       toast.error('Uang tunai yang diterima kurang dari total tagihan!');
       return;
@@ -334,12 +338,17 @@ export function PembayaranTab({
               <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3">
                 Pilih Metode Pembayaran
               </h3>
+              {import.meta.env.PROD && (
+                <p role="status" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+                  QRIS belum terhubung ke penyedia pembayaran, jadi opsi ini dinonaktifkan. Jangan tandai pembayaran QRIS sebagai lunas.
+                </p>
+              )}
               
               {/* Payment Methods Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {[
                   { id: 'Tunai', label: 'Tunai (Cash)', icon: Banknote, color: 'text-emerald-600' },
-                  { id: 'QRIS', label: 'QRIS Dinamis', icon: QrCode, color: 'text-blue-600' },
+                  { id: 'QRIS', label: import.meta.env.PROD ? 'QRIS — belum aktif' : 'QRIS (simulasi)', icon: QrCode, color: 'text-blue-600' },
                   { id: 'Debit', label: 'Kartu Debit', icon: CreditCard, color: 'text-indigo-600' },
                   { id: 'Kredit', label: 'Kartu Kredit', icon: CreditCard, color: 'text-purple-600' },
                   { id: 'Transfer VA', label: 'Virtual Account', icon: Banknote, color: 'text-sky-600' },
@@ -353,8 +362,9 @@ export function PembayaranTab({
                     <button
                       key={m.id}
                       type="button"
+                      disabled={import.meta.env.PROD && m.id === 'QRIS'}
                       onClick={() => setMethod(m.id as PaymentMethod)}
-                      className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                      className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                         isSelected
                           ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600 dark:border-blue-500 ring-2 ring-blue-500/20 font-bold'
                           : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700 hover:border-slate-300 text-slate-700 dark:text-slate-300'
@@ -450,7 +460,7 @@ export function PembayaranTab({
                     Rp {amountToPay.toLocaleString('id-ID')}
                   </div>
                   <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
-                    ✓ QR Code aktif dan siap dipindai oleh pasien
+                    QR ini hanya simulasi dan tidak memproses pembayaran.
                   </p>
                 </div>
               </div>
@@ -539,7 +549,7 @@ export function PembayaranTab({
                       className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded text-xs bg-slate-50 dark:bg-slate-900"
                     >
                       <option value="Tunai">Tunai</option>
-                      <option value="QRIS">QRIS</option>
+                      <option value="QRIS" disabled={import.meta.env.PROD}>QRIS</option>
                       <option value="Debit">Kartu Debit</option>
                       <option value="Kredit">Kartu Kredit</option>
                     </select>

@@ -308,23 +308,29 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
       const refreshFromServer = async () => {
         try {
           const headers = { 'X-Storage-Mode': import.meta.env.VITE_STORAGE_MODE || 'firebase' };
-          const [patientsResponse, appointmentsResponse] = await Promise.all([
-            fetch('/api/v1/patients?limit=1000', { credentials: 'same-origin', headers }),
-            fetch('/api/v1/appointments', { credentials: 'same-origin', headers })
+          const fetchAllPages = async (endpoint: string, limit: number) => {
+            const data: any[] = [];
+            let page = 1;
+            let totalPages = 1;
+            do {
+              const response = await fetch(`${endpoint}?page=${page}&limit=${limit}`, { credentials: 'same-origin', headers });
+              const payload = await response.json();
+              if (!response.ok || !payload.success) {
+                throw new Error(payload.error || payload.code || `${endpoint} data could not be loaded.`);
+              }
+              data.push(...(payload.data || []));
+              totalPages = Number(payload.totalPages) || 0;
+              page += 1;
+            } while (page <= totalPages);
+            return data;
+          };
+          const [patientRecords, appointmentRecords] = await Promise.all([
+            fetchAllPages('/api/v1/patients', 1000),
+            fetchAllPages('/api/v1/appointments', 500)
           ]);
-          const [patientsPayload, appointmentsPayload] = await Promise.all([
-            patientsResponse.json(),
-            appointmentsResponse.json()
-          ]);
-          if (!patientsResponse.ok || !patientsPayload.success) {
-            throw new Error(patientsPayload.error || patientsPayload.code || 'Patient data could not be loaded.');
-          }
-          if (!appointmentsResponse.ok || !appointmentsPayload.success) {
-            throw new Error(appointmentsPayload.error || appointmentsPayload.code || 'Appointment data could not be loaded.');
-          }
           if (!active) return;
 
-          const patients: Pasien[] = (patientsPayload.data || []).map((item: any) => ({
+          const patients: Pasien[] = patientRecords.map((item: any) => ({
             id: item.id,
             no_rm: item.no_rm || '',
             nik: item.nik || '',
@@ -342,7 +348,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
             keluhan_utama: item.keluhan_utama || '',
             diagnosa_primer: item.diagnosa_primer || ''
           }));
-          const visits: Kunjungan[] = (appointmentsPayload.data || []).map((item: any) => ({
+          const visits: Kunjungan[] = appointmentRecords.map((item: any) => ({
             id: item.id,
             pasien_id: item.pasien_id || '',
             tanggal: item.tanggal || today,

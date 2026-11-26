@@ -11,7 +11,10 @@ function createD1Shim(db: DatabaseSync): D1DatabaseLike {
     bind: (...next) => prepare(query, next),
     first: async <T>() => (db.prepare(query).get(...(values as never[])) as T | undefined) ?? null,
     all: async <T>() => ({ results: db.prepare(query).all(...(values as never[])) as T[] }),
-    run: async () => db.prepare(query).run(...(values as never[]))
+    run: async () => {
+      const result = db.prepare(query).run(...(values as never[]));
+      return { meta: { changes: Number(result.changes) } };
+    }
   });
   return {
     prepare: (query) => prepare(query),
@@ -32,7 +35,9 @@ function createD1Shim(db: DatabaseSync): D1DatabaseLike {
 
 function migratedAdapter(): D1Adapter {
   const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  for (const migration of ['0001_init.sql', '0002_clinical_entities.sql']) {
+    db.exec(readFileSync(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'));
+  }
   return new D1Adapter(createD1Shim(db));
 }
 
@@ -64,6 +69,14 @@ describe('D1Adapter', () => {
     assert.deepEqual(await adapter.get('patients', 'p1'), { nama: 'A2' });
     assert.deepEqual((await adapter.list('patients')).map((r) => r.id), ['p1', 'p2']);
 
+    const firstPage = await adapter.listPage<{ nama: string }>('patients', 0, 1);
+    assert.deepEqual(firstPage.records.map((record) => record.id), ['p1']);
+    assert.equal(firstPage.total, 2);
+    assert.equal(firstPage.hasMore, true);
+    const lastPage = await adapter.listPage('patients', 1, 1);
+    assert.deepEqual(lastPage.records.map((record) => record.id), ['p2']);
+    assert.equal(lastPage.hasMore, false);
+
     await adapter.commit([{ entity: 'patients', id: 'p1', data: null }]);
     assert.equal(await adapter.get('patients', 'p1'), null);
     assert.equal((await adapter.list('patients')).length, 1);
@@ -76,6 +89,21 @@ describe('D1Adapter', () => {
       { entity: 'queues', id: 'x'.repeat(129), data: { n: 2 } }
     ]));
     assert.equal(await adapter.get('queues', 'q1'), null);
+  });
+
+  test('compare-and-swap allows only one writer using the same snapshot', async () => {
+    const adapter = migratedAdapter();
+    const first = await adapter.compareAndSwap('system_data', 'employee_gateway_state', null, { leaveRequests: [] });
+    assert.equal(first, true);
+    const expected = await adapter.get('system_data', 'employee_gateway_state');
+    const results = await Promise.all([
+      adapter.compareAndSwap('system_data', 'employee_gateway_state', expected, { leaveRequests: [{ id: 'a' }] }),
+      adapter.compareAndSwap('system_data', 'employee_gateway_state', expected, { leaveRequests: [{ id: 'b' }] })
+    ]);
+    assert.deepEqual(results.sort(), [false, true]);
+    const saved = await adapter.get<{ leaveRequests: Array<{ id: string }> }>('system_data', 'employee_gateway_state');
+    assert.equal(saved?.leaveRequests.length, 1);
+    assert.ok(['a', 'b'].includes(saved!.leaveRequests[0].id));
   });
 
   test('rejects unknown entities', async () => {

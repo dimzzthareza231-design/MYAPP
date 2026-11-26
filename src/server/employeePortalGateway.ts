@@ -8,6 +8,8 @@ import {
   GOVERNANCE_FRAMEWORKS,
   type DivisionDefinition
 } from '../data/employeePortalCatalog';
+import type { PersistenceRepository } from './databaseAdapter';
+import { safeErrorDetails } from './scrubPhi';
 
 export interface GatewayDependencies {
   createAuditLog?: (entry: {
@@ -139,7 +141,11 @@ function mapPortalRole(div: DivisionDefinition): EmployeeUserRecord['portalRole'
   return 'STAF_UMUM';
 }
 
-export function registerEmployeePortalGateway(app: express.Application, deps: GatewayDependencies = {}) {
+export function registerEmployeePortalGateway(
+  app: express.Application,
+  deps: GatewayDependencies = {},
+  persistence?: PersistenceRepository
+) {
   // MYITARU Campus Reference Coordinate (Jakarta)
   const HOSPITAL_GEOFENCE = {
     name: 'Kampus Utama MYITARU Jakarta',
@@ -729,6 +735,164 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     ] as Array<{ timestamp: string; device: string; cta: string; utmSource: string }>
   };
 
+  const GATEWAY_STATE_ID = 'employee_gateway_state';
+  let gatewayStateRevision = 0;
+  let persistedGatewayStateRevision = 0;
+  let gatewayStateExpected: unknown | null = null;
+  let gatewayStateLoaded = false;
+  let gatewayStateLoad: Promise<void> | undefined;
+  let gatewayStateSaveQueue: Promise<void> = Promise.resolve();
+
+  function restoreArray<T>(target: T[], value: unknown) {
+    if (Array.isArray(value)) target.splice(0, target.length, ...structuredClone(value) as T[]);
+  }
+
+  function restoreObject(target: object, value: unknown) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const current = target as Record<string, unknown>;
+      for (const key of Object.keys(current)) delete current[key];
+      Object.assign(current, value);
+    }
+  }
+
+  function restoreGatewayState(value: unknown) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+    const state = value as Record<string, unknown>;
+    restoreArray(usersStore, state.usersStore);
+    restoreObject(rbacMatrix, state.rbacMatrix);
+    restoreObject(abacPolicies, state.abacPolicies);
+    restoreObject(featureFlags, state.featureFlags);
+    restoreArray(portalAnnouncements, state.portalAnnouncements);
+    restoreArray(shiftSchedulesStore, state.shiftSchedulesStore);
+    restoreArray(shiftSwapsStore, state.shiftSwapsStore);
+    restoreArray(attendanceLogsStore, state.attendanceLogsStore);
+    restoreArray(leaveRequestsStore, state.leaveRequestsStore);
+    restoreArray(reimbursementsStore, state.reimbursementsStore);
+    restoreArray(sbarHandoversStore, state.sbarHandoversStore);
+    restoreArray(helpdeskTicketsStore, state.helpdeskTicketsStore);
+    restoreArray(trainingCatalog, state.trainingCatalog);
+    restoreArray(siemAuditTrail, state.siemAuditTrail);
+    restoreArray(configChangeProposals, state.configChangeProposals);
+    restoreArray(governanceChangelog, state.governanceChangelog);
+    restoreArray(integrationHealthStore, state.integrationHealthStore);
+    restoreObject(landingAnalyticsStore, state.landingAnalyticsStore);
+    if (state.divisionActionState && typeof state.divisionActionState === 'object' && !Array.isArray(state.divisionActionState)) {
+      divisionActionState.clear();
+      for (const [divisionId, actions] of Object.entries(state.divisionActionState)) {
+        if (actions && typeof actions === 'object' && !Array.isArray(actions)) {
+          divisionActionState.set(divisionId, actions as Record<string, string>);
+        }
+      }
+    }
+  }
+
+  let gatewayDefaultsSnapshot: unknown;
+  function defaultGatewayState() {
+    if (gatewayDefaultsSnapshot === undefined) gatewayDefaultsSnapshot = structuredClone(gatewayStateSnapshot());
+    return gatewayDefaultsSnapshot;
+  }
+
+  async function loadGatewayState() {
+    if (!persistence || gatewayStateLoaded) return;
+    if (!gatewayStateLoad) {
+      gatewayStateLoad = (async () => {
+        defaultGatewayState();
+        const stored = await persistence.get<unknown>('system_data', GATEWAY_STATE_ID);
+        gatewayStateExpected = stored === null ? null : structuredClone(stored);
+        restoreGatewayState(defaultGatewayState());
+        if (stored !== null) restoreGatewayState(stored);
+        gatewayStateLoaded = true;
+      })().finally(() => {
+        gatewayStateLoad = undefined;
+      });
+    }
+    return gatewayStateLoad;
+  }
+
+  class GatewayStateConflictError extends Error {
+    constructor() {
+      super('Employee gateway state changed in another instance.');
+      this.name = 'GatewayStateConflictError';
+    }
+  }
+
+  function gatewayStateSnapshot() {
+    return {
+      usersStore,
+      rbacMatrix,
+      abacPolicies,
+      featureFlags,
+      portalAnnouncements,
+      shiftSchedulesStore,
+      shiftSwapsStore,
+      attendanceLogsStore,
+      leaveRequestsStore,
+      reimbursementsStore,
+      sbarHandoversStore,
+      helpdeskTicketsStore,
+      trainingCatalog,
+      divisionActionState: Object.fromEntries(divisionActionState),
+      siemAuditTrail,
+      configChangeProposals,
+      governanceChangelog,
+      integrationHealthStore,
+      landingAnalyticsStore
+    };
+  }
+
+  function markGatewayStateDirty() {
+    gatewayStateRevision += 1;
+  }
+
+  function persistGatewayState(): Promise<void> {
+    if (!persistence) return Promise.resolve();
+    const save = gatewayStateSaveQueue.then(async () => {
+      if (gatewayStateRevision === persistedGatewayStateRevision) return;
+      const revision = gatewayStateRevision;
+      const snapshot = structuredClone(gatewayStateSnapshot());
+      const saved = await persistence.compareAndSwap('system_data', GATEWAY_STATE_ID, gatewayStateExpected, snapshot);
+      if (!saved) {
+        const latest = await persistence.get<unknown>('system_data', GATEWAY_STATE_ID);
+        gatewayStateExpected = latest === null ? null : structuredClone(latest);
+        restoreGatewayState(defaultGatewayState());
+        if (latest !== null) restoreGatewayState(latest);
+        persistedGatewayStateRevision = revision;
+        throw new GatewayStateConflictError();
+      }
+      gatewayStateExpected = snapshot;
+      persistedGatewayStateRevision = revision;
+    });
+    gatewayStateSaveQueue = save.catch(() => undefined);
+    return save;
+  }
+
+  app.use('/api/gateway', (req, res, next) => {
+    void loadGatewayState().then(() => {
+      if (persistence) {
+        const sendJson = res.json.bind(res);
+        res.json = ((body: unknown) => {
+          if (gatewayStateRevision === persistedGatewayStateRevision) return sendJson(body);
+          void persistGatewayState().then(() => sendJson(body)).catch((error: unknown) => {
+            console.error('[Persistence] Could not save employee gateway state.', safeErrorDetails(error));
+            if (!res.headersSent) {
+              const conflict = error instanceof GatewayStateConflictError;
+              res.status(conflict ? 409 : 503);
+              sendJson({
+                success: false,
+                code: conflict ? 'GATEWAY_STATE_CONFLICT' : 'GATEWAY_PERSISTENCE_UNAVAILABLE'
+              });
+            }
+          });
+          return res;
+        }) as typeof res.json;
+      }
+      next();
+    }).catch((error: unknown) => {
+      console.error('[Persistence] Could not load employee gateway state.', safeErrorDetails(error));
+      res.status(503).json({ success: false, code: 'GATEWAY_PERSISTENCE_UNAVAILABLE' });
+    });
+  });
+
   // =========================================================================
   // 2. GATEWAY HELPERS (SIEM LOG, RATE LIMIT, IDEMPOTENCY, RBAC+ABAC)
   // =========================================================================
@@ -764,6 +928,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
     siemAuditTrail.unshift(entry);
     if (siemAuditTrail.length > 200) siemAuditTrail.pop();
+    markGatewayStateDirty();
 
     deps.createAuditLog?.({
       user_id: params.actorNip,
@@ -1643,6 +1808,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       status: 'Diajukan' as const
     };
     reimbursementsStore.unshift(newItem);
+    markGatewayStateDirty();
     res.json({ success: true, reimbursement: newItem });
   });
 
@@ -1675,6 +1841,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!course) return res.status(404).json({ success: false, message: 'Pelatihan tidak ditemukan.' });
     course.enrolled = true;
     course.status = 'Terdaftar (Menunggu Jadwal)';
+    markGatewayStateDirty();
     res.json({ success: true, course });
   });
 
@@ -1776,6 +1943,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     if (!item) return res.status(404).json({ success: false, message: 'Catatan SBAR tidak ditemukan.' });
     item.karuVerified = true;
     item.karuName = session.name;
+    markGatewayStateDirty();
     res.json({ success: true, handover: item });
   });
 
@@ -1845,6 +2013,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const t = helpdeskTicketsStore.find((item) => item.id === ticketId);
     if (!t) return res.status(404).json({ success: false, message: 'Tiket tidak ditemukan.' });
     t.status = status === 'Selesai' ? 'Selesai' : 'Ditangani ITIL L1/L2';
+    markGatewayStateDirty();
     res.json({ success: true, ticket: t });
   });
 
@@ -2058,6 +2227,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         lastHrisSync: new Date().toISOString()
       };
       usersStore.unshift(newUser);
+      markGatewayStateDirty();
       return res.json({ success: true, user: newUser });
     }
 
@@ -2255,6 +2425,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       }
     }
 
+    markGatewayStateDirty();
     res.json({
       success: true,
       analytics: landingAnalyticsStore

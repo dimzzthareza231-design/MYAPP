@@ -30,6 +30,19 @@ const fromFields = (f: Record<string, FsValue> = {}) => Object.fromEntries(Objec
 const b64url = (b: ArrayBuffer | string) =>
   btoa(typeof b === 'string' ? b : String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => item === undefined ? 'null' : canonicalJson(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(',')}}`;
+  }
+  const json = JSON.stringify(value);
+  return json ?? 'null';
+}
+
 interface ServiceAccount { client_email: string; private_key: string; project_id: string }
 
 export class FirestoreRestAdapter implements PersistenceRepository {
@@ -68,7 +81,9 @@ export class FirestoreRestAdapter implements PersistenceRepository {
 
   private async call(path: string, init: RequestInit = {}): Promise<Response> {
     const res = await this.fetcher(`https://firestore.googleapis.com/v1/${path}`, {
-      ...init, headers: { Authorization: `Bearer ${await this.accessToken()}`, 'Content-Type': 'application/json' }
+      ...init,
+      signal: AbortSignal.timeout(10_000),
+      headers: { Authorization: `Bearer ${await this.accessToken()}`, 'Content-Type': 'application/json' }
     });
     if (!res.ok && res.status !== 404) throw new Error(`Firestore ${res.status}: ${(await res.text()).slice(0, 300)}`);
     return res;
@@ -91,6 +106,37 @@ export class FirestoreRestAdapter implements PersistenceRepository {
     return fromFields(((await res.json()) as { fields?: Record<string, FsValue> }).fields) as T;
   }
 
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    assertEntity(entity); assertRecordId(id);
+    const path = `${this.base}/${FIRESTORE_COLLECTIONS[entity]}/${encodeURIComponent(id)}`;
+    const currentResponse = await this.call(path);
+    let updateTime: string | undefined;
+    if (currentResponse.status === 404) {
+      if (expected !== null) return false;
+    } else {
+      const current = await currentResponse.json() as { fields?: Record<string, FsValue>; updateTime?: string };
+      if (expected === null || canonicalJson(fromFields(current.fields)) !== canonicalJson(expected)) return false;
+      updateTime = current.updateTime;
+      if (!updateTime) throw new Error('Firestore compare-and-swap read omitted updateTime.');
+    }
+
+    const value = toFs(data);
+    const write = {
+      update: {
+        name: path,
+        fields: value.mapValue ? (value.mapValue as { fields: unknown }).fields : { value }
+      },
+      currentDocument: updateTime ? { updateTime } : { exists: false }
+    };
+    try {
+      await this.call(`${this.base}:commit`, { method: 'POST', body: JSON.stringify({ writes: [write] }) });
+      return true;
+    } catch (error) {
+      if (error instanceof Error && /Firestore (?:400|409):.*(?:FAILED_PRECONDITION|ABORTED|ALREADY_EXISTS)/s.test(error.message)) return false;
+      throw error;
+    }
+  }
+
   async list<T>(entity: PersistenceEntity): Promise<Array<StoredRecord<T>>> {
     assertEntity(entity);
     const out: Array<StoredRecord<T>> = [];
@@ -102,6 +148,46 @@ export class FirestoreRestAdapter implements PersistenceRepository {
       pageToken = json.nextPageToken ?? '';
     } while (pageToken);
     return out;
+  }
+
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    assertEntity(entity);
+    const records: Array<StoredRecord<T>> = [];
+    let remainingOffset = offset;
+    let pageToken = '';
+    let hasMore = false;
+    const orderBy = entity === 'registrations'
+      ? '&orderBy=created_at%20desc'
+      : entity === 'audit_logs'
+        ? '&orderBy=timestamp%20desc'
+        : '';
+    do {
+      const pageSize = Math.min(300, Math.max(1, remainingOffset + limit + 1));
+      const res = await this.call(
+        `${this.base}/${FIRESTORE_COLLECTIONS[entity]}?pageSize=${pageSize}${orderBy}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+      );
+      const json = await res.json() as {
+        documents?: Array<{ name: string; fields?: Record<string, FsValue> }>;
+        nextPageToken?: string;
+      };
+      const documents = json.documents ?? [];
+      if (remainingOffset >= documents.length) {
+        remainingOffset -= documents.length;
+      } else {
+        const pageRecords = documents.slice(remainingOffset);
+        remainingOffset = 0;
+        for (const document of pageRecords) {
+          records.push({
+            id: decodeURIComponent(document.name.split('/').pop()!),
+            data: fromFields(document.fields) as T
+          });
+          if (records.length > limit) break;
+        }
+      }
+      pageToken = json.nextPageToken ?? '';
+      hasMore = records.length > limit || Boolean(pageToken);
+    } while (pageToken && records.length <= limit);
+    return { records: records.slice(0, limit), total: null, hasMore };
   }
 
   async commit(changes: PersistenceChange[]): Promise<void> {

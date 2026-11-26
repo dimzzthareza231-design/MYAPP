@@ -6,6 +6,7 @@ export interface RateLimiterLike {
 
 const AUTH_PATHS = new Set([
   '/api/auth/login',
+  '/api/auth/mfa/complete',
   '/api/gateway/auth/login',
   '/api/gateway/auth/verify-mfa',
   '/api/patient/verify',
@@ -14,16 +15,38 @@ const AUTH_PATHS = new Set([
   '/api/patient/appointments'
 ]);
 
-export async function checkAuthRateLimit(request: Request, limiter?: RateLimiterLike): Promise<Response | undefined> {
+export async function checkAuthRateLimit(
+  request: Request,
+  limiter?: RateLimiterLike,
+  response?: Response
+): Promise<Response | undefined> {
   if (!limiter || request.method !== 'POST') return undefined;
   const path = new URL(request.url).pathname.toLowerCase().replace(/\/+$/, '');
   if (!AUTH_PATHS.has(path)) return undefined;
   const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const isBooking = path === '/api/patient/appointments';
+  if (isBooking ? response !== undefined : !response || ![400, 401].includes(response.status)) return undefined;
   try {
-    const { success } = await limiter.limit({ key: `${ip}:${path}` });
+    let identifier = '';
+    if (!isBooking) {
+      try {
+        const body = await request.clone().json() as Record<string, unknown>;
+        const value = path === '/api/auth/login'
+          ? body.identifier
+          : path === '/api/auth/mfa/complete'
+            ? body.userId
+          : path === '/api/gateway/auth/verify-mfa'
+            ? body.challengeId
+            : body.identifier || body.divisionId || body.no_rm || body.email;
+        if (typeof value === 'string') identifier = value.trim().toLowerCase();
+      } catch {
+        identifier = '<invalid>';
+      }
+    }
+    const { success } = await limiter.limit({ key: `${ip}:${path}${identifier ? `:${identifier}` : ''}` });
     if (success) return undefined;
   } catch (error) {
-    // Gagal terbuka: limiter per isolate di Express masih membatasi.
+    // Gagal terbuka; LocalAuthService still applies per-IP/per-identifier lockout.
     console.error('[Worker] AUTH_LIMITER error:', error);
     return undefined;
   }

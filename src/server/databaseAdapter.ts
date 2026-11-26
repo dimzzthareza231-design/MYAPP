@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore, type DocumentData, type Firestore } from 'firebase-admin/firestore';
 import { createPool, type Pool, type PoolConnection } from 'mysql2/promise';
+import { safeErrorDetails } from './scrubPhi';
 
 export const STORAGE_MODES = ['mysql', 'firebase', 'hybrid', 'memory', 'd1', 'firestore'] as const;
 export type StorageMode = typeof STORAGE_MODES[number];
@@ -13,6 +14,9 @@ export const PERSISTENCE_ENTITIES = [
   'emr_soap',
   'prescriptions',
   'billings',
+  'lab_orders',
+  'radiology_orders',
+  'emergency_visits',
   'qr_tokens',
   'audit_logs',
   'beds',
@@ -32,6 +36,9 @@ const MYSQL_TABLES: Record<PersistenceEntity, string> = {
   emr_soap: 'emr_soap',
   prescriptions: 'prescriptions',
   billings: 'billings',
+  lab_orders: 'lab_orders',
+  radiology_orders: 'radiology_orders',
+  emergency_visits: 'emergency_visits',
   qr_tokens: 'qr_tokens',
   audit_logs: 'audit_logs',
   beds: 'beds',
@@ -50,6 +57,9 @@ export const FIRESTORE_COLLECTIONS: Record<PersistenceEntity, string> = {
   emr_soap: 'emr_soap',
   prescriptions: 'resep',
   billings: 'tagihan',
+  lab_orders: 'lab_orders',
+  radiology_orders: 'radiology_orders',
+  emergency_visits: 'emergency_visits',
   qr_tokens: 'qr_tokens',
   audit_logs: 'activity_logs',
   beds: 'bed',
@@ -86,7 +96,13 @@ export interface PersistenceRepository {
   health(): Promise<PersistenceHealth>;
   get<T>(entity: PersistenceEntity, id: string): Promise<T | null>;
   list<T>(entity: PersistenceEntity): Promise<Array<StoredRecord<T>>>;
+  listPage<T>(entity: PersistenceEntity, offset: number, limit: number): Promise<{
+    records: Array<StoredRecord<T>>;
+    total: number | null;
+    hasMore: boolean;
+  }>;
   commit(changes: PersistenceChange[]): Promise<void>;
+  compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -131,13 +147,31 @@ function serializePayload(data: unknown): string {
   return payload;
 }
 
+function canonicalPayload(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => item === undefined ? 'null' : canonicalPayload(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalPayload(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 function decodePayload(value: unknown): unknown {
   if (typeof value !== 'string') return value;
   return JSON.parse(value) as unknown;
 }
 
 function errorText(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
+  const { type, message } = safeErrorDetails(error);
+  return `${type}: ${message}`.slice(0, 1000);
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error &&
+    (error as { code?: unknown }).code === 'ER_DUP_ENTRY');
 }
 
 function persistentReady(mode: StorageMode, mysqlConnected: boolean, firebaseConnected: boolean): boolean {
@@ -192,6 +226,15 @@ export class MemoryPersistenceRepository implements PersistenceRepository {
     }));
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    const records = await this.list<T>(entity);
+    return {
+      records: records.slice(offset, offset + limit),
+      total: records.length,
+      hasMore: offset + limit < records.length
+    };
+  }
+
   async commit(changes: PersistenceChange[]): Promise<void> {
     for (const change of changes) {
       assertEntity(change.entity);
@@ -200,6 +243,18 @@ export class MemoryPersistenceRepository implements PersistenceRepository {
       if (change.data === null) records.delete(change.id);
       else records.set(change.id, structuredClone(JSON.parse(serializePayload(change.data))));
     }
+  }
+
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    assertEntity(entity);
+    assertRecordId(id);
+    const records = this.records.get(entity)!;
+    const current = records.get(id);
+    if (expected === null ? current !== undefined : current === undefined || canonicalPayload(current) !== canonicalPayload(expected)) {
+      return false;
+    }
+    records.set(id, structuredClone(JSON.parse(serializePayload(data))));
+    return true;
   }
 
   async close(): Promise<void> {}
@@ -341,8 +396,63 @@ export class MySQLAdapter implements PrimaryPersistenceRepository {
     }));
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    await this.ensureReady();
+    assertEntity(entity);
+    const table = MYSQL_TABLES[entity];
+    const [[countRows], [rows]] = await Promise.all([
+      this.pool.query(`SELECT COUNT(*) AS total FROM \`${table}\``, []),
+      this.pool.query(`SELECT id, payload FROM \`${table}\` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, [limit, offset])
+    ]);
+    const total = Number((countRows as Array<{ total: number }>)[0]?.total || 0);
+    const records = (rows as Array<{ id: string; payload: unknown }>).map((record) => ({
+      id: record.id,
+      data: decodePayload(record.payload) as T
+    }));
+    return { records, total, hasMore: offset + records.length < total };
+  }
+
   async commit(changes: PersistenceChange[]): Promise<void> {
     await this.commitTransaction(changes, []);
+  }
+
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    await this.ensureReady();
+    assertEntity(entity);
+    assertRecordId(id);
+    const connection = await this.pool.getConnection();
+    let transactionStarted = false;
+    try {
+      await connection.beginTransaction();
+      transactionStarted = true;
+      const [rows] = await connection.query(`SELECT payload FROM \`${MYSQL_TABLES[entity]}\` WHERE id = ? FOR UPDATE`, [id]);
+      const record = (rows as Array<{ payload: unknown }>)[0];
+      if (expected === null ? Boolean(record) : !record || canonicalPayload(decodePayload(record.payload)) !== canonicalPayload(expected)) {
+        await connection.rollback();
+        transactionStarted = false;
+        return false;
+      }
+      if (record) {
+        await connection.query(`UPDATE \`${MYSQL_TABLES[entity]}\` SET payload = ? WHERE id = ?`, [serializePayload(data), id]);
+      } else {
+        await connection.query(`INSERT INTO \`${MYSQL_TABLES[entity]}\` (id, payload) VALUES (?, ?)`, [id, serializePayload(data)]);
+      }
+      await connection.commit();
+      transactionStarted = false;
+      return true;
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await connection.rollback();
+        } catch (rollbackError) {
+          console.error('[Persistence:mysql] Compare-and-swap rollback failed.', rollbackError);
+        }
+      }
+      if (expected === null && isDuplicateKeyError(error)) return false;
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async commitWithOutbox(localChanges: PersistenceChange[], cloudChanges: PersistenceChange[]): Promise<void> {
@@ -533,6 +643,21 @@ export class D1Adapter implements PersistenceRepository {
     return results.map((row) => ({ id: row.id, data: decodePayload(row.payload) as T }));
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    assertEntity(entity);
+    const table = MYSQL_TABLES[entity];
+    const [count, { results }] = await Promise.all([
+      this.db.prepare(`SELECT COUNT(*) AS total FROM "${table}"`).first<{ total: number }>(),
+      this.db
+        .prepare(`SELECT id, payload FROM "${table}" ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?`)
+        .bind(limit, offset)
+        .all<{ id: string; payload: string }>()
+    ]);
+    const total = Number(count?.total || 0);
+    const records = results.map((row) => ({ id: row.id, data: decodePayload(row.payload) as T }));
+    return { records, total, hasMore: offset + records.length < total };
+  }
+
   async commit(changes: PersistenceChange[]): Promise<void> {
     if (!changes.length) return;
     const statements = changes.map((change) => {
@@ -551,6 +676,29 @@ export class D1Adapter implements PersistenceRepository {
     });
     // D1 batch runs as a single transaction: all changes apply or none do.
     await this.db.batch(statements);
+  }
+
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    assertEntity(entity);
+    assertRecordId(id);
+    const table = MYSQL_TABLES[entity];
+    if (expected === null) {
+      const result = await this.db
+        .prepare(`INSERT INTO "${table}" (id, payload, updated_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) ON CONFLICT(id) DO NOTHING`)
+        .bind(id, serializePayload(data))
+        .run() as { meta?: { changes?: number } };
+      return result.meta?.changes === 1;
+    }
+    const current = await this.db
+      .prepare(`SELECT payload FROM "${table}" WHERE id = ? LIMIT 1`)
+      .bind(id)
+      .first<{ payload: string }>();
+    if (!current || canonicalPayload(decodePayload(current.payload)) !== canonicalPayload(expected)) return false;
+    const result = await this.db
+      .prepare(`UPDATE "${table}" SET payload = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND payload = ?`)
+      .bind(serializePayload(data), id, current.payload)
+      .run() as { meta?: { changes?: number } };
+    return result.meta?.changes === 1;
   }
 
   async close(): Promise<void> {}
@@ -640,6 +788,18 @@ export class FirebaseServerAdapter implements CloudPersistenceRepository {
     return snapshot.docs.map((document) => ({ id: document.id, data: document.data() as T }));
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    if (!this.firestore) throw new Error('Firebase persistence is not configured.');
+    assertEntity(entity);
+    const snapshot = await this.firestore.collection(FIRESTORE_COLLECTIONS[entity]).offset(offset).limit(limit + 1).get();
+    const hasMore = snapshot.docs.length > limit;
+    return {
+      records: snapshot.docs.slice(0, limit).map((document) => ({ id: document.id, data: document.data() as T })),
+      total: null,
+      hasMore
+    };
+  }
+
   async listBookings(): Promise<Array<StoredRecord<unknown>>> {
     if (!this.firestore) throw new Error('Firebase persistence is not configured.');
     const snapshot = await this.firestore.collection(FIRESTORE_COLLECTIONS.bookings).get();
@@ -659,6 +819,20 @@ export class FirebaseServerAdapter implements CloudPersistenceRepository {
       else batch.set(reference, JSON.parse(serializePayload(change.data)) as DocumentData);
     }
     await batch.commit();
+  }
+
+  async compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    if (!this.firestore) throw new Error('Firebase persistence is not configured.');
+    assertEntity(entity);
+    assertRecordId(id);
+    const reference = this.firestore.collection(FIRESTORE_COLLECTIONS[entity]).doc(id);
+    return this.firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(reference);
+      if (expected === null ? snapshot.exists : !snapshot.exists ||
+          canonicalPayload(snapshot.data()) !== canonicalPayload(expected)) return false;
+      transaction.set(reference, JSON.parse(serializePayload(data)) as DocumentData);
+      return true;
+    });
   }
 
   async close(): Promise<void> {}
@@ -701,6 +875,10 @@ export class HybridAdapter implements PersistenceRepository {
     return this.mysql.list<T>(entity);
   }
 
+  listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    return this.mysql.listPage<T>(entity, offset, limit);
+  }
+
   async commit(changes: PersistenceChange[]): Promise<void> {
     const cloudChanges = changes.flatMap((change) => {
       const projection = projectCloudChange(change);
@@ -711,6 +889,10 @@ export class HybridAdapter implements PersistenceRepository {
       this.lastSyncError = errorText(error);
       console.warn(`[Persistence:hybrid] Firestore replication deferred to sync_outbox: ${this.lastSyncError}`);
     });
+  }
+
+  compareAndSwap(entity: PersistenceEntity, id: string, expected: unknown | null, data: unknown): Promise<boolean> {
+    return this.mysql.compareAndSwap(entity, id, expected, data);
   }
 
   async syncPending(): Promise<number> {

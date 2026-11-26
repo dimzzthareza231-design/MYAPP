@@ -6,15 +6,20 @@
 // Bed Ranap -> Kasir/Billing -> BPJS & SatuSehat -> RME / Patient360
 
 import { storage } from './storage';
+import { usesServerPersistence } from '../lib/firestoreService';
 import { Pasien, Kunjungan } from '../types';
 import { BillingRecord, BillingItem } from '../components/Finance/types';
 import { PrescriptionOrder, PrescriptionItem } from '../components/Pharmacy/types';
 import { LabOrder } from '../components/Laboratorium/types';
 import { STATUS_RJ, STATUS_RI } from '../contexts/PatientFlowContext';
 import { generate50InpatientBeds } from '../data/patientPelayananData';
-import { INITIAL_BILLINGS } from '../components/Finance/mockFinanceData';
-import { INITIAL_LAB_ORDERS_MOCK } from '../components/Laboratorium/data';
-import { INITIAL_PRESCRIPTIONS, INITIAL_MEDICATIONS } from '../components/Pharmacy/data';
+import { INITIAL_BILLINGS as DEMO_INITIAL_BILLINGS } from '../components/Finance/mockFinanceData';
+import { INITIAL_LAB_ORDERS_MOCK as DEMO_INITIAL_LAB_ORDERS } from '../components/Laboratorium/data';
+import { INITIAL_PRESCRIPTIONS as DEMO_INITIAL_PRESCRIPTIONS, INITIAL_MEDICATIONS } from '../components/Pharmacy/data';
+
+const INITIAL_BILLINGS = usesServerPersistence ? [] as BillingRecord[] : DEMO_INITIAL_BILLINGS;
+const INITIAL_LAB_ORDERS_MOCK = usesServerPersistence ? [] as LabOrder[] : DEMO_INITIAL_LAB_ORDERS;
+const INITIAL_PRESCRIPTIONS = usesServerPersistence ? [] as PrescriptionOrder[] : DEMO_INITIAL_PRESCRIPTIONS;
 
 export const SIMRS_STORAGE_KEYS = {
   PASIEN: 'hospital_pasien',
@@ -132,8 +137,8 @@ export function integrateRegistration({
       const totalTagihan = subtotal + (isRanap ? 25000 : 10000);
 
       const newBill: BillingRecord = {
-        id: `BIL-REG-${Date.now()}-${patient.no_rm}`,
-        noBilling: `BIL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`,
+        id: `BIL-REG-${visit.id}`,
+        noBilling: '',
         kunjunganId: visit.id,
         pasienId: String(patient.id),
         noRm: patient.no_rm,
@@ -146,7 +151,7 @@ export function integrateRegistration({
         penjaminId: visit.penjamin_id || (isBPJS ? 'PJ-02' : 'PJ-01'),
         namaPenjamin: patient.penjamin || (isBPJS ? 'BPJS Kesehatan' : 'Umum Mandiri'),
         tipePenjamin: isBPJS ? 'BPJS' : 'Umum',
-        noSep: isBPJS ? `SEP-${new Date().getFullYear()}${Math.floor(100000 + Math.random() * 900000)}` : undefined,
+        noSep: undefined,
         status: 'Belum Lunas',
         tanggalMasuk: visit.tanggal || new Date().toISOString().slice(0, 10),
         items: regItems,
@@ -160,7 +165,7 @@ export function integrateRegistration({
         jumlahDibayar: 0,
         kembalian: 0,
         metodePembayaran: isBPJS ? 'BPJS' : 'Tunai',
-        kasirNama: 'Siti Rahmawati, S.E.'
+        kasirNama: ''
       };
 
       billings.unshift(newBill);
@@ -293,10 +298,10 @@ export function integrateOutpatientSOAP({
             waktu_telaah: '-'
           },
           ai_clinical_check: {
-            status_keamanan: 'Aman',
+            status_keamanan: 'Belum terverifikasi',
             interaksi_terdeteksi: [],
             peringatan_alergi: [],
-            ringkasan_ai: 'Resep poliklinik terverifikasi valid dan aman disiapkan.'
+            ringkasan_ai: 'Belum terverifikasi; telaah manual oleh apoteker sebelum dispensing.'
           },
           dispensing: {
             jenis_etiket_dicetak: ['Putih (Oral)'],

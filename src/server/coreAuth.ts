@@ -5,6 +5,16 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { COMMON_MODULES, MODULE_ALIASES, PATIENT_DATA_MODULES, ROLES } from '../data/roles';
 import { getDocumentQrScope, readSecurePatientQrToken } from './securePatientQr';
+import { LocalAuthUserError } from './localAuth';
+import { clientIp } from './clientIp';
+import type {
+  LocalAuthLoginResponse,
+  LocalAuthGoogleLoginResponse,
+  LocalAuthMfaCompletion,
+  LocalAuthSession,
+  LocalAuthUserInput,
+  LocalAuthUserUpdate
+} from './localAuth';
 
 const SESSION_COOKIE = 'myitaru_core_session';
 const LOCAL_SESSION_COOKIE = 'myitaru_local_session';
@@ -38,37 +48,16 @@ export interface CoreAuthOptions {
   localAuth?: {
     initialize(): Promise<void>;
     changePassword?(token: string, currentPassword: string, newPassword: string): Promise<'OK' | 'INVALID_SESSION' | 'WRONG_PASSWORD' | 'WEAK_PASSWORD'>;
-    loginWithEmail?(email: string): Promise<{
-      token: string;
-      user: { id: string; username: string; email: string; nama: string; roleId: string; aktif: true; dibuatPada: string };
-      principal: CorePrincipal;
-    } | null>;
-    login(identifier: string, password: string): Promise<{
-      token: string;
-      user: {
-        id: string;
-        username: string;
-        email: string;
-        nama: string;
-        roleId: string;
-        aktif: true;
-        dibuatPada: string;
-      };
-      principal: CorePrincipal;
-    } | null>;
-    resolveSession(token: string): Promise<{
-      user: {
-        id: string;
-        username: string;
-        email: string;
-        nama: string;
-        roleId: string;
-        aktif: true;
-        dibuatPada: string;
-      };
-      principal: CorePrincipal;
-    } | null>;
+    loginWithEmail?(email: string): Promise<LocalAuthGoogleLoginResponse>;
+    login(identifier: string, password: string, ipAddress?: string): Promise<LocalAuthLoginResponse>;
+    completeMfa?(challengeToken: string, code: string, userId?: string): Promise<LocalAuthMfaCompletion>;
+    cancelMfa?(challengeToken: string): Promise<void>;
+    resolveSession(token: string): Promise<LocalAuthSession | null>;
     logout(token: string): Promise<void>;
+    listUsers(): Promise<LocalAuthSession['user'][]>;
+    createUser(input: LocalAuthUserInput): Promise<LocalAuthSession['user']>;
+    updateUser(id: string, input: LocalAuthUserUpdate): Promise<LocalAuthSession['user']>;
+    deleteUser(id: string): Promise<void>;
   };
 }
 
@@ -168,6 +157,7 @@ function isSameOrigin(req: express.Request): boolean {
 }
 
 export function scopeForPath(path: string, req?: express.Request): string | null {
+  if (path === '/api/v1/auth/users' || path.startsWith('/api/v1/auth/users/')) return 'user-management';
   if (path === '/api/v1/dossier/document-qr/issue') {
     return getDocumentQrScope(req?.body?.documentType);
   }
@@ -176,7 +166,18 @@ export function scopeForPath(path: string, req?: express.Request): string | null
     if (claims?.kind === 'document') return claims.scope || 'rekam-medis';
   }
   if (path === '/api/v1/health' || path === '/api/v1/system/stats' || path.startsWith('/api/v1/health-updates')) return 'dashboard';
-  if (path.startsWith('/api/v1/system-data') || path.startsWith('/api/v1/module-data')) return 'data-pasien';
+  if (path.startsWith('/api/v1/module-data/')) {
+    let key = path.slice('/api/v1/module-data/'.length);
+    try { key = decodeURIComponent(key); } catch { return 'data-pasien'; }
+    return moduleDataScopeForKey(key);
+  }
+  if (path.startsWith('/api/v1/system-data') || path === '/api/v1/module-data') return 'data-pasien';
+  const clinicalCollection = path.match(/^\/api\/v1\/clinical-records\/([^/]+)/)?.[1];
+  if (clinicalCollection === 'billings') return 'kasir';
+  if (clinicalCollection === 'prescriptions') return 'inventory';
+  if (clinicalCollection === 'lab-orders') return 'laboratorium';
+  if (clinicalCollection === 'radiology-orders') return 'radiologi';
+  if (clinicalCollection === 'emergency-visits') return 'igd';
   const isRead = req?.method === 'GET' || req?.method === 'HEAD';
   // Ubah status antrean dipakai poli, farmasi dan kasir, bukan hanya pendaftaran.
   if (path.startsWith('/api/v1/appointments/') && req?.method === 'PATCH') return 'antrean';
@@ -197,7 +198,26 @@ export function scopeForPath(path: string, req?: express.Request): string | null
   return null;
 }
 
+export function moduleDataScopeForKey(key: string): string {
+  if (/^(?:simrs|hospital)_(?:rme|rekam_medis)_/i.test(key)) return 'rekam-medis';
+  if (/^(?:simrs|hospital)_icu_/i.test(key)) return 'icu';
+  if (/^(?:simrs|hospital)_(?:bed|rawat_inap)_/i.test(key)) return 'rawat-inap';
+  if (/^(?:simrs|hospital)_(?:satusehat|satu_sehat)_/i.test(key)) return 'satu-sehat';
+  if (/^bpjs_/i.test(key)) return 'bpjs-klaim';
+  if (/^(?:simrs|hospital)_(?:pharmacy|farmasi)_/i.test(key)) return 'inventory';
+  if (/^(?:simrs|hospital)_lab(?:oratorium)?_/i.test(key)) return 'laboratorium';
+  if (/^(?:simrs|hospital)_(?:rad|radiologi)_/i.test(key)) return 'radiologi';
+  if (/^(?:simrs|hospital)_(?:finance|billing|kasir)_/i.test(key)) return 'kasir';
+  if (/^(?:simrs|hospital)_igd_/i.test(key) || /^myitaru_igd_/i.test(key)) return 'igd';
+  return 'data-pasien';
+}
+
+export function isModuleDataConfigKey(key: string): boolean {
+  return /_config$/i.test(key);
+}
+
 export function hasScope(roleId: string, scope: string): boolean {
+  if (scope === 'user-management') return ['super_admin', 'admin'].includes(roleId);
   if (roleId === 'super_admin' || COMMON_MODULES.includes(scope)) return true;
   const role = ROLES.find((item) => item.id === roleId);
   if (!role) return false;
@@ -230,6 +250,14 @@ function setSessionCookie(
     'Set-Cookie',
     `${cookieName}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`,
   );
+}
+
+function sendLocalUserError(error: unknown, res: express.Response): boolean {
+  if (!(error instanceof LocalAuthUserError)) return false;
+  const status = error.code === 'USER_NOT_FOUND' ? 404 :
+    error.code === 'USER_EXISTS' || error.code === 'LAST_ADMIN' ? 409 : 400;
+  res.status(status).json({ success: false, code: error.code, message: error.message });
+  return true;
 }
 
 export function getCoreAuthMode(): CoreAuthMode {
@@ -267,12 +295,56 @@ export function registerCoreAuthentication(
       }
 
       try {
-        const result = await localAuth!.login(req.body.identifier, req.body.password);
+        const result = await localAuth!.login(req.body.identifier, req.body.password, clientIp(req));
         if (!result) {
           return res.status(401).json({ success: false, code: 'INVALID_CREDENTIALS', message: 'Username/email atau kata sandi tidak valid.' });
         }
+        if ('mfaFlow' in result) {
+          return res.json({
+            success: false,
+            authMode: 'local',
+            mfaFlow: result.mfaFlow,
+            challengeToken: result.challengeToken,
+            userId: result.userId,
+            user: result.user,
+            ...(result.qrCodeUrl ? { qrCodeUrl: result.qrCodeUrl, secretKey: result.secretKey } : {})
+          });
+        }
         setSessionCookie(res, result.token, SESSION_TTL_MS / 1000, LOCAL_SESSION_COOKIE);
         return res.json({ success: true, authMode: 'local', user: result.user });
+      } catch (error) {
+        return next(error);
+      }
+    });
+
+    app.post('/api/auth/mfa/complete', async (req, res, next) => {
+      if (!isSameOrigin(req)) return res.status(403).json({ success: false, code: 'ORIGIN_NOT_ALLOWED' });
+      if (typeof req.body?.challengeToken !== 'string' || typeof req.body?.code !== 'string' || typeof req.body?.userId !== 'string') {
+        return res.status(400).json({ success: false, code: 'INVALID_MFA_CHALLENGE' });
+      }
+      try {
+        const result = await localAuth!.completeMfa?.(req.body.challengeToken, req.body.code, req.body.userId);
+        if (!result || result === 'INVALID_CHALLENGE') {
+          return res.status(401).json({ success: false, code: 'INVALID_MFA_CHALLENGE', message: 'Tantangan MFA berakhir. Silakan login kembali.' });
+        }
+        if (result === 'INVALID_CODE') {
+          return res.status(401).json({ success: false, code: 'INVALID_MFA_CODE', message: 'Kode autentikator salah.' });
+        }
+        setSessionCookie(res, result.token, SESSION_TTL_MS / 1000, LOCAL_SESSION_COOKIE);
+        return res.json({ success: true, authMode: 'local', user: result.user });
+      } catch (error) {
+        return next(error);
+      }
+    });
+
+    app.post('/api/auth/mfa/cancel', async (req, res, next) => {
+      if (!isSameOrigin(req)) return res.status(403).json({ success: false, code: 'ORIGIN_NOT_ALLOWED' });
+      if (typeof req.body?.challengeToken !== 'string') {
+        return res.status(400).json({ success: false, code: 'INVALID_MFA_CHALLENGE' });
+      }
+      try {
+        await localAuth!.cancelMfa?.(req.body.challengeToken);
+        return res.status(204).end();
       } catch (error) {
         return next(error);
       }
@@ -315,6 +387,7 @@ export function registerCoreAuthentication(
         }
         const result = await localAuth!.loginWithEmail!(claims.email);
         if (!result) return res.redirect('/?google=tidak-terdaftar');
+        if ('mfaFlow' in result || 'mfaBlocked' in result) return res.redirect('/?google=mfa-wajib');
         setSessionCookie(res, result.token, SESSION_TTL_MS / 1000, LOCAL_SESSION_COOKIE);
         return res.redirect('/');
       } catch (error) {
@@ -348,13 +421,14 @@ export function registerCoreAuthentication(
       try {
         const result = await localAuth!.changePassword?.(token, currentPassword, newPassword);
         const messages = {
-          OK: 'Kata sandi berhasil diganti.',
+          OK: 'Kata sandi berhasil diganti. Semua sesi telah dicabut; silakan login kembali.',
           INVALID_SESSION: 'Sesi berakhir. Silakan login ulang.',
           WRONG_PASSWORD: 'Kata sandi saat ini salah.',
           WEAK_PASSWORD: 'Kata sandi baru minimal 8 karakter, beda dari yang lama dan bukan sandi bawaan.'
         } as const;
         if (!result) return res.status(404).json({ success: false, code: 'NOT_FOUND' });
         const status = result === 'OK' ? 200 : result === 'INVALID_SESSION' ? 401 : 400;
+        if (result === 'OK') setSessionCookie(res, '', 0, LOCAL_SESSION_COOKIE);
         return res.status(status).json({ success: result === 'OK', code: result, message: messages[result] });
       } catch (error) {
         return next(error);
@@ -433,9 +507,14 @@ export function registerCoreAuthentication(
   app.use('/api', async (req: CoreAuthRequest, res, next) => {
     const apiPath = `${req.baseUrl}${req.path}`;
     const publicAuthEndpoint = authMode === 'local'
-      ? ['/api/auth/login', '/api/auth/me', '/api/auth/logout', '/api/auth/password', '/api/auth/google', '/api/auth/google/callback'].includes(apiPath)
+      ? [
+          '/api/auth/login', '/api/auth/me', '/api/auth/logout', '/api/auth/password',
+          '/api/auth/mfa/complete', '/api/auth/mfa/cancel', '/api/auth/google', '/api/auth/google/callback'
+        ].includes(apiPath)
       : apiPath === '/api/auth/session';
     if (publicAuthEndpoint || apiPath === '/api/v1/health') return next();
+    const scope = scopeForPath(apiPath, req);
+    if (!scope) return res.status(404).json({ success: false, code: 'NOT_FOUND' });
 
     const cookieName = authMode === 'local' ? LOCAL_SESSION_COOKIE : SESSION_COOKIE;
     const cookieToken = getCookie(req, cookieName);
@@ -456,14 +535,10 @@ export function registerCoreAuthentication(
         return res.status(401).json({ success: false, code: 'INVALID_SESSION' });
       }
 
-      const scope = scopeForPath(apiPath, req);
-      if (scope && !hasScope(principal.roleId, scope)) {
+      if (!hasScope(principal.roleId, scope)) {
         return res.status(403).json({ success: false, code: 'FORBIDDEN' });
       }
-      if (!scope) {
-        return res.status(404).json({ success: false, code: 'NOT_FOUND' });
-      }
-      if (scope !== 'dashboard' && !principal.mfaVerified && principal.authMode !== 'local') {
+      if (scope !== 'dashboard' && !principal.mfaVerified) {
         return res.status(403).json({ success: false, code: 'MFA_REQUIRED' });
       }
       if (isWriteDenied(principal, req.method, apiPath)) {
@@ -487,6 +562,67 @@ export function registerCoreAuthentication(
       return next(error);
     }
   });
+
+  if (authMode === 'local') {
+    app.get('/api/v1/auth/users', async (_req, res, next) => {
+      try {
+        return res.json({ success: true, users: await localAuth!.listUsers() });
+      } catch (error) {
+        return next(error);
+      }
+    });
+
+    app.post('/api/v1/auth/users', async (req: CoreAuthRequest, res, next) => {
+      if (req.corePrincipal?.roleId !== 'super_admin' && req.body?.roleId === 'super_admin') {
+        return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+      }
+      try {
+        const user = await localAuth!.createUser(req.body);
+        return res.status(201).json({ success: true, user });
+      } catch (error) {
+        if (sendLocalUserError(error, res)) return;
+        return next(error);
+      }
+    });
+
+    app.patch('/api/v1/auth/users/:id', async (req: CoreAuthRequest, res, next) => {
+      const { id } = req.params;
+      const roleId = req.body?.roleId;
+      if ((req.corePrincipal?.roleId !== 'super_admin' && roleId === 'super_admin') ||
+          (id === req.corePrincipal?.uid && (req.body?.aktif === false ||
+            (typeof roleId === 'string' && !['admin', 'super_admin'].includes(roleId))))) {
+        return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+      }
+      try {
+        if (req.corePrincipal?.roleId !== 'super_admin' &&
+            (await localAuth!.listUsers()).some((user) => user.id === id && user.roleId === 'super_admin')) {
+          return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+        }
+        const user = await localAuth!.updateUser(id, req.body);
+        return res.json({ success: true, user });
+      } catch (error) {
+        if (sendLocalUserError(error, res)) return;
+        return next(error);
+      }
+    });
+
+    app.delete('/api/v1/auth/users/:id', async (req: CoreAuthRequest, res, next) => {
+      if (req.params.id === req.corePrincipal?.uid) {
+        return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+      }
+      try {
+        if (req.corePrincipal?.roleId !== 'super_admin' &&
+            (await localAuth!.listUsers()).some((user) => user.id === req.params.id && user.roleId === 'super_admin')) {
+          return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+        }
+        await localAuth!.deleteUser(req.params.id);
+        return res.json({ success: true });
+      } catch (error) {
+        if (sendLocalUserError(error, res)) return;
+        return next(error);
+      }
+    });
+  }
 }
 
 export function assertProductionAuthConfiguration(authMode = getCoreAuthMode()): void {
