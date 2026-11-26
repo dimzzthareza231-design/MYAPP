@@ -104,6 +104,41 @@ export class FirestoreRestAdapter implements PersistenceRepository {
     return out;
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    assertEntity(entity);
+    const records: Array<StoredRecord<T>> = [];
+    let remainingOffset = offset;
+    let pageToken = '';
+    let hasMore = false;
+    do {
+      const pageSize = Math.min(300, Math.max(1, remainingOffset + limit + 1));
+      const res = await this.call(
+        `${this.base}/${FIRESTORE_COLLECTIONS[entity]}?pageSize=${pageSize}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+      );
+      const json = await res.json() as {
+        documents?: Array<{ name: string; fields?: Record<string, FsValue> }>;
+        nextPageToken?: string;
+      };
+      const documents = json.documents ?? [];
+      if (remainingOffset >= documents.length) {
+        remainingOffset -= documents.length;
+      } else {
+        const pageRecords = documents.slice(remainingOffset);
+        remainingOffset = 0;
+        for (const document of pageRecords) {
+          records.push({
+            id: decodeURIComponent(document.name.split('/').pop()!),
+            data: fromFields(document.fields) as T
+          });
+          if (records.length > limit) break;
+        }
+      }
+      pageToken = json.nextPageToken ?? '';
+      hasMore = records.length > limit || Boolean(pageToken);
+    } while (pageToken && records.length <= limit);
+    return { records: records.slice(0, limit), total: null, hasMore };
+  }
+
   async commit(changes: PersistenceChange[]): Promise<void> {
     if (!changes.length) return;
     const writes = changes.map((c) => {

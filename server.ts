@@ -21,6 +21,7 @@ import {
 } from './src/server/aiIntelligenceEngine';
 import { registerPatientPortalRoutes } from './src/server/patientPortalService';
 import { registerEmployeePortalGateway } from './src/server/employeePortalGateway';
+import { registerClinicalRecordApi } from './src/server/clinicalRecordApi';
 import {
   assertProductionAuthConfiguration,
   getCoreAuthMode,
@@ -165,8 +166,9 @@ function installPersistenceMiddleware(
       const affectedBindings = bindingsForMutation(req.method, req.path, bindings);
       const needsSerialization = affectedBindings.length > 0 ||
         req.path.startsWith('/api/v1/module-data/') ||
-        req.path.startsWith('/api/v1/auth/users') ||
-        req.path.startsWith('/api/gateway/');
+        req.path.startsWith('/api/v1/clinical-records/') ||
+        req.path.startsWith('/api/gateway/') ||
+        req.path.startsWith('/api/v1/auth/users');
       if (!needsSerialization) return next();
 
       let release!: () => void;
@@ -906,6 +908,8 @@ export async function createApps(
   // =========================================================================
   // 🚀 REST API V1 ENDPOINTS (Enterprise Klinik Information System Backend)
   // =========================================================================
+
+  registerClinicalRecordApi(app, persistence);
 
   // 1. System Health Check Endpoint
   app.get('/api/v1/health', async (req, res) => {
@@ -2514,7 +2518,7 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
         details: entry.details
       });
     }
-  });
+  }, persistence);
 
   for (const target of [app, publicApp]) {
     target.use('/api', (_req, res) => res.status(404).json({ success: false, code: 'NOT_FOUND' }));

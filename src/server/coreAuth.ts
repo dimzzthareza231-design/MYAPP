@@ -157,6 +157,12 @@ export function scopeForPath(path: string, req?: express.Request): string | null
   }
   if (path === '/api/v1/health' || path === '/api/v1/system/stats' || path.startsWith('/api/v1/health-updates')) return 'dashboard';
   if (path.startsWith('/api/v1/system-data') || path.startsWith('/api/v1/module-data')) return 'data-pasien';
+  const clinicalCollection = path.match(/^\/api\/v1\/clinical-records\/([^/]+)/)?.[1];
+  if (clinicalCollection === 'billings') return 'kasir';
+  if (clinicalCollection === 'prescriptions') return 'inventory';
+  if (clinicalCollection === 'lab-orders') return 'laboratorium';
+  if (clinicalCollection === 'radiology-orders') return 'radiologi';
+  if (clinicalCollection === 'emergency-visits') return 'igd';
   const isRead = req?.method === 'GET' || req?.method === 'HEAD';
   // Ubah status antrean dipakai poli, farmasi dan kasir, bukan hanya pendaftaran.
   if (path.startsWith('/api/v1/appointments/') && req?.method === 'PATCH') return 'antrean';

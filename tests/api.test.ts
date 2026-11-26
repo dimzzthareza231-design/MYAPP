@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createSecurePatientQrToken } from '../src/server/securePatientQr';
+import type { PersistenceRepository } from '../src/server/databaseAdapter';
 
 process.env.VERCEL = '1'; // cegah server.ts menjalankan listen() sendiri
 process.env.SESSION_SECRET = 'test-secret';
@@ -15,6 +16,7 @@ delete process.env.GEMINI_API_KEY;
 type Res = { status: number; body: any; cookie: string };
 let core = '';
 let pub = '';
+let sharedPersistence: PersistenceRepository;
 const servers: http.Server[] = [];
 
 function restoreEnv(name: string, value: string | undefined): void {
@@ -56,7 +58,7 @@ async function call(
 before(async () => {
   // Diimpor di sini (bukan di atas) agar variabel lingkungan di atas sudah terpasang saat server.ts dimuat.
   const { createApps, addErrorHandler } = await import('../server');
-  const { app, publicApp } = await createApps({
+  const created = await createApps({
     resolvePrincipal: async (token, isSessionCookie) => {
       if (token === 'viewer-token') return { uid: 'viewer', email: 'viewer@test.local', roleId: 'viewer', mfaVerified: true };
       if (token === 'cashier-token') return { uid: 'cashier', email: 'cashier@test.local', roleId: 'kasir', mfaVerified: true };
@@ -70,6 +72,8 @@ before(async () => {
     createSessionCookie: async () => 'test-session-token',
     revokeRefreshTokens: async () => {}
   });
+  const { app, publicApp } = created;
+  sharedPersistence = created.persistence;
   addErrorHandler(app);
   addErrorHandler(publicApp);
   core = await listen(app);
@@ -168,6 +172,69 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal((await call(core, 'DELETE', key, undefined, 'cashier-token', undefined, { 'If-Match': `"${updated.body.version}"` })).status, 200);
     assert.equal((await call(core, 'GET', '/api/v1/module-data/hospital_billing_ralan')).status, 404);
     assert.equal((await call(core, 'GET', '/api/v1/module-data')).body.index.hospital_billing_ralan, undefined);
+  });
+
+  test('clinical records use paginated entity APIs, validation, and version preconditions', async () => {
+    const path = '/api/v1/clinical-records/billings/BIL-API-001';
+    const billing = {
+      id: 'BIL-API-001',
+      noBilling: 'BIL-RJ-API-001',
+      noRm: 'RM-260801-001',
+      namaPasien: 'Pasien Uji',
+      tipeLayanan: 'Rawat Jalan',
+      status: 'Belum Lunas',
+      items: [],
+      subtotal: 10000,
+      diskonTotal: 0,
+      pajak: 0,
+      biayaAdministrasi: 0,
+      totalTagihan: 10000,
+      uangMukaDeposit: 0,
+      sisaTagihan: 10000,
+      jumlahDibayar: 0,
+      kembalian: 0
+    };
+    assert.equal((await call(core, 'PUT', path, { data: billing }, 'cashier-token')).status, 428);
+    const created = await call(core, 'PUT', path, { data: billing }, 'cashier-token', undefined, { 'If-None-Match': '*' });
+    assert.equal(created.status, 200);
+    const version = created.body.version;
+    const listed = await call(core, 'GET', '/api/v1/clinical-records/billings?page=1&limit=1', undefined, 'cashier-token');
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.total, 1);
+    assert.equal(listed.body.data[0].version, version);
+
+    const invalid = await call(core, 'PUT', path, { data: { ...billing, totalTagihan: -1 } }, 'cashier-token', undefined, { 'If-Match': `"${version}"` });
+    assert.equal(invalid.status, 422);
+    const stale = await call(core, 'PUT', path, { data: { ...billing, totalTagihan: 12000 } }, 'cashier-token', undefined, { 'If-Match': '"stale"' });
+    assert.equal(stale.status, 412);
+    const removed = await call(core, 'DELETE', path, undefined, 'cashier-token', undefined, { 'If-Match': `"${version}"` });
+    assert.equal(removed.status, 200);
+    assert.equal((await call(core, 'GET', '/api/v1/clinical-records/billings', undefined, 'cashier-token')).body.total, 0);
+    assert.equal((await call(core, 'GET', '/api/v1/clinical-records/lab-orders', undefined, 'cashier-token')).status, 403);
+
+    const radiology = {
+      id: 'RAD-API-001',
+      orderNumber: 'ORD-RAD-API-001',
+      modality: 'X-Ray',
+      examName: 'Foto Thorax',
+      patientRm: 'RM-260801-002',
+      patientName: 'Pasien Radiologi',
+      status: 'Dalam Proses'
+    };
+    const radiologyResult = await call(core, 'PUT', '/api/v1/clinical-records/radiology-orders/RAD-API-001',
+      { data: radiology }, 'test-token', undefined, { 'If-None-Match': '*' });
+    assert.equal(radiologyResult.status, 200);
+
+    const emergency = {
+      id: 170000001,
+      no_rm: 'RM-IGD-API-001',
+      nama_pasien: 'Pasien IGD',
+      triage: 'Merah',
+      status: 'Resusitasi'
+    };
+    const emergencyResult = await call(core, 'PUT', '/api/v1/clinical-records/emergency-visits/170000001',
+      { data: emergency }, 'test-token', undefined, { 'If-None-Match': '*' });
+    assert.equal(emergencyResult.status, 200);
   });
 
   test('validasi pasien sama untuk POST dan PATCH; dokumen dossier dibatasi ukurannya', async () => {
@@ -517,6 +584,36 @@ describe('portal karyawan', () => {
     assert.equal(ok.status, 200);
     assert.equal((await call(core, 'GET', '/api/gateway/profile', undefined, ok.body.token)).status, 200);
     assert.equal((await call(core, 'GET', '/api/gateway/profile')).status, 401);
+  });
+
+  test('state cuti bertahan setelah gateway dibuat ulang', async () => {
+    const login = await call(core, 'POST', '/api/gateway/auth/login', { divisionId: 'sdm-umum', deviceInfo: 'persist-test' });
+    const verified = await call(core, 'POST', '/api/gateway/auth/verify-mfa', {
+      challengeId: login.body.challengeId,
+      otp: '123456'
+    });
+    assert.equal(verified.status, 200);
+
+    const submitted = await call(core, 'POST', '/api/gateway/leaves', {
+      type: 'Cuti Tahunan',
+      startDate: '2026-05-01',
+      endDate: '2026-05-01',
+      days: 1,
+      reason: 'Persistence test'
+    }, verified.body.token);
+    assert.equal(submitted.status, 200);
+
+    const { createApps, addErrorHandler } = await import('../server');
+    const { app } = await createApps({
+      resolvePrincipal: async (token) => token.startsWith('emp_')
+        ? { uid: token, email: 'employee@test.local', roleId: 'super_admin', mfaVerified: true }
+        : null
+    }, { mode: 'firestore', firestore: sharedPersistence });
+    addErrorHandler(app);
+    const restartedUrl = await listen(app);
+    const afterRestart = await call(restartedUrl, 'GET', '/api/gateway/leaves', undefined, verified.body.token);
+    assert.equal(afterRestart.status, 200);
+    assert.ok(afterRestart.body.requests.some((leave: { id: string }) => leave.id === submitted.body.leave.id));
   });
 });
 

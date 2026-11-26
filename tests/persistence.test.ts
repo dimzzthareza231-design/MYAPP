@@ -55,6 +55,15 @@ class FakePrimaryRepository implements PrimaryPersistenceRepository {
     }));
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    const records = await this.list<T>(entity);
+    return {
+      records: records.slice(offset, offset + limit),
+      total: records.length,
+      hasMore: offset + limit < records.length
+    };
+  }
+
   async commit(changes: PersistenceChange[]): Promise<void> {
     if (!this.online) throw new Error('simulated MySQL outage');
     for (const change of changes) {
@@ -119,6 +128,11 @@ class FakeCloudRepository implements CloudPersistenceRepository {
   async list<T>(entity: PersistenceEntity): Promise<Array<StoredRecord<T>>> {
     if (!this.online) throw new Error('simulated offline state');
     return this.records.list<T>(entity);
+  }
+
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    if (!this.online) throw new Error('simulated offline state');
+    return this.records.listPage<T>(entity, offset, limit);
   }
 
   async listBookings(): Promise<Array<StoredRecord<unknown>>> {

@@ -13,6 +13,9 @@ export const PERSISTENCE_ENTITIES = [
   'emr_soap',
   'prescriptions',
   'billings',
+  'lab_orders',
+  'radiology_orders',
+  'emergency_visits',
   'qr_tokens',
   'audit_logs',
   'beds',
@@ -32,6 +35,9 @@ const MYSQL_TABLES: Record<PersistenceEntity, string> = {
   emr_soap: 'emr_soap',
   prescriptions: 'prescriptions',
   billings: 'billings',
+  lab_orders: 'lab_orders',
+  radiology_orders: 'radiology_orders',
+  emergency_visits: 'emergency_visits',
   qr_tokens: 'qr_tokens',
   audit_logs: 'audit_logs',
   beds: 'beds',
@@ -50,6 +56,9 @@ export const FIRESTORE_COLLECTIONS: Record<PersistenceEntity, string> = {
   emr_soap: 'emr_soap',
   prescriptions: 'resep',
   billings: 'tagihan',
+  lab_orders: 'lab_orders',
+  radiology_orders: 'radiology_orders',
+  emergency_visits: 'emergency_visits',
   qr_tokens: 'qr_tokens',
   audit_logs: 'activity_logs',
   beds: 'bed',
@@ -86,6 +95,11 @@ export interface PersistenceRepository {
   health(): Promise<PersistenceHealth>;
   get<T>(entity: PersistenceEntity, id: string): Promise<T | null>;
   list<T>(entity: PersistenceEntity): Promise<Array<StoredRecord<T>>>;
+  listPage<T>(entity: PersistenceEntity, offset: number, limit: number): Promise<{
+    records: Array<StoredRecord<T>>;
+    total: number | null;
+    hasMore: boolean;
+  }>;
   commit(changes: PersistenceChange[]): Promise<void>;
   close(): Promise<void>;
 }
@@ -190,6 +204,15 @@ export class MemoryPersistenceRepository implements PersistenceRepository {
       id,
       data: structuredClone(data) as T
     }));
+  }
+
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    const records = await this.list<T>(entity);
+    return {
+      records: records.slice(offset, offset + limit),
+      total: records.length,
+      hasMore: offset + limit < records.length
+    };
   }
 
   async commit(changes: PersistenceChange[]): Promise<void> {
@@ -339,6 +362,22 @@ export class MySQLAdapter implements PrimaryPersistenceRepository {
       id: record.id,
       data: decodePayload(record.payload) as T
     }));
+  }
+
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    await this.ensureReady();
+    assertEntity(entity);
+    const table = MYSQL_TABLES[entity];
+    const [[countRows], [rows]] = await Promise.all([
+      this.pool.query(`SELECT COUNT(*) AS total FROM \`${table}\``, []),
+      this.pool.query(`SELECT id, payload FROM \`${table}\` ORDER BY updated_at DESC LIMIT ? OFFSET ?`, [limit, offset])
+    ]);
+    const total = Number((countRows as Array<{ total: number }>)[0]?.total || 0);
+    const records = (rows as Array<{ id: string; payload: unknown }>).map((record) => ({
+      id: record.id,
+      data: decodePayload(record.payload) as T
+    }));
+    return { records, total, hasMore: offset + records.length < total };
   }
 
   async commit(changes: PersistenceChange[]): Promise<void> {
@@ -533,6 +572,21 @@ export class D1Adapter implements PersistenceRepository {
     return results.map((row) => ({ id: row.id, data: decodePayload(row.payload) as T }));
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    assertEntity(entity);
+    const table = MYSQL_TABLES[entity];
+    const [count, { results }] = await Promise.all([
+      this.db.prepare(`SELECT COUNT(*) AS total FROM "${table}"`).first<{ total: number }>(),
+      this.db
+        .prepare(`SELECT id, payload FROM "${table}" ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?`)
+        .bind(limit, offset)
+        .all<{ id: string; payload: string }>()
+    ]);
+    const total = Number(count?.total || 0);
+    const records = results.map((row) => ({ id: row.id, data: decodePayload(row.payload) as T }));
+    return { records, total, hasMore: offset + records.length < total };
+  }
+
   async commit(changes: PersistenceChange[]): Promise<void> {
     if (!changes.length) return;
     const statements = changes.map((change) => {
@@ -640,6 +694,18 @@ export class FirebaseServerAdapter implements CloudPersistenceRepository {
     return snapshot.docs.map((document) => ({ id: document.id, data: document.data() as T }));
   }
 
+  async listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    if (!this.firestore) throw new Error('Firebase persistence is not configured.');
+    assertEntity(entity);
+    const snapshot = await this.firestore.collection(FIRESTORE_COLLECTIONS[entity]).offset(offset).limit(limit + 1).get();
+    const hasMore = snapshot.docs.length > limit;
+    return {
+      records: snapshot.docs.slice(0, limit).map((document) => ({ id: document.id, data: document.data() as T })),
+      total: null,
+      hasMore
+    };
+  }
+
   async listBookings(): Promise<Array<StoredRecord<unknown>>> {
     if (!this.firestore) throw new Error('Firebase persistence is not configured.');
     const snapshot = await this.firestore.collection(FIRESTORE_COLLECTIONS.bookings).get();
@@ -699,6 +765,10 @@ export class HybridAdapter implements PersistenceRepository {
 
   list<T>(entity: PersistenceEntity): Promise<Array<StoredRecord<T>>> {
     return this.mysql.list<T>(entity);
+  }
+
+  listPage<T>(entity: PersistenceEntity, offset: number, limit: number) {
+    return this.mysql.listPage<T>(entity, offset, limit);
   }
 
   async commit(changes: PersistenceChange[]): Promise<void> {

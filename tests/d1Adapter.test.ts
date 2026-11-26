@@ -32,7 +32,9 @@ function createD1Shim(db: DatabaseSync): D1DatabaseLike {
 
 function migratedAdapter(): D1Adapter {
   const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  for (const migration of ['0001_init.sql', '0002_clinical_entities.sql']) {
+    db.exec(readFileSync(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'));
+  }
   return new D1Adapter(createD1Shim(db));
 }
 
@@ -63,6 +65,14 @@ describe('D1Adapter', () => {
 
     assert.deepEqual(await adapter.get('patients', 'p1'), { nama: 'A2' });
     assert.deepEqual((await adapter.list('patients')).map((r) => r.id), ['p1', 'p2']);
+
+    const firstPage = await adapter.listPage<{ nama: string }>('patients', 0, 1);
+    assert.deepEqual(firstPage.records.map((record) => record.id), ['p1']);
+    assert.equal(firstPage.total, 2);
+    assert.equal(firstPage.hasMore, true);
+    const lastPage = await adapter.listPage('patients', 1, 1);
+    assert.deepEqual(lastPage.records.map((record) => record.id), ['p2']);
+    assert.equal(lastPage.hasMore, false);
 
     await adapter.commit([{ entity: 'patients', id: 'p1', data: null }]);
     assert.equal(await adapter.get('patients', 'p1'), null);
