@@ -118,17 +118,31 @@ function AppContent() {
       });
     };
     const handleModuleSyncConflict = (event: Event) => {
-      const key = (event as CustomEvent<{ key?: string }>).detail?.key;
-      toast.error(`Data modul${key ? ` ${key}` : ''} berubah di perangkat lain. Perubahan lokal belum tersimpan; salin sebelum memuat ulang.`, {
+      const { key, draftKey, draftPreserved } = (event as CustomEvent<{
+        key?: string;
+        draftKey?: string;
+        draftPreserved?: boolean;
+      }>).detail || {};
+      const draftMessage = draftPreserved && draftKey ? ` Draf lokal tersimpan di ${draftKey}. Muat ulang halaman untuk memakai data server terbaru.` : '';
+      toast.error(`Data modul${key ? ` ${key}` : ''} berubah di perangkat lain. Penyimpanan diblokir agar perubahan server tidak tertimpa.${draftMessage}`, {
         id: `module-sync-conflict-${key || 'unknown'}`,
-        duration: 8000,
+        duration: 12000,
+      });
+    };
+    const handleModuleSyncError = (event: Event) => {
+      const { key, message } = (event as CustomEvent<{ key?: string; message?: string }>).detail || {};
+      toast.error(`${key ? `${key}: ` : ''}${message || 'Data modul gagal disinkronkan.'}`, {
+        id: `module-sync-error-${key || 'unknown'}`,
+        duration: 10000,
       });
     };
     window.addEventListener('viewer-mode-block', handleViewerBlock);
     window.addEventListener('module-data-conflict', handleModuleSyncConflict);
+    window.addEventListener('module-data-sync-error', handleModuleSyncError);
     return () => {
       window.removeEventListener('viewer-mode-block', handleViewerBlock);
       window.removeEventListener('module-data-conflict', handleModuleSyncConflict);
+      window.removeEventListener('module-data-sync-error', handleModuleSyncError);
     };
   }, []);
 

@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify:
@@ -36,11 +36,11 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build aplikasi inti
-        run: npm run build:core
+      - name: Dry-run deploy web publik (mode Cloudflare)
+        run: npx wrangler deploy --env public --dry-run
 
-      - name: Build web publik
-        run: npm run build:public
+      - name: Dry-run deploy aplikasi inti (mode Cloudflare)
+        run: npx wrangler deploy --env core --dry-run
 
   deploy:
     name: Deploy ke Cloudflare
@@ -78,14 +78,35 @@ jobs:
         if: steps.secret.outputs.ok == 'true'
         run: npm ci
 
-      - name: Migrasi D1
+      - name: Catat versi aktif sebelum deploy
+        id: versions
         if: steps.secret.outputs.ok == 'true'
-        run: npm run cf:migrate
+        run: |
+          echo "public=$(npx wrangler versions list --env public --json | jq -r '.[-1].id // empty')" >> "$GITHUB_OUTPUT"
+          echo "core=$(npx wrangler versions list --env core --json | jq -r '.[-1].id // empty')" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy kedua Worker
+      - name: Build Worker mode Cloudflare
         if: steps.secret.outputs.ok == 'true'
-        run: npm run cf:deploy
+        run: npm run cf:build
+
+      - name: Deploy web publik
+        id: deploy_public
+        if: steps.secret.outputs.ok == 'true'
+        run: npx wrangler deploy --env public
+
+      - name: Deploy aplikasi inti
+        id: deploy_core
+        if: steps.secret.outputs.ok == 'true'
+        run: npx wrangler deploy --env core
 
       - name: Cek health aplikasi inti
         if: steps.secret.outputs.ok == 'true'
         run: curl -fsS --retry 5 --retry-delay 5 https://myitaru-core.myappv1.workers.dev/api/v1/health
+
+      - name: Rollback aplikasi inti jika deploy atau health check gagal
+        if: failure() && steps.secret.outputs.ok == 'true' && steps.versions.outputs.core != ''
+        run: npx wrangler rollback "${{ steps.versions.outputs.core }}" --env core --yes
+
+      - name: Rollback web publik jika deploy atau health check gagal
+        if: failure() && steps.secret.outputs.ok == 'true' && steps.versions.outputs.public != ''
+        run: npx wrangler rollback "${{ steps.versions.outputs.public }}" --env public --yes

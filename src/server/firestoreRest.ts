@@ -30,7 +30,7 @@ const fromFields = (f: Record<string, FsValue> = {}) => Object.fromEntries(Objec
 const b64url = (b: ArrayBuffer | string) =>
   btoa(typeof b === 'string' ? b : String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => item === undefined ? 'null' : canonicalJson(item)).join(',')}]`;
   if (value && typeof value === 'object') {
     return `{${Object.entries(value)
@@ -81,7 +81,9 @@ export class FirestoreRestAdapter implements PersistenceRepository {
 
   private async call(path: string, init: RequestInit = {}): Promise<Response> {
     const res = await this.fetcher(`https://firestore.googleapis.com/v1/${path}`, {
-      ...init, headers: { Authorization: `Bearer ${await this.accessToken()}`, 'Content-Type': 'application/json' }
+      ...init,
+      signal: AbortSignal.timeout(10_000),
+      headers: { Authorization: `Bearer ${await this.accessToken()}`, 'Content-Type': 'application/json' }
     });
     if (!res.ok && res.status !== 404) throw new Error(`Firestore ${res.status}: ${(await res.text()).slice(0, 300)}`);
     return res;
@@ -154,10 +156,15 @@ export class FirestoreRestAdapter implements PersistenceRepository {
     let remainingOffset = offset;
     let pageToken = '';
     let hasMore = false;
+    const orderBy = entity === 'registrations'
+      ? '&orderBy=created_at%20desc'
+      : entity === 'audit_logs'
+        ? '&orderBy=timestamp%20desc'
+        : '';
     do {
       const pageSize = Math.min(300, Math.max(1, remainingOffset + limit + 1));
       const res = await this.call(
-        `${this.base}/${FIRESTORE_COLLECTIONS[entity]}?pageSize=${pageSize}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+        `${this.base}/${FIRESTORE_COLLECTIONS[entity]}?pageSize=${pageSize}${orderBy}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
       );
       const json = await res.json() as {
         documents?: Array<{ name: string; fields?: Record<string, FsValue> }>;

@@ -29,6 +29,8 @@ import {
 import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 import toast from 'react-hot-toast';
+import { CloudflareTurnstile } from '../Common/CloudflareTurnstile';
+import { jakartaDate } from '../../utils/jakartaDate';
 import {
   HOSPITAL_SERVICES,
   CENTERS_OF_EXCELLENCE,
@@ -265,13 +267,17 @@ export const PublicHospitalPortal: React.FC = () => {
   const [bookingForm, setBookingForm] = useState({
     isExistingPatient: false,
     no_rm: '',
+    nik: '',
     nama: '',
+    jenis_kelamin: 'L' as 'L' | 'P',
     tanggal_lahir: '1990-05-15',
     no_hp: '',
-    tanggal: new Date().toISOString().split('T')[0],
+    tanggal: jakartaDate(),
     penjamin: 'Umum / Mandiri',
     keluhan: ''
   });
+  const [bookingTurnstileToken, setBookingTurnstileToken] = useState('');
+  const [bookingTurnstileGeneration, setBookingTurnstileGeneration] = useState(0);
   const [isSubmittingBooking, setIsSubmittingBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState<{
     kode_booking: string;
@@ -441,6 +447,10 @@ export const PublicHospitalPortal: React.FC = () => {
       toast.error('Masukkan nama lengkap pasien.');
       return;
     }
+    if (!bookingTurnstileToken) {
+      toast.error('Selesaikan verifikasi keamanan sebelum membuat booking.');
+      return;
+    }
 
     setIsSubmittingBooking(true);
     try {
@@ -450,8 +460,11 @@ export const PublicHospitalPortal: React.FC = () => {
         body: JSON.stringify({
           nama: bookingForm.nama,
           no_rm: bookingForm.isExistingPatient ? bookingForm.no_rm : undefined,
+          nik: bookingForm.isExistingPatient ? undefined : bookingForm.nik,
+          jenis_kelamin: bookingForm.isExistingPatient ? undefined : bookingForm.jenis_kelamin,
           tanggal_lahir: bookingForm.tanggal_lahir,
           no_hp: bookingForm.no_hp,
+          turnstileToken: bookingTurnstileToken,
           poli_id: selectedDoctor.poli_id,
           poli_nama: selectedDoctor.poli,
           dokter_id: selectedDoctor.id,
@@ -496,6 +509,8 @@ export const PublicHospitalPortal: React.FC = () => {
       toast.error('Koneksi ke server terganggu. Silakan coba beberapa saat lagi.');
     } finally {
       setIsSubmittingBooking(false);
+      setBookingTurnstileToken('');
+      setBookingTurnstileGeneration((generation) => generation + 1);
     }
   };
 
@@ -1330,6 +1345,32 @@ export const PublicHospitalPortal: React.FC = () => {
                                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono uppercase focus:border-[#0B3D91] outline-none"
                                   required
                                 />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">NIK (opsional)</label>
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      maxLength={16}
+                                      value={bookingForm.nik}
+                                      onChange={(e) => setBookingForm((p) => ({ ...p, nik: e.target.value }))}
+                                      placeholder="16 digit"
+                                      className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-[#0B3D91] outline-none"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-1">Jenis Kelamin *</label>
+                                    <select
+                                      value={bookingForm.jenis_kelamin}
+                                      onChange={(e) => setBookingForm((p) => ({ ...p, jenis_kelamin: e.target.value as 'L' | 'P' }))}
+                                      className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white focus:border-[#0B3D91] outline-none"
+                                      required
+                                    >
+                                      <option value="L">Laki-laki</option>
+                                      <option value="P">Perempuan</option>
+                                    </select>
+                                  </div>
+                                </div>
                               </div>
                             ) : (
                               <div>
@@ -1385,7 +1426,7 @@ export const PublicHospitalPortal: React.FC = () => {
                                 <input
                                   type="date"
                                   value={bookingForm.tanggal}
-                                  min={new Date().toISOString().split('T')[0]}
+                                  min={jakartaDate()}
                                   onChange={(e) => setBookingForm((p) => ({ ...p, tanggal: e.target.value }))}
                                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-[#0B3D91] outline-none"
                                   required
@@ -1420,9 +1461,18 @@ export const PublicHospitalPortal: React.FC = () => {
                               />
                             </div>
 
+                            <div className="flex justify-center">
+                              <CloudflareTurnstile
+                                key={bookingTurnstileGeneration}
+                                action="patient_booking"
+                                onSuccess={setBookingTurnstileToken}
+                                onError={() => setBookingTurnstileToken('')}
+                                onExpire={() => setBookingTurnstileToken('')}
+                              />
+                            </div>
                             <motion.button
                               type="submit"
-                              disabled={isSubmittingBooking}
+                              disabled={isSubmittingBooking || !bookingTurnstileToken}
                               whileTap={{ scale: 0.98 }}
                               className="w-full py-3.5 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm transition cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2 min-h-[48px]"
                             >

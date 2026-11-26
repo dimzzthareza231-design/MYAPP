@@ -132,8 +132,8 @@ export function Billing() {
       const subtotal = autoItems.reduce((acc, curr) => acc + curr.total, 0);
 
       newBillingsFromKunjungan.push({
-        id: `BIL-AUTOSYNC-${Date.now()}-${k.id}`,
-        noBilling: `BIL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`,
+        id: `BIL-AUTOSYNC-${k.id}`,
+        noBilling: '',
         kunjunganId: k.id,
         pasienId: String(p.id),
         namaPasien: p.nama,
@@ -144,8 +144,8 @@ export function Billing() {
         penjaminId: k.penjamin_id,
         namaPenjamin: pj?.nama || 'Umum Mandiri',
         tipePenjamin: isBPJS ? 'BPJS' : 'Umum',
-        noSep: isBPJS ? `SEP-${Date.now().toString().slice(-8)}` : undefined,
-        status: k.status === 'Selesai' ? 'Lunas' : 'Belum Lunas',
+        noSep: undefined,
+        status: 'Belum Lunas',
         tanggalMasuk: k.tanggal || new Date().toISOString().slice(0, 10),
         items: autoItems,
         subtotal: subtotal,
@@ -154,12 +154,12 @@ export function Billing() {
         biayaAdministrasi: 10000,
         totalTagihan: subtotal + 10000,
         uangMukaDeposit: 0,
-        sisaTagihan: k.status === 'Selesai' ? 0 : subtotal + 10000,
-        jumlahDibayar: k.status === 'Selesai' ? subtotal + 10000 : 0,
+        sisaTagihan: subtotal + 10000,
+        jumlahDibayar: 0,
         kembalian: 0,
-        kasirNama: 'Siti Rahmawati, S.E.',
+        kasirNama: '',
         jenisKelamin: p.jenis_kelamin || 'L',
-        metodePembayaran: k.status === 'Selesai' ? (isBPJS ? 'BPJS' : 'Tunai') : ('Tunai' as PaymentMethod)
+        metodePembayaran: 'Tunai' as PaymentMethod
       });
       addedCount++;
     });

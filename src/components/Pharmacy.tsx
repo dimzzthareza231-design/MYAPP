@@ -107,7 +107,7 @@ export function Pharmacy() {
 
   // PERSISTENT STORAGE WITH RESILIENT FALLBACK
   const [stocks, setStocks] = useState<MedicationStock[]>(() => {
-    return storage.get<MedicationStock[]>('hospital_pharmacy_stocks', INITIAL_MEDICATIONS);
+    return usesServerPersistence ? [] : storage.get<MedicationStock[]>('hospital_pharmacy_stocks', INITIAL_MEDICATIONS);
   });
 
   const [prescriptions, setPrescriptions] = useState<PrescriptionOrder[]>(() => {
@@ -115,23 +115,23 @@ export function Pharmacy() {
   });
 
   const [uddSchedules, setUddSchedules] = useState<UDDSchedule[]>(() => {
-    return storage.get<UDDSchedule[]>('hospital_pharmacy_udd', INITIAL_UDD_SCHEDULES);
+    return usesServerPersistence ? [] : storage.get<UDDSchedule[]>('hospital_pharmacy_udd', INITIAL_UDD_SCHEDULES);
   });
 
   const [reconciliations, setReconciliations] = useState<DrugReconciliation[]>(() => {
-    return storage.get<DrugReconciliation[]>('hospital_pharmacy_reconciliations', INITIAL_RECONCILIATIONS);
+    return usesServerPersistence ? [] : storage.get<DrugReconciliation[]>('hospital_pharmacy_reconciliations', INITIAL_RECONCILIATIONS);
   });
 
   const [returns, setReturns] = useState<DrugReturn[]>(() => {
-    return storage.get<DrugReturn[]>('hospital_pharmacy_returns', INITIAL_RETURNS);
+    return usesServerPersistence ? [] : storage.get<DrugReturn[]>('hospital_pharmacy_returns', INITIAL_RETURNS);
   });
 
   const [poList, setPoList] = useState<PurchaseOrderDefecta[]>(() => {
-    return storage.get<PurchaseOrderDefecta[]>('hospital_pharmacy_po', INITIAL_PURCHASE_ORDERS);
+    return usesServerPersistence ? [] : storage.get<PurchaseOrderDefecta[]>('hospital_pharmacy_po', INITIAL_PURCHASE_ORDERS);
   });
 
   const [sipnapList, setSipnapList] = useState<SIPNAPReport[]>(() => {
-    return storage.get<SIPNAPReport[]>('hospital_pharmacy_sipnap', INITIAL_SIPNAP);
+    return usesServerPersistence ? [] : storage.get<SIPNAPReport[]>('hospital_pharmacy_sipnap', INITIAL_SIPNAP);
   });
 
   // SAVE VIA STORAGE WRAPPER
@@ -244,10 +244,10 @@ export function Pharmacy() {
               waktu_telaah: '-'
             },
             ai_clinical_check: {
-              status_keamanan: 'Aman',
+              status_keamanan: 'Belum terverifikasi',
               interaksi_terdeteksi: [],
               peringatan_alergi: [],
-              ringkasan_ai: 'Resep tunggal Paracetamol aman diberikan.'
+              ringkasan_ai: 'Belum terverifikasi; telaah manual oleh apoteker sebelum dispensing.'
             },
             dispensing: {
               jenis_etiket_dicetak: ['Putih (Oral)'],
@@ -426,6 +426,11 @@ export function Pharmacy() {
       </div>
 
       {/* 2. RENDER ACTIVE TAB CONTENT */}
+      {usesServerPersistence && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          Integrasi stok farmasi belum dikonfigurasi. Stok tidak ditampilkan dan dispensing diblokir.
+        </div>
+      )}
       {activeMainTab === 'maps' && (
         <GoogleMapsHealthLocator
           initialQuery="Apotek 24 Jam dan Distributor Pedagang Besar Farmasi (PBF)"
@@ -439,6 +444,10 @@ export function Pharmacy() {
           prescriptions={prescriptions}
           stocks={stocks}
           onUpdatePrescription={(p) => {
+            if (usesServerPersistence && p.status === 'Selesai Terlayani') {
+              toast.error('Dispensing belum tersedia: integrasi stok farmasi belum dikonfigurasi.');
+              return;
+            }
             setPrescriptions(prev => prev.map(item => item.id === p.id ? p : item));
             if (p.status === 'Selesai Terlayani') {
               integratePharmacyDispense({
@@ -455,7 +464,13 @@ export function Pharmacy() {
         />
       )}
 
-      {activeMainTab === 'ranap' && (
+      {usesServerPersistence && activeMainTab !== 'ralan' && activeMainTab !== 'maps' && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-6 text-amber-950">
+          <h2 className="font-bold">Integrasi inventori farmasi belum dikonfigurasi</h2>
+          <p className="mt-2 text-sm">Data UDD, pengadaan, dan pelaporan tidak tersedia sampai layanan persediaan terhubung.</p>
+        </div>
+      )}
+      {!usesServerPersistence && activeMainTab === 'ranap' && (
         <ApotekRanapTab
           prescriptions={prescriptions}
           uddSchedules={uddSchedules}
@@ -478,7 +493,7 @@ export function Pharmacy() {
         />
       )}
 
-      {activeMainTab === 'stok' && (
+      {!usesServerPersistence && activeMainTab === 'stok' && (
         <StokInventoriTab
           stocks={stocks}
           onUpdateStocks={(stks) => setStocks(stks)}
@@ -486,7 +501,7 @@ export function Pharmacy() {
         />
       )}
 
-      {activeMainTab === 'defecta' && (
+      {!usesServerPersistence && activeMainTab === 'defecta' && (
         <DefectaProcurementTab
           stocks={stocks}
           poList={poList}
@@ -496,7 +511,7 @@ export function Pharmacy() {
         />
       )}
 
-      {activeMainTab === 'narkotika' && (
+      {!usesServerPersistence && activeMainTab === 'narkotika' && (
         <NarkotikaLasaTab
           sipnapList={sipnapList}
           highAlertList={INITIAL_HIGH_ALERT}
@@ -504,7 +519,7 @@ export function Pharmacy() {
         />
       )}
 
-      {activeMainTab === 'fornas' && (
+      {!usesServerPersistence && activeMainTab === 'fornas' && (
         <KatalogFornasKfaTab
           stocks={stocks}
         />

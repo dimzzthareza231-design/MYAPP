@@ -14,9 +14,11 @@ describe('firestoreRest', () => {
 
   test('commit, get, list lewat REST', async () => {
     const calls: Array<{ url: string; body?: string }> = [];
+    const firestoreSignals: AbortSignal[] = [];
     const fetcher = (async (url: string, init?: RequestInit) => {
       calls.push({ url, body: init?.body as string | undefined });
       if (url.includes('oauth2')) return Response.json({ access_token: 't', expires_in: 3600 });
+      if (init?.signal) firestoreSignals.push(init.signal);
       if (url.endsWith(':commit')) return Response.json({});
       if (url.includes('/pasien/p1')) return Response.json({ fields: { nama: { stringValue: 'Budi' } } });
       if (url.includes('/pasien/none')) return new Response('', { status: 404 });
@@ -30,6 +32,10 @@ describe('firestoreRest', () => {
     assert.deepEqual(await db.get('patients', 'p1'), { nama: 'Budi' });
     assert.equal(await db.get('patients', 'none'), null);
     assert.deepEqual(await db.list('patients'), [{ id: 'p1', data: { nama: 'Budi' } }]);
+    assert.ok(firestoreSignals.length > 0);
+    assert.ok(firestoreSignals.every((signal) => signal instanceof AbortSignal));
+    await db.listPage('registrations', 0, 1);
+    assert.ok(calls.some((call) => call.url.includes('orderBy=created_at%20desc')));
 
     calls.length = 0;
     await db.commit(Array.from({ length: 850 }, (_, i) => ({ entity: 'patients' as const, id: `x${i}`, data: null })));

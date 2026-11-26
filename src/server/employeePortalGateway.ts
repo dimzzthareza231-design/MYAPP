@@ -9,6 +9,7 @@ import {
   type DivisionDefinition
 } from '../data/employeePortalCatalog';
 import type { PersistenceRepository } from './databaseAdapter';
+import { safeErrorDetails } from './scrubPhi';
 
 export interface GatewayDependencies {
   createAuditLog?: (entry: {
@@ -872,7 +873,7 @@ export function registerEmployeePortalGateway(
         res.json = ((body: unknown) => {
           if (gatewayStateRevision === persistedGatewayStateRevision) return sendJson(body);
           void persistGatewayState().then(() => sendJson(body)).catch((error: unknown) => {
-            console.error('[Persistence] Could not save employee gateway state.', error);
+            console.error('[Persistence] Could not save employee gateway state.', safeErrorDetails(error));
             if (!res.headersSent) {
               const conflict = error instanceof GatewayStateConflictError;
               res.status(conflict ? 409 : 503);
@@ -887,7 +888,7 @@ export function registerEmployeePortalGateway(
       }
       next();
     }).catch((error: unknown) => {
-      console.error('[Persistence] Could not load employee gateway state.', error);
+      console.error('[Persistence] Could not load employee gateway state.', safeErrorDetails(error));
       res.status(503).json({ success: false, code: 'GATEWAY_PERSISTENCE_UNAVAILABLE' });
     });
   });

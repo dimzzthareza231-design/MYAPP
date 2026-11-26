@@ -4,7 +4,10 @@ import { nextRmNumber } from './rmNumber';
 import type express from 'express';
 import { createSignedStore } from './signedStore';
 import { createSecurePatientQrToken, isSecurePatientQrConfigured } from './securePatientQr';
-import { hashQrToken } from './databaseAdapter';
+import { hashQrToken, type PersistenceRepository } from './databaseAdapter';
+import { safeErrorDetails } from './scrubPhi';
+import { jakartaDate } from '../utils/jakartaDate';
+import { TurnstileNotConfiguredError, verifyTurnstileToken } from './turnstile';
 import { MASTER_POLIKLINIK, SEMUA_DOKTER } from '../data/seedData';
 import {
   generateAllPatientsWithResumes,
@@ -175,6 +178,18 @@ export interface ServerPatientNotification {
   createdAt: string;
 }
 
+type PatientPortalState = {
+  fcmTokens: ServerFcmTokenRecord[];
+  notifications: ServerPatientNotification[];
+  labRadResults: PatientDossierPayload['labRadResults'];
+};
+
+type PatientPortalStateRecord = {
+  key: string;
+  updatedAt: string;
+  data: PatientPortalState;
+};
+
 function normalizeRm(val: string): string {
   return String(val || '').trim().toUpperCase();
 }
@@ -214,6 +229,7 @@ export function registerPatientPortalRoutes(
     appointmentsStore: ServerAppointmentRecord[];
     bedsStore: ServerBedRecord[];
     qrTokensStore?: ServerQrTokenRecord[];
+    persistence?: PersistenceRepository;
     useDemoData?: boolean;
     /** App staf (berauth). Route dispatch notifikasi hanya didaftarkan di sini, tidak di web publik. */
     staffApp?: express.Express;
@@ -240,7 +256,6 @@ export function registerPatientPortalRoutes(
   // Sesi pasien = token bertanda tangan (stateless), tetap valid di semua instance serverless.
   const patientSessions = createSignedStore<PatientSession>('pat_', 'token', 12 * 60 * 60 * 1000);
 
-  const doctorServedBoost = new Map<string, number>();
   const patientSessionCookieName = 'myitaru_patient_session';
 
   // Real-time FCM tokens, notification inbox, dynamic lab reports, and SSE streams per No. RM
@@ -248,6 +263,58 @@ export function registerPatientPortalRoutes(
   const notificationsByRm = new Map<string, ServerPatientNotification[]>();
   const dynamicLabResultsByRm = new Map<string, PatientDossierPayload['labRadResults']>();
   const sseClientsByRm = new Map<string, Set<express.Response>>();
+
+  function patientPortalStateId(noRm: string): string {
+    return `patient_portal_${hashQrToken(normalizeRm(noRm))}`;
+  }
+
+  function cachedPatientPortalState(noRm: string): PatientPortalState {
+    return {
+      fcmTokens: fcmTokensByRm.get(noRm) || [],
+      notifications: notificationsByRm.get(noRm) || [],
+      labRadResults: dynamicLabResultsByRm.get(noRm) || []
+    };
+  }
+
+  function cachePatientPortalState(noRm: string, state: PatientPortalState): void {
+    fcmTokensByRm.set(noRm, state.fcmTokens);
+    notificationsByRm.set(noRm, state.notifications);
+    dynamicLabResultsByRm.set(noRm, state.labRadResults);
+  }
+
+  async function loadPatientPortalState(noRm: string): Promise<PatientPortalState> {
+    const targetRm = normalizeRm(noRm);
+    const record = await deps.persistence?.get<PatientPortalStateRecord>('system_data', patientPortalStateId(targetRm));
+    const state = record?.data || cachedPatientPortalState(targetRm);
+    cachePatientPortalState(targetRm, state);
+    return state;
+  }
+
+  async function updatePatientPortalState(
+    noRm: string,
+    update: (state: PatientPortalState) => void
+  ): Promise<PatientPortalState> {
+    const targetRm = normalizeRm(noRm);
+    if (!deps.persistence) {
+      const state = cachedPatientPortalState(targetRm);
+      update(state);
+      cachePatientPortalState(targetRm, state);
+      return state;
+    }
+
+    const id = patientPortalStateId(targetRm);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = await deps.persistence.get<PatientPortalStateRecord>('system_data', id);
+      const state = structuredClone(current?.data || cachedPatientPortalState(targetRm));
+      update(state);
+      const next: PatientPortalStateRecord = { key: id, updatedAt: new Date().toISOString(), data: state };
+      if (await deps.persistence.compareAndSwap('system_data', id, current, next)) {
+        cachePatientPortalState(targetRm, state);
+        return state;
+      }
+    }
+    throw new Error('Patient portal state changed concurrently.');
+  }
 
   function resolveSessionFromReq(req: express.Request): PatientSession | undefined {
     const authHeader = req.headers.authorization || '';
@@ -285,7 +352,8 @@ export function registerPatientPortalRoutes(
     force?: boolean;
   }): Promise<{ deliveredSse: number; fcmTargets: number; notification: ServerPatientNotification }> {
     const targetRm = normalizeRm(params.no_rm);
-    const registeredTokens = (fcmTokensByRm.get(targetRm) || []).filter((t) => t.active);
+    const state = await loadPatientPortalState(targetRm);
+    const registeredTokens = state.fcmTokens.filter((t) => t.active);
 
     const anyEnabledForType =
       registeredTokens.length === 0 ||
@@ -297,8 +365,6 @@ export function registerPatientPortalRoutes(
           : true
       );
 
-    const hasWebPushToken = registeredTokens.some((t) => t.mode === 'fcm_web_push');
-
     const notification: ServerPatientNotification = {
       id: `notif_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
       no_rm: targetRm,
@@ -308,7 +374,7 @@ export function registerPatientPortalRoutes(
       poli: params.poli,
       nomor_antrian: params.nomor_antrian,
       lab_order_id: params.lab_order_id,
-      channel: hasWebPushToken ? 'fcm_push' : 'sse_realtime',
+      channel: 'sse_realtime',
       read: false,
       createdAt: new Date().toISOString()
     };
@@ -317,45 +383,9 @@ export function registerPatientPortalRoutes(
       return { deliveredSse: 0, fcmTargets: 0, notification };
     }
 
-    const existingList = notificationsByRm.get(targetRm) || [];
-    notificationsByRm.set(targetRm, [notification, ...existingList].slice(0, 40));
-
-    // Optional relay to FCM HTTP legacy endpoint if FCM_SERVER_KEY is configured on server env
-    const fcmServerKey = process.env.FCM_SERVER_KEY;
-    const realFcmTokens = registeredTokens
-      .filter((t) => t.mode === 'fcm_web_push' && !t.token.startsWith('fcm_sse_'))
-      .map((t) => t.token);
-
-    if (fcmServerKey && realFcmTokens.length > 0) {
-      try {
-        await fetch('https://fcm.googleapis.com/fcm/send', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `key=${fcmServerKey}`
-          },
-          body: JSON.stringify({
-            registration_ids: realFcmTokens,
-            notification: {
-              title: notification.title,
-              body: notification.body,
-              icon: '/pwa-192x192.png'
-            },
-            data: {
-              id: notification.id,
-              type: notification.type,
-              no_rm: notification.no_rm,
-              poli: notification.poli || '',
-              nomor_antrian: notification.nomor_antrian || '',
-              lab_order_id: notification.lab_order_id || '',
-              url: notification.type === 'lab_ready' ? '/mobile?tab=hasil' : '/mobile?tab=beranda'
-            }
-          })
-        });
-      } catch (err) {
-        console.warn('[FCM Relay] External FCM HTTP relay skipped:', err);
-      }
-    }
+    await updatePatientPortalState(targetRm, (current) => {
+      current.notifications = [notification, ...current.notifications].slice(0, 40);
+    });
 
     // Real-time SSE broadcast to all connected mobile tabs/PWAs of this patient
     const listeners = sseClientsByRm.get(targetRm);
@@ -374,7 +404,7 @@ export function registerPatientPortalRoutes(
 
     return {
       deliveredSse,
-      fcmTargets: realFcmTokens.length,
+      fcmTargets: 0,
       notification
     };
   }
@@ -415,7 +445,7 @@ export function registerPatientPortalRoutes(
       (a) => normalizeRm(a.no_rm) === targetRm
     );
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = jakartaDate();
 
     // If patient is from core or rich and has no active appointment yet, construct realistic active/latest outpatient queue snapshot
     const activeQueues =
@@ -675,9 +705,14 @@ export function registerPatientPortalRoutes(
 
   // 1. Public Hospital Catalog (Doctors, Poliklinik, Live Queue Snapshot, Demo Quick Check Samples)
   app.get('/api/public/hospital-catalog', (req, res) => {
+    const today = jakartaDate();
     const doctors = SEMUA_DOKTER.map((doc) => {
-      const boost = doctorServedBoost.get(doc.id) || 0;
-      const served = (doc.pasien_terlayani || 0) + boost;
+      const visitsToday = appointmentsStore.filter((appointment) =>
+        appointment.dokter === doc.nama &&
+        appointment.tanggal === today &&
+        !/^(?:dibatalkan|batal|cancelled)$/i.test(appointment.status)
+      );
+      const served = visitsToday.filter((appointment) => appointment.status === 'Selesai').length;
       const quota = doc.kuota || 30;
       return {
         id: doc.id,
@@ -695,7 +730,7 @@ export function registerPatientPortalRoutes(
         status_jaga: doc.status_jaga,
         status: doc.status,
         pasien_terlayani: served,
-        kuota_tersisa: Math.max(0, quota - served)
+        kuota_tersisa: Math.max(0, quota - visitsToday.length)
       };
     });
 
@@ -821,7 +856,7 @@ export function registerPatientPortalRoutes(
   });
 
   // 2. Patient Verification via No. RM + Tanggal Lahir
-  app.post('/api/patient/verify', (req, res) => {
+  app.post('/api/patient/verify', async (req, res) => {
     if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
       return res.status(503).json({
         success: false,
@@ -869,6 +904,7 @@ export function registerPatientPortalRoutes(
 
       const session = issueSession(targetRm, 'rm_dob');
       setPatientSessionCookie(res, session.token);
+      await loadPatientPortalState(targetRm);
       const dossier = buildDossier(targetRm, 'rm_dob');
 
       createAuditLog?.({
@@ -888,15 +924,16 @@ export function registerPatientPortalRoutes(
         dossier
       });
     } catch (err: any) {
+      console.error('[PatientPortal] Patient verification failed.', safeErrorDetails(err));
       return res.status(500).json({
         success: false,
-        message: err?.message || 'Gagal memverifikasi data pasien.'
+        message: 'Gagal memverifikasi data pasien.'
       });
     }
   });
 
   // 3. Google Sign-In Session & Account Linking for Mobile Patient App
-  app.post('/api/patient/google-session', (req, res) => {
+  app.post('/api/patient/google-session', async (req, res) => {
     if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
       return res.status(503).json({
         success: false,
@@ -951,6 +988,7 @@ export function registerPatientPortalRoutes(
 
       const session = issueSession(linkedRm, 'google', normalizedEmail);
       setPatientSessionCookie(res, session.token);
+      await loadPatientPortalState(linkedRm);
       const dossier = buildDossier(linkedRm, 'google', normalizedEmail);
 
       return res.json({
@@ -961,9 +999,10 @@ export function registerPatientPortalRoutes(
         dossier
       });
     } catch (err: any) {
+      console.error('[PatientPortal] Google session failed.', safeErrorDetails(err));
       return res.status(500).json({
         success: false,
-        message: err?.message || 'Gagal menghubungkan sesi Google pasien.'
+        message: 'Gagal menghubungkan sesi Google pasien.'
       });
     }
   });
@@ -989,7 +1028,7 @@ export function registerPatientPortalRoutes(
     return res.status(204).end();
   });
 
-  app.get('/api/patient/dossier', (req, res) => {
+  app.get('/api/patient/dossier', async (req, res) => {
     const session = resolveSessionFromReq(req);
     if (!session) {
       return res.status(401).json({
@@ -998,6 +1037,12 @@ export function registerPatientPortalRoutes(
       });
     }
 
+    try {
+      await loadPatientPortalState(session.no_rm);
+    } catch (error) {
+      console.error('[PatientPortal] Could not load patient dossier state.', safeErrorDetails(error));
+      return res.status(503).json({ success: false, code: 'PATIENT_DATA_UNAVAILABLE' });
+    }
     const dossier = buildDossier(session.no_rm, session.authMethod, session.email);
     if (!dossier) {
       return res.status(404).json({
@@ -1013,16 +1058,33 @@ export function registerPatientPortalRoutes(
   });
 
   // 5. Public & Mobile Patient Online Appointment Booking
-  app.post('/api/patient/appointments', (req, res) => {
+  app.post('/api/patient/appointments', async (req, res) => {
     try {
       if (!isSecurePatientQrConfigured()) {
         return res.status(503).json({ success: false, code: 'QR_SECRET_NOT_CONFIGURED' });
       }
+      const { turnstileToken } = req.body || {};
+      if (typeof turnstileToken !== 'string' || turnstileToken.length === 0 || turnstileToken.length > 4096) {
+        return res.status(400).json({ success: false, code: 'TURNSTILE_REQUIRED' });
+      }
+      let verified: boolean;
+      try {
+        verified = await verifyTurnstileToken(turnstileToken, clientIp(req), 'patient_booking');
+      } catch (error) {
+        if (error instanceof TurnstileNotConfiguredError) {
+          return res.status(503).json({ success: false, code: 'TURNSTILE_NOT_CONFIGURED' });
+        }
+        console.error('[PatientPortal] Turnstile verification failed.', safeErrorDetails(error));
+        return res.status(502).json({ success: false, code: 'TURNSTILE_VERIFICATION_FAILED' });
+      }
+      if (!verified) return res.status(403).json({ success: false, code: 'TURNSTILE_INVALID' });
+
       const {
         nama,
         no_rm,
         tanggal_lahir,
         nik,
+        jenis_kelamin,
         no_hp,
         poli_id,
         poli_nama,
@@ -1048,7 +1110,7 @@ export function registerPatientPortalRoutes(
       }
 
       const targetDate = tanggal;
-      if (targetDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })) {
+      if (targetDate < jakartaDate()) {
         return res.status(400).json({ success: false, message: 'Tanggal kunjungan tidak boleh berada di masa lalu.' });
       }
       const targetDateEnd = Date.parse(`${targetDate}T23:59:59.999Z`);
@@ -1057,10 +1119,13 @@ export function registerPatientPortalRoutes(
         return res.status(400).json({ success: false, message: 'Pendaftaran hanya dapat dibuat hingga 1 tahun ke depan.' });
       }
       // Kuota dihitung per dokter per tanggal; jumlah terlayani hari ini hanya berlaku untuk hari ini.
-      const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
-      const boostKey = `${doctor.id}:${targetDate}`;
-      const served = (targetDate === today ? doctor.pasien_terlayani || 0 : 0) + (doctorServedBoost.get(boostKey) || 0);
-      if (served >= (doctor.kuota || 30)) {
+      const today = jakartaDate();
+      const bookedForDoctor = appointmentsStore.filter((appointment) =>
+        appointment.dokter === doctor.nama &&
+        appointment.tanggal === targetDate &&
+        !/^(?:dibatalkan|batal|cancelled)$/i.test(appointment.status)
+      ).length;
+      if (bookedForDoctor >= (doctor.kuota || 30)) {
         return res.status(409).json({ success: false, message: 'Kuota dokter untuk jadwal tersebut telah penuh.' });
       }
 
@@ -1069,6 +1134,7 @@ export function registerPatientPortalRoutes(
       const normalizedDob = normalizeDob(tanggal_lahir || '');
       const phone = typeof no_hp === 'string' ? no_hp.trim() : '';
       const suppliedNik = typeof nik === 'string' ? nik.trim() : '';
+      const sex = jenis_kelamin === 'L' || jenis_kelamin === 'P' ? jenis_kelamin : null;
       if (resolvedName.length > 120 || phone.length > 24 ||
           !/^[+0-9][0-9+\s().-]{7,23}$/.test(phone) ||
           (suppliedNik && !/^\d{16}$/.test(suppliedNik)) ||
@@ -1087,8 +1153,11 @@ export function registerPatientPortalRoutes(
         }
         patientName = core?.nama || rich?.nama || 'Pasien Terdaftar';
       } else {
-        if (resolvedName.length < 2 || !isValidIsoDate(normalizedDob) || !phone) {
-          return res.status(400).json({ success: false, message: 'Nama, tanggal lahir valid, dan nomor telepon wajib untuk pasien baru.' });
+        if (resolvedName.length < 2 || !isValidIsoDate(normalizedDob) || !phone || !sex) {
+          return res.status(400).json({ success: false, message: 'Nama, tanggal lahir valid, jenis kelamin, dan nomor telepon wajib untuk pasien baru.' });
+        }
+        if (suppliedNik && patientsStore.some((patient) => patient.nik === suppliedNik)) {
+          return res.status(409).json({ success: false, code: 'DUPLICATE_NIK' });
         }
         resolvedRm = nextRmNumber(patientsStore);
         patientsStore.unshift({
@@ -1097,7 +1166,7 @@ export function registerPatientPortalRoutes(
           nik: suppliedNik,
           nama: resolvedName,
           tanggal_lahir: normalizedDob,
-          jenis_kelamin: 'L',
+          jenis_kelamin: sex,
           alamat: 'Pendaftaran Online Portal MYITARU',
           no_hp: phone,
           golongan_darah: '',
@@ -1154,8 +1223,6 @@ export function registerPatientPortalRoutes(
       });
       appointmentsStore.unshift(newApt);
 
-      doctorServedBoost.set(boostKey, (doctorServedBoost.get(boostKey) || 0) + 1);
-
       createAuditLog?.({
         user: resolvedName,
         role: 'Pasien Portal',
@@ -1172,7 +1239,7 @@ export function registerPatientPortalRoutes(
         booking: {
           kode_booking: `BK-${newApt.id.slice(4, 12).toUpperCase()}`,
           no_rm: resolvedRm,
-          nama: patientName,
+          nama: maskPatientName(patientName),
           nomor_antrian: nomorAntrian,
           poli: poliObj.nama,
           dokter: doctor.nama,
@@ -1184,13 +1251,13 @@ export function registerPatientPortalRoutes(
       });
     } catch (err) {
       // Detail error hanya di log server; pesan internal tidak dikirim ke pengunjung publik.
-      console.error('[PatientPortal] Booking failed:', err);
+      console.error('[PatientPortal] Booking failed.', safeErrorDetails(err));
       return res.status(500).json({ success: false, message: 'Gagal memproses pendaftaran janji temu.' });
     }
   });
 
   // 6. Register or Update Patient FCM Device Token & Notification Preferences
-  app.post('/api/patient/fcm-token', (req, res) => {
+  app.post('/api/patient/fcm-token', async (req, res) => {
     const session = resolveSessionFromReq(req);
     if (!session) {
       return res.status(401).json({
@@ -1215,7 +1282,6 @@ export function registerPatientPortalRoutes(
     }
 
     const targetRm = normalizeRm(session.no_rm);
-    const currentTokens = fcmTokensByRm.get(targetRm) || [];
     const updatedRecord: ServerFcmTokenRecord = {
       token: fcmToken.slice(0, 512),
       no_rm: targetRm,
@@ -1227,74 +1293,87 @@ export function registerPatientPortalRoutes(
       updatedAt: new Date().toISOString()
     };
 
-    const filtered = currentTokens.filter((t) => t.token !== updatedRecord.token);
-    fcmTokensByRm.set(targetRm, [updatedRecord, ...filtered].slice(0, 10));
-
-    return res.json({
-      success: true,
-      record: updatedRecord
-    });
+    try {
+      await updatePatientPortalState(targetRm, (state) => {
+        const filtered = state.fcmTokens.filter((token) => token.token !== updatedRecord.token);
+        state.fcmTokens = [updatedRecord, ...filtered].slice(0, 10);
+      });
+      return res.json({ success: true, record: updatedRecord });
+    } catch (error) {
+      console.error('[PatientPortal] Could not save device token.', safeErrorDetails(error));
+      return res.status(503).json({ success: false, code: 'PATIENT_DATA_UNAVAILABLE' });
+    }
   });
 
   // 7. Deactivate FCM Device Token on Patient Logout
-  app.delete('/api/patient/fcm-token', (req, res) => {
+  app.delete('/api/patient/fcm-token', async (req, res) => {
     const session = resolveSessionFromReq(req);
     if (!session) {
       return res.status(401).json({ success: false, message: 'Sesi pasien tidak valid.' });
     }
     const targetRm = normalizeRm(session.no_rm);
     const { token: fcmToken } = req.body || {};
-    const currentTokens = fcmTokensByRm.get(targetRm) || [];
-    const nextTokens = fcmToken
-      ? currentTokens.map((t) => (t.token === fcmToken ? { ...t, active: false } : t))
-      : currentTokens.map((t) => ({ ...t, active: false }));
-    fcmTokensByRm.set(targetRm, nextTokens);
-    return res.json({ success: true });
+    try {
+      await updatePatientPortalState(targetRm, (state) => {
+        state.fcmTokens = fcmToken
+          ? state.fcmTokens.map((token) => (token.token === fcmToken ? { ...token, active: false } : token))
+          : state.fcmTokens.map((token) => ({ ...token, active: false }));
+      });
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('[PatientPortal] Could not deactivate device token.', safeErrorDetails(error));
+      return res.status(503).json({ success: false, code: 'PATIENT_DATA_UNAVAILABLE' });
+    }
   });
 
   // 8. List Patient Real-Time Notifications & Active Preferences
-  app.get('/api/patient/notifications', (req, res) => {
+  app.get('/api/patient/notifications', async (req, res) => {
     const session = resolveSessionFromReq(req);
     if (!session) {
       return res.status(401).json({ success: false, message: 'Sesi pasien tidak valid.' });
     }
     const targetRm = normalizeRm(session.no_rm);
-    const notifications = notificationsByRm.get(targetRm) || [];
-    const tokens = (fcmTokensByRm.get(targetRm) || []).filter((t) => t.active);
-
-    return res.json({
-      success: true,
-      notifications,
-      unreadCount: notifications.filter((n) => !n.read).length,
-      registeredDevices: tokens.length,
-      preferences: {
-        queueAlertsEnabled: tokens[0]?.queueAlertsEnabled ?? true,
-        labAlertsEnabled: tokens[0]?.labAlertsEnabled ?? true
-      }
-    });
+    try {
+      const state = await loadPatientPortalState(targetRm);
+      const tokens = state.fcmTokens.filter((token) => token.active);
+      return res.json({
+        success: true,
+        notifications: state.notifications,
+        unreadCount: state.notifications.filter((notification) => !notification.read).length,
+        registeredDevices: tokens.length,
+        preferences: {
+          queueAlertsEnabled: tokens[0]?.queueAlertsEnabled ?? true,
+          labAlertsEnabled: tokens[0]?.labAlertsEnabled ?? true
+        }
+      });
+    } catch (error) {
+      console.error('[PatientPortal] Could not load notifications.', safeErrorDetails(error));
+      return res.status(503).json({ success: false, code: 'PATIENT_DATA_UNAVAILABLE' });
+    }
   });
 
   // 9. Mark Patient Notification(s) Read
-  app.post('/api/patient/notifications/read', (req, res) => {
+  app.post('/api/patient/notifications/read', async (req, res) => {
     const session = resolveSessionFromReq(req);
     if (!session) {
       return res.status(401).json({ success: false, message: 'Sesi pasien tidak valid.' });
     }
     const targetRm = normalizeRm(session.no_rm);
     const { id, markAll } = req.body || {};
-    const current = notificationsByRm.get(targetRm) || [];
-    const updated = current.map((n) => {
-      if (markAll || (id && n.id === id)) {
-        return { ...n, read: true };
-      }
-      return n;
-    });
-    notificationsByRm.set(targetRm, updated);
-
-    return res.json({
-      success: true,
-      unreadCount: updated.filter((n) => !n.read).length
-    });
+    try {
+      const state = await updatePatientPortalState(targetRm, (current) => {
+        current.notifications = current.notifications.map((notification) =>
+          markAll || (id && notification.id === id) ? { ...notification, read: true } : notification
+        );
+      });
+      return res.json({
+        success: true,
+        unreadCount: state.notifications.filter((notification) => !notification.read).length
+      });
+    } catch (error) {
+      console.error('[PatientPortal] Could not save notification read state.', safeErrorDetails(error));
+      return res.status(503).json({ success: false, code: 'PATIENT_DATA_UNAVAILABLE' });
+    }
   });
 
   // 10. Real-Time SSE Notification Stream for PatientMobileApp
@@ -1333,7 +1412,7 @@ export function registerPatientPortalRoutes(
   });
 
   // Helper to apply queue call or lab ready state into backend stores
-  function applyClinicalEventToStores(params: {
+  async function applyClinicalEventToStores(params: {
     no_rm: string;
     type: 'queue_call' | 'lab_ready';
     nomor_antrian?: string;
@@ -1343,10 +1422,10 @@ export function registerPatientPortalRoutes(
     pemeriksaan?: string;
     hasil?: string;
     loinc?: string;
-  }) {
+  }): Promise<{ title: string; body: string; poli?: string; nomor_antrian?: string; lab_order_id?: string }> {
     const targetRm = normalizeRm(params.no_rm);
     const dossier = buildDossier(targetRm, 'rm_dob');
-    const today = new Date().toISOString().split('T')[0];
+    const today = jakartaDate();
 
     if (params.type === 'queue_call') {
       const targetApt = appointmentsStore.find((a) => normalizeRm(a.no_rm) === targetRm);
@@ -1391,7 +1470,6 @@ export function registerPatientPortalRoutes(
       params.hasil ||
       'Hasil pemeriksaan laboratorium telah selesai diverifikasi dan ditandatangani secara digital oleh Dokter Sp.PK. Silakan buka tab Hasil Lab & Radiologi.';
 
-    const existingLabs = dynamicLabResultsByRm.get(targetRm) || [];
     const newLabEntry = {
       id: labId,
       jenis: 'Lab',
@@ -1402,7 +1480,12 @@ export function registerPatientPortalRoutes(
       hasil,
       loinc: params.loinc || '58410-2'
     };
-    dynamicLabResultsByRm.set(targetRm, [newLabEntry, ...existingLabs.filter((l) => l.id !== labId)]);
+    await updatePatientPortalState(targetRm, (state) => {
+      state.labRadResults = [
+        newLabEntry,
+        ...state.labRadResults.filter((item) => item.id !== labId)
+      ].slice(0, 100);
+    });
 
     return {
       title: `Hasil Laboratorium Tersedia (${labId})`,
@@ -1428,7 +1511,7 @@ export function registerPatientPortalRoutes(
       });
     }
 
-    const applied = applyClinicalEventToStores({
+    const applied = await applyClinicalEventToStores({
       no_rm: session.no_rm,
       type
     });
@@ -1472,7 +1555,7 @@ export function registerPatientPortalRoutes(
         });
       }
 
-      const applied = applyClinicalEventToStores({
+      const applied = await applyClinicalEventToStores({
         no_rm,
         type,
         nomor_antrian,
@@ -1509,9 +1592,10 @@ export function registerPatientPortalRoutes(
         ...result
       });
     } catch (err: any) {
+      console.error('[PatientPortal] Notification dispatch failed.', safeErrorDetails(err));
       return res.status(500).json({
         success: false,
-        message: err?.message || 'Gagal mengirim notifikasi pasien.'
+        message: 'Gagal mengirim notifikasi pasien.'
       });
     }
   });

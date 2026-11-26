@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { storage } from '../utils/storage';
+import { usesServerPersistence } from '../lib/firestoreService';
 
 export interface AuditLog {
   id: number;
@@ -30,6 +31,11 @@ export function AuditTrailProvider({ children }: { children: React.ReactNode }) 
   const [logs, setLogs] = useState<AuditLog[]>([]);
   
   useEffect(() => {
+    if (usesServerPersistence) {
+      setLogs([]);
+      return;
+    }
+
     const saved = storage.get('audit_logs', null);
     if (saved && Array.isArray(saved) && saved.length > 0) {
       setLogs(saved);

@@ -32,6 +32,8 @@ import {
   Sparkles
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { CloudflareTurnstile } from '../Common/CloudflareTurnstile';
+import { jakartaDate } from '../../utils/jakartaDate';
 import { useAuth } from '../../contexts/AuthContext';
 import { auth } from '../../lib/firebase';
 import {
@@ -177,9 +179,11 @@ export const PatientMobileApp: React.FC = () => {
   const [docQuery, setDocQuery] = useState('');
   const [selectedPoliId, setSelectedPoliId] = useState('ALL');
   const [bookingDoc, setBookingDoc] = useState<(typeof fallbackDoctors)[number] | null>(null);
-  const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bookingDate, setBookingDate] = useState(jakartaDate());
   const [bookingPenjamin, setBookingPenjamin] = useState('Umum / Mandiri');
   const [bookingKeluhan, setBookingKeluhan] = useState('');
+  const [bookingTurnstileToken, setBookingTurnstileToken] = useState('');
+  const [bookingTurnstileGeneration, setBookingTurnstileGeneration] = useState(0);
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
 
   const unreadCount = useMemo(
@@ -681,6 +685,10 @@ export const PatientMobileApp: React.FC = () => {
   const handleMobileBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookingDoc || !dossier) return;
+    if (!bookingTurnstileToken) {
+      toast.error('Selesaikan verifikasi keamanan sebelum membuat booking.');
+      return;
+    }
     setIsBookingSubmitting(true);
     try {
       const res = await fetch('/api/patient/appointments', {
@@ -691,6 +699,7 @@ export const PatientMobileApp: React.FC = () => {
           nama: dossier.patient.nama,
           tanggal_lahir: dossier.patient.tanggal_lahir,
           no_hp: dossier.patient.no_hp,
+          turnstileToken: bookingTurnstileToken,
           poli_id: bookingDoc.poli_id,
           poli_nama: bookingDoc.poli,
           dokter_id: bookingDoc.id,
@@ -719,6 +728,8 @@ export const PatientMobileApp: React.FC = () => {
       toast.error('Koneksi bermasalah saat membuat janji temu.');
     } finally {
       setIsBookingSubmitting(false);
+      setBookingTurnstileToken('');
+      setBookingTurnstileGeneration((generation) => generation + 1);
     }
   };
 
@@ -1841,6 +1852,15 @@ export const PatientMobileApp: React.FC = () => {
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm outline-none focus:border-[#0B3D91]"
                 />
               </div>
+              <div className="flex justify-center">
+                <CloudflareTurnstile
+                  key={bookingTurnstileGeneration}
+                  action="patient_booking"
+                  onSuccess={setBookingTurnstileToken}
+                  onError={() => setBookingTurnstileToken('')}
+                  onExpire={() => setBookingTurnstileToken('')}
+                />
+              </div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1">Penjamin Biaya</label>
                 <select
@@ -1874,7 +1894,7 @@ export const PatientMobileApp: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isBookingSubmitting}
+                  disabled={isBookingSubmitting || !bookingTurnstileToken}
                   className="py-3 rounded-xl bg-[#0B3D91] text-white font-bold text-xs cursor-pointer disabled:opacity-60 flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle2 className="w-4 h-4" />

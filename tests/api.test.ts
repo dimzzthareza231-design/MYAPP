@@ -12,6 +12,23 @@ process.env.SESSION_SECRET = 'test-secret';
 process.env.NODE_ENV = 'test';
 process.env.ALLOW_INSECURE_DEMO_AUTH = 'true';
 delete process.env.GEMINI_API_KEY;
+const originalFetch = globalThis.fetch;
+const previousTurnstileSecret = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
+const previousTurnstileHostname = process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME;
+process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY = 'test-turnstile-secret';
+process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME = 'turnstile-test.local';
+globalThis.fetch = async (input, init) => {
+  if (String(input) === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
+    const formData = new URLSearchParams(String(init?.body || ''));
+    const token = formData.get('response');
+    return Response.json({
+      success: token === 'test-booking-token' || token === 'wrong-action-token',
+      hostname: 'turnstile-test.local',
+      action: token === 'test-booking-token' ? 'patient_booking' : 'login'
+    });
+  }
+  return originalFetch(input, init);
+};
 
 type Res = { status: number; body: any; cookie: string };
 let core = '';
@@ -80,7 +97,12 @@ before(async () => {
   pub = await listen(publicApp);
 });
 
-after(() => servers.forEach((s) => s.close()));
+after(() => {
+  servers.forEach((s) => s.close());
+  globalThis.fetch = originalFetch;
+  restoreEnv('CLOUDFLARE_TURNSTILE_SECRET_KEY', previousTurnstileSecret);
+  restoreEnv('CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME', previousTurnstileHostname);
+});
 
 describe('isolasi web publik dan aplikasi inti', () => {
   test('API data pasien inti tidak tersedia di web publik', async () => {
@@ -100,6 +122,10 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.deepEqual(publicResponse.body, { success: false, code: 'NOT_FOUND' });
     assert.deepEqual(coreResponse.body, { success: false, code: 'NOT_FOUND' });
   });
+  test('JSON publik dibatasi 100 KB sebelum handler route berjalan', async () => {
+    const response = await call(pub, 'POST', '/api/not-a-route', { payload: 'x'.repeat(120_000) });
+    assert.equal(response.status, 413);
+  });
   test('security headers mengizinkan kamera dan mikrofon serta menetapkan CSP', async () => {
     const response = await fetch(`${core}/api/v1/health`);
     assert.equal(response.headers.get('permissions-policy'), 'camera=(self), microphone=(self), geolocation=(self)');
@@ -111,6 +137,12 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal(r.body?.status, 'DEGRADED');
     assert.equal(r.body?.storage?.mode, 'memory');
     assert.equal(r.body?.storage?.persistentReady, false);
+  });
+  test('statistik integrasi tidak mengklaim keberhasilan BPJS atau SATUSEHAT tanpa integrasi', async () => {
+    const r = await call(core, 'GET', '/api/v1/system/stats');
+    assert.equal(r.status, 200);
+    assert.equal(r.body?.satusehatSyncRate, null);
+    assert.equal(r.body?.bpjsClaimApprovalRate, null);
   });
 
   test('API operasional menolak sesi kosong dan membatasi akses berbasis role dan MFA', async () => {
@@ -128,6 +160,11 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal(kemarin.body.data.tanggal, '2026-01-01');
     assert.equal(hariIni.body.data.nomor_antrian, 'Q-001');
     assert.equal((await call(core, 'GET', '/api/v1/patients?page=abc&limit=1')).body.page, 1);
+    const firstPage = await call(core, 'GET', '/api/v1/appointments?page=1&limit=1');
+    const secondPage = await call(core, 'GET', '/api/v1/appointments?page=2&limit=1');
+    assert.equal(firstPage.body.data.length, 1);
+    assert.equal(firstPage.body.hasMore, true);
+    assert.notEqual(firstPage.body.data[0].id, secondPage.body.data[0].id);
   });
 
   test('kasir hanya menerima identitas pasien, bukan catatan klinis', async () => {
@@ -150,9 +187,9 @@ describe('isolasi web publik dan aplikasi inti', () => {
     const saved = await call(core, 'PUT', key, { data: '[{"id":"BIL-1"}]' }, 'cashier-token', undefined, { 'If-None-Match': '*' });
     assert.equal(saved.status, 200);
     assert.equal(typeof saved.body.version, 'string');
-    const index = (await call(core, 'GET', '/api/v1/module-data', undefined, 'role:dokter')).body.index;
+    const index = (await call(core, 'GET', '/api/v1/module-data', undefined, 'cashier-token')).body.index;
     assert.equal(index.hospital_billing_ralan, saved.body.version);
-    const fetched = await call(core, 'GET', key, undefined, 'role:apoteker');
+    const fetched = await call(core, 'GET', key, undefined, 'cashier-token');
     assert.equal(fetched.body.data, '[{"id":"BIL-1"}]');
     assert.equal(fetched.body.version, saved.body.version);
     const updated = await call(core, 'PUT', key, { data: '[{"id":"BIL-2"}]' }, 'cashier-token', undefined, { 'If-Match': `"${saved.body.version}"` });
@@ -160,12 +197,23 @@ describe('isolasi web publik dan aplikasi inti', () => {
     const staleWrite = await call(core, 'PUT', key, { data: '[{"id":"BIL-3"}]' }, 'cashier-token', undefined, { 'If-Match': `"${saved.body.version}"` });
     assert.equal(staleWrite.status, 412);
     assert.equal(staleWrite.body.code, 'MODULE_DATA_CONFLICT');
-    assert.equal((await call(core, 'GET', key, undefined, 'role:apoteker')).body.data, '[{"id":"BIL-2"}]');
+    assert.equal((await call(core, 'GET', key, undefined, 'cashier-token')).body.data, '[{"id":"BIL-2"}]');
     const batch = (await call(core, 'GET', '/api/v1/module-data?keys=hospital_billing_ralan,hospital_tidak_ada,rahasia')).body.records;
     assert.deepEqual(Object.keys(batch), ['hospital_billing_ralan']);
     assert.equal(batch.hospital_billing_ralan.version, updated.body.version);
+    const soapKey = '/api/v1/module-data/simrs_rme_soap';
+    const soap = await call(core, 'PUT', soapKey, { data: '{"soap":"catatan klinis"}' }, 'role:dokter', undefined, { 'If-None-Match': '*' });
+    assert.equal(soap.status, 200);
+    assert.equal((await call(core, 'GET', soapKey, undefined, 'cashier-token')).status, 403);
+    assert.equal((await call(core, 'PUT', soapKey, { data: '{"soap":"ditimpa"}' }, 'cashier-token', undefined, { 'If-Match': `"${soap.body.version}"` })).status, 403);
+    const cashierIndex = (await call(core, 'GET', '/api/v1/module-data', undefined, 'cashier-token')).body.index;
+    assert.equal(cashierIndex.simrs_rme_soap, undefined);
+    const cashierBatch = (await call(core, 'GET', '/api/v1/module-data?keys=simrs_rme_soap,hospital_billing_ralan', undefined, 'cashier-token')).body.records;
+    assert.deepEqual(Object.keys(cashierBatch), ['hospital_billing_ralan']);
     assert.equal((await call(core, 'PUT', '/api/v1/module-data/rahasia', { data: 'x' })).status, 400);
-    assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_igd_Penanganan IGD')}`, { data: '[]' }, 'cashier-token', undefined, { 'If-None-Match': '*' })).status, 200);
+    assert.equal((await call(core, 'PUT', '/api/v1/module-data/simrs_satusehat_config', { data: '{"clientSecret":"not-stored"}' }, 'role:super_admin', undefined, { 'If-None-Match': '*' })).status, 400);
+    assert.equal((await call(core, 'GET', '/api/v1/module-data/simrs_satusehat_config', undefined, 'role:super_admin')).status, 400);
+    assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_igd_Penanganan IGD')}`, { data: '[]' }, 'role:dokter', undefined, { 'If-None-Match': '*' })).status, 200);
     assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_a/b')}`, { data: '[]' })).status, 400);
     assert.equal((await call(core, 'PUT', '/api/v1/module-data/hospital_x', { data: 'x' }, 'viewer-token')).status, 403);
     assert.equal((await call(core, 'GET', '/api/v1/module-data', undefined, 'role:it_support')).status, 403);
@@ -178,7 +226,6 @@ describe('isolasi web publik dan aplikasi inti', () => {
     const path = '/api/v1/clinical-records/billings/BIL-API-001';
     const billing = {
       id: 'BIL-API-001',
-      noBilling: 'BIL-RJ-API-001',
       noRm: 'RM-260801-001',
       namaPasien: 'Pasien Uji',
       tipeLayanan: 'Rawat Jalan',
@@ -198,18 +245,48 @@ describe('isolasi web publik dan aplikasi inti', () => {
     const created = await call(core, 'PUT', path, { data: billing }, 'cashier-token', undefined, { 'If-None-Match': '*' });
     assert.equal(created.status, 200);
     const version = created.body.version;
+    const assignedBillingNumber = created.body.data.noBilling as string;
+    assert.match(assignedBillingNumber, /^BIL-[0-9a-f-]{36}$/i);
+    assert.equal(created.body.data.status, 'Belum Lunas');
+    assert.equal(created.body.data.jumlahDibayar, 0);
+    await sharedPersistence.commit([{
+      entity: 'billings',
+      id: 'BIL-API-001',
+      data: Object.fromEntries(Object.entries(created.body.data).reverse())
+    }]);
     const listed = await call(core, 'GET', '/api/v1/clinical-records/billings?page=1&limit=1', undefined, 'cashier-token');
     assert.equal(listed.status, 200);
     assert.equal(listed.body.total, 1);
+    assert.equal(typeof listed.body.collectionVersion, 'string');
     assert.equal(listed.body.data[0].version, version);
+    assert.equal((await call(core, 'GET', '/api/v1/clinical-records/billings?page=1&limit=1',
+      undefined, 'cashier-token', undefined, { 'If-None-Match': `"${listed.body.collectionVersion}"` })).status, 304);
 
-    const invalid = await call(core, 'PUT', path, { data: { ...billing, totalTagihan: -1 } }, 'cashier-token', undefined, { 'If-Match': `"${version}"` });
+    const updated = await call(core, 'PUT', path, { data: { ...billing, noBilling: 'CLIENT-FAKE', totalTagihan: 11000 } }, 'cashier-token', undefined, { 'If-Match': `"${version}"` });
+    assert.equal(updated.body.data.noBilling, assignedBillingNumber);
+    assert.notEqual(updated.body.collectionVersion, listed.body.collectionVersion);
+    const updatedVersion = updated.body.version;
+    const invalid = await call(core, 'PUT', path, { data: { ...billing, totalTagihan: -1 } }, 'cashier-token', undefined, { 'If-Match': `"${updatedVersion}"` });
     assert.equal(invalid.status, 422);
     const stale = await call(core, 'PUT', path, { data: { ...billing, totalTagihan: 12000 } }, 'cashier-token', undefined, { 'If-Match': '"stale"' });
     assert.equal(stale.status, 412);
-    const removed = await call(core, 'DELETE', path, undefined, 'cashier-token', undefined, { 'If-Match': `"${version}"` });
+    const removed = await call(core, 'DELETE', path, undefined, 'cashier-token', undefined, { 'If-Match': `"${updatedVersion}"` });
     assert.equal(removed.status, 200);
-    assert.equal((await call(core, 'GET', '/api/v1/clinical-records/billings', undefined, 'cashier-token')).body.total, 0);
+    const retained = await sharedPersistence.get<Record<string, unknown>>('billings', 'BIL-API-001');
+    assert.equal(typeof retained?.deletedAt, 'string');
+    assert.equal(retained?.deletedBy, 'cashier@test.local');
+    assert.equal(retained?.deletedRole, 'kasir');
+    const afterDelete = await call(core, 'GET', '/api/v1/clinical-records/billings', undefined, 'cashier-token');
+    assert.deepEqual(afterDelete.body.data, []);
+    assert.deepEqual(afterDelete.body.deletedIds, ['BIL-API-001']);
+    assert.equal((await call(core, 'PUT', path, { data: billing }, 'cashier-token', undefined,
+      { 'If-Match': `"${updatedVersion}"` })).status, 410);
+
+    const largePath = '/api/v1/clinical-records/billings/BIL-API-LARGE';
+    const largeBilling = { ...billing, id: 'BIL-API-LARGE', items: [{ description: 'x'.repeat(120_000) }] };
+    const large = await call(core, 'PUT', largePath, { data: largeBilling }, 'cashier-token', undefined, { 'If-None-Match': '*' });
+    assert.equal(large.status, 200);
+    assert.equal((await call(core, 'DELETE', largePath, undefined, 'cashier-token', undefined, { 'If-Match': `"${large.body.version}"` })).status, 200);
     assert.equal((await call(core, 'GET', '/api/v1/clinical-records/lab-orders', undefined, 'cashier-token')).status, 403);
 
     const radiology = {
@@ -396,18 +473,45 @@ describe('web publik pasien', () => {
     const cat = (await call(pub, 'GET', '/api/public/hospital-catalog')).body;
     const d = (cat.doctors ?? cat.data.doctors)[0];
     const appointmentDate = new Date().toISOString().slice(0, 10);
+    const missingTurnstile = await call(pub, 'POST', '/api/patient/appointments', {
+      poli_id: d.poli_id, dokter_id: d.id, tanggal: appointmentDate
+    });
+    assert.equal(missingTurnstile.body?.code, 'TURNSTILE_REQUIRED');
+    const wrongAction = await call(pub, 'POST', '/api/patient/appointments', {
+      turnstileToken: 'wrong-action-token'
+    });
+    assert.equal(wrongAction.status, 403);
+    assert.equal(wrongAction.body?.code, 'TURNSTILE_INVALID');
     const r = await call(pub, 'POST', '/api/patient/appointments', {
       nama: 'Pasien Uji', tanggal_lahir: '1990-05-15', no_hp: '081200000000',
       poli_id: d.poli_id, poli_nama: d.poli, dokter_id: d.id, dokter_nama: d.nama,
       tanggal: appointmentDate, jam_praktek: d.jam, penjamin: 'Umum', keluhan: 'uji',
+      nik: '3171000000000001', jenis_kelamin: 'P', turnstileToken: 'test-booking-token'
     });
     assert.equal(r.status, 201);
     assert.ok(r.body?.booking?.nomor_antrian);
     assert.match(r.body?.booking?.kode_booking, /^BK-[0-9A-F]{8}$/);
     assert.match(r.body?.booking?.qr_value, /^MYITARU1\./);
     assert.equal(r.body.booking.qr_value.includes(r.body.booking.no_rm), false);
+    assert.notEqual(r.body.booking.nama, 'Pasien Uji');
     assert.equal(r.body?.token, undefined);
     assert.equal(r.body?.dossier, undefined);
+    const registeredPatient = await call(core, 'GET', `/api/v1/patients/${encodeURIComponent(r.body.booking.no_rm)}`);
+    assert.equal(registeredPatient.body?.data?.nik, '3171000000000001');
+    assert.equal(registeredPatient.body?.data?.jenis_kelamin, 'P');
+    const duplicateNik = await call(pub, 'POST', '/api/patient/appointments', {
+      nama: 'Pasien Kedua',
+      tanggal_lahir: '1991-04-04',
+      jenis_kelamin: 'L',
+      nik: '3171000000000001',
+      no_hp: '081200000009',
+      poli_id: d.poli_id,
+      dokter_id: d.id,
+      tanggal: appointmentDate,
+      turnstileToken: 'test-booking-token'
+    });
+    assert.equal(duplicateNik.status, 409);
+    assert.equal(duplicateNik.body?.code, 'DUPLICATE_NIK');
     assert.equal((await call(core, 'POST', '/api/v1/patient-qr/redeem', {
       token: 'not-a-secure-qr'
     })).status, 400);
@@ -446,7 +550,9 @@ describe('web publik pasien', () => {
       dokter_nama: doctor.nama,
       tanggal: futureDate,
       jam_praktek: doctor.jam,
-      penjamin: 'Umum'
+      penjamin: 'Umum',
+      jenis_kelamin: 'L',
+      turnstileToken: 'test-booking-token'
     });
     assert.equal(booking.status, 201);
 
@@ -476,6 +582,13 @@ describe('web publik pasien', () => {
 });
 
 describe('fitur AI (mesin aturan)', () => {
+  test('obat null ditolak dan daftar obat dibatasi 50 item', async () => {
+    const invalid = await call(core, 'POST', '/api/ai/drug-interaction', { medications: [null] });
+    assert.equal(invalid.status, 400);
+    const oversized = await call(core, 'POST', '/api/ai/drug-interaction', { medications: Array(51).fill('Paracetamol') });
+    assert.equal(oversized.status, 413);
+  });
+
   test('catatan hipertensi menyarankan ICD-10 I10', async () => {
     const r = await call(core, 'POST', '/api/ai/analyze', { clinicalNote: 'Nyeri dada, tekanan darah 160/100 mmHg, riwayat hipertensi.' });
     assert.equal(r.status, 200);
@@ -531,9 +644,18 @@ describe('validasi transaksi dan layanan produksi', () => {
   });
 
   test('QRIS, backup, dan Turnstile tidak mengklaim sukses tanpa integrasi nyata', async () => {
-    assert.equal((await call(core, 'POST', '/api/v1/billing/qris/callback', { paymentStatus: 'PAID' })).status, 503);
-    assert.equal((await call(core, 'POST', '/api/v1/backup/create')).body?.code, 'BACKUP_NOT_CONFIGURED');
-    assert.equal((await call(core, 'POST', '/api/cloudflare/verify-turnstile', { token: 'CF_TURNSTILE_DEMO' })).status, 503);
+    const secret = process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
+    const hostname = process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME;
+    delete process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY;
+    delete process.env.CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME;
+    try {
+      assert.equal((await call(core, 'POST', '/api/v1/billing/qris/callback', { paymentStatus: 'PAID' })).status, 503);
+      assert.equal((await call(core, 'POST', '/api/v1/backup/create')).body?.code, 'BACKUP_NOT_CONFIGURED');
+      assert.equal((await call(core, 'POST', '/api/cloudflare/verify-turnstile', { token: 'CF_TURNSTILE_DEMO' })).status, 503);
+    } finally {
+      restoreEnv('CLOUDFLARE_TURNSTILE_SECRET_KEY', secret);
+      restoreEnv('CLOUDFLARE_TURNSTILE_EXPECTED_HOSTNAME', hostname);
+    }
   });
 
   test('server menolak startup production selama store masih in-memory', async () => {

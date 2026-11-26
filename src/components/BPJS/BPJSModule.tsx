@@ -21,6 +21,7 @@ import { PCareKunjungan } from './Tabs/PCareKunjungan';
 import { AntreanOnlineBPJS } from './Tabs/AntreanOnlineBPJS';
 import { ICareJKN } from './Tabs/ICareJKN';
 import { GoogleMapsHealthLocator } from '../Common/GoogleMapsHealthLocator';
+import { usesServerPersistence } from '../../lib/firestoreService';
 
 export function BPJSModule() {
   const outletCtx = useOutletContext<{ activeTab?: string }>();
@@ -68,6 +69,15 @@ export function BPJSModule() {
   ];
 
   const renderContent = () => {
+    if (usesServerPersistence && activeTab !== 'faskes-maps') {
+      return (
+        <div className="m-6 rounded-xl border border-amber-300 bg-amber-50 p-6 text-amber-950">
+          <h1 className="text-lg font-bold">Integrasi BPJS belum dikonfigurasi</h1>
+          <p className="mt-2 text-sm">Data peserta, SEP, dan klaim tidak tersedia sampai koneksi resmi V-Claim/P-Care aktif.</p>
+        </div>
+      );
+    }
+
     switch(activeTab) {
       case 'dashboard': return <DashboardBPJS onNavigate={setActiveTab} />;
       case 'peserta': return <DataPesertaBPJS />;

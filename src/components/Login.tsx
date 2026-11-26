@@ -148,7 +148,11 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
   useEffect(() => {
     const g = new URLSearchParams(window.location.search).get('google');
     if (!g) return;
-    toast.error(g === 'tidak-terdaftar' ? 'Email Google belum terdaftar sebagai staf.' : 'Login Google gagal atau belum diaktifkan.');
+    toast.error(g === 'tidak-terdaftar'
+      ? 'Email Google belum terdaftar sebagai staf.'
+      : g === 'mfa-wajib'
+        ? 'Gunakan login password dan kode TOTP untuk role sensitif.'
+        : 'Login Google gagal atau belum diaktifkan.');
     window.history.replaceState(null, '', window.location.pathname);
   }, []);
 

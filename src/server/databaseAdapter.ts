@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore, type DocumentData, type Firestore } from 'firebase-admin/firestore';
 import { createPool, type Pool, type PoolConnection } from 'mysql2/promise';
+import { safeErrorDetails } from './scrubPhi';
 
 export const STORAGE_MODES = ['mysql', 'firebase', 'hybrid', 'memory', 'd1', 'firestore'] as const;
 export type StorageMode = typeof STORAGE_MODES[number];
@@ -164,7 +165,8 @@ function decodePayload(value: unknown): unknown {
 }
 
 function errorText(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
+  const { type, message } = safeErrorDetails(error);
+  return `${type}: ${message}`.slice(0, 1000);
 }
 
 function isDuplicateKeyError(error: unknown): boolean {

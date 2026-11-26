@@ -36,10 +36,15 @@ test('clinical storage sync protects legacy data and writes versioned changes', 
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const storage = new TestStorage();
   const requests: Array<{ url: string; method: string; headers: Headers; body?: string }> = [];
+  let clinicalReadCount = 0;
+  let clinicalCollectionVersion = 'clinical-collection-v1';
   const serverRecord = { id: 'BIL-SYNC-001', noBilling: 'BIL-SYNC-001', totalTagihan: 10000 };
   const legacyRecord = { id: 'BIL-DEMO-001', noBilling: 'BIL-DEMO-001', totalTagihan: 5000 };
   const newRecord = { id: 'BIL-REAL-001', noBilling: 'BIL-REAL-001', totalTagihan: 12000 };
-  let serverRecords = [{ id: serverRecord.id, data: serverRecord, version: 'billing-v1' }];
+  let serverRecords: Array<{ id: string; data: Record<string, unknown>; version: string }> = [
+    { id: serverRecord.id, data: serverRecord, version: 'billing-v1' }
+  ];
+  let forceModuleConflict = false;
 
   Object.defineProperty(globalThis, 'Storage', { configurable: true, value: TestStorage });
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
@@ -57,8 +62,25 @@ test('clinical storage sync protects legacy data and writes versioned changes', 
         headers: new Headers(init?.headers),
         body: init?.body === undefined ? undefined : String(init.body)
       });
-      if (requestUrl.includes('/clinical-records/billings?')) {
-        return Response.json({ data: serverRecords, totalPages: serverRecords.length ? 1 : 0 });
+      if (requestUrl.endsWith('/module-data/hospital_conflict_test') && method === 'PUT' && forceModuleConflict) {
+        return new Response(JSON.stringify({ code: 'MODULE_DATA_CONFLICT', version: 'module-v2' }), { status: 412 });
+      }
+      if (requestUrl.endsWith('/module-data/hospital_conflict_test') && method === 'GET') {
+        return Response.json({ data: 'server-latest', version: 'module-v2' });
+      }
+      if (requestUrl.includes('/api/v1/clinical-records/') && method === 'GET') {
+        if (new Headers(init?.headers).get('if-none-match') === `"${clinicalCollectionVersion}"`) {
+          return new Response(null, { status: 304 });
+        }
+        clinicalReadCount += 1;
+        const isBillings = requestUrl.includes('/clinical-records/billings?');
+        const billings = isBillings ? serverRecords : [];
+        return Response.json({
+          data: billings.filter(({ data }) => typeof data.deletedAt !== 'string'),
+          deletedIds: billings.filter(({ data }) => typeof data.deletedAt === 'string').map(({ id }) => id),
+          totalPages: isBillings && billings.length ? 1 : 0,
+          collectionVersion: clinicalCollectionVersion
+        });
       }
       if (requestUrl.includes('/api/v1/clinical-records/') && method === 'PUT') {
         return Response.json({ success: true, version: 'billing-v2' });
@@ -70,10 +92,23 @@ test('clinical storage sync protects legacy data and writes versioned changes', 
   try {
     const sync = await import('../src/lib/moduleSync');
     assert.equal(sync.isSyncedKey('hospital_clinical_record_versions'), false);
+    assert.equal(sync.isSyncedKey('hospital_clinical_collection_versions'), false);
     assert.equal(sync.isSyncedKey('hospital_clinical_record_deferred'), false);
+    assert.equal(sync.isSyncedKey('simrs_satusehat_config'), false);
+    assert.equal(sync.isSyncedKey('bpjs_klaim'), false);
+    assert.equal(sync.isSyncedKey('simrs_bpjs_claims'), false);
+    assert.equal(sync.isSyncedKey('hospital_pharmacy_stocks'), false);
+    assert.equal(sync.isSyncedKey('hospital_pharmacy_prescriptions'), true);
+    assert.equal(sync.isSyncedKey('hospital_module_conflict_simrs_rme_soap'), false);
 
     await sync.startModuleSync();
     assert.deepEqual(JSON.parse(storage.getItem('hospital_finance_billings') || 'null'), [serverRecord]);
+    const readsAfterInitialSync = clinicalReadCount;
+    await sync.pullModuleData();
+    assert.equal(clinicalReadCount, readsAfterInitialSync);
+    assert.ok(requests.some((request) =>
+      request.url.includes('/clinical-records/billings?') && request.headers.get('if-none-match') === `"${clinicalCollectionVersion}"`
+    ));
     storage.setItem('hospital_finance_billings', JSON.stringify([{ ...serverRecord, totalTagihan: 12000 }]));
     await sync.stopModuleSync(true);
 
@@ -83,6 +118,15 @@ test('clinical storage sync protects legacy data and writes versioned changes', 
     assert.ok(update);
     assert.equal(update.headers.get('if-match'), '"billing-v1"');
     assert.equal(requests.some((request) => request.url.includes('/module-data/hospital_finance_billings')), false);
+
+    clinicalCollectionVersion = 'clinical-collection-v2';
+    serverRecords = [{
+      id: serverRecord.id,
+      data: { ...serverRecord, deletedAt: '2026-04-09T00:00:00.000Z' },
+      version: 'billing-v2'
+    }];
+    await sync.pullModuleData();
+    assert.deepEqual(JSON.parse(storage.getItem('hospital_finance_billings') || 'null'), []);
 
     storage.clear();
     requests.length = 0;
@@ -108,6 +152,24 @@ test('clinical storage sync protects legacy data and writes versioned changes', 
       request.url.endsWith('/clinical-records/billings/BIL-REAL-002') && request.method === 'PUT'
     );
     assert.ok(firstRealWrite);
+
+    storage.clear();
+    requests.length = 0;
+    await sync.startModuleSync();
+    storage.setItem('simrs_satusehat_config', '{"clientSecret":"never-sync"}');
+    assert.equal(requests.some((request) => request.url.includes('simrs_satusehat_config')), false);
+
+    forceModuleConflict = true;
+    storage.setItem('hospital_conflict_test', 'local draft');
+    await new Promise((resolve) => setTimeout(resolve, 1700));
+    assert.equal(storage.getItem('hospital_conflict_test'), 'server-latest');
+    assert.equal(storage.getItem('hospital_module_conflict_hospital_conflict_test'), 'local draft');
+    storage.setItem('hospital_conflict_test', 'newer local draft');
+    assert.equal(storage.getItem('hospital_conflict_test'), 'server-latest');
+    assert.equal(storage.getItem('hospital_module_conflict_hospital_conflict_test'), 'newer local draft');
+    assert.equal(requests.filter((request) =>
+      request.url.endsWith('/module-data/hospital_conflict_test') && request.method === 'PUT'
+    ).length, 1);
   } finally {
     const sync = await import('../src/lib/moduleSync');
     await sync.stopModuleSync(false);

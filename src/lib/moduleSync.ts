@@ -4,6 +4,7 @@
 const SYNCED_KEY = /^(hospital_|simrs_|klinik_|bpjs_|myitaru_igd_)/;
 const VERSIONS_KEY = 'hospital_sync_versions';
 const CLINICAL_VERSIONS_KEY = 'hospital_clinical_record_versions';
+const CLINICAL_COLLECTION_VERSIONS_KEY = 'hospital_clinical_collection_versions';
 const CLINICAL_DEFERRED_KEY = 'hospital_clinical_record_deferred';
 const CLINICAL_INITIALIZED_KEY = 'hospital_clinical_sync_initialized';
 const CLINICAL_KEYS: Record<string, string> = {
@@ -15,12 +16,18 @@ const CLINICAL_KEYS: Record<string, string> = {
 };
 // Sudah punya API sendiri, data per pengguna, atau preferensi tampilan.
 const EXCLUDED = new Set([
-  VERSIONS_KEY, CLINICAL_VERSIONS_KEY, CLINICAL_DEFERRED_KEY, CLINICAL_INITIALIZED_KEY, 'hospital_pasien', 'hospital_kunjungan', 'hospital_dokter', 'hospital_perawat', 'hospital_settings',
+  VERSIONS_KEY, CLINICAL_VERSIONS_KEY, CLINICAL_COLLECTION_VERSIONS_KEY, CLINICAL_DEFERRED_KEY, CLINICAL_INITIALIZED_KEY, 'hospital_pasien', 'hospital_kunjungan', 'hospital_dokter', 'hospital_perawat', 'hospital_settings',
   'hospital_poli_master', 'simrs_theme', 'hospital_theme', 'simrs_registration_draft'
 ]);
 const MAX_BYTES = 900_000;
 
-export const isSyncedKey = (key: string) => SYNCED_KEY.test(key) && !EXCLUDED.has(key);
+export const isSyncedKey = (key: string) =>
+  SYNCED_KEY.test(key) &&
+  !EXCLUDED.has(key) &&
+  !key.startsWith('hospital_module_conflict_') &&
+  !/^bpjs_|^simrs_bpjs_/i.test(key) &&
+  !(key.startsWith('hospital_pharmacy_') && key !== 'hospital_pharmacy_prescriptions') &&
+  !/_config$/i.test(key);
 const clinicalCollectionForKey = (key: string) => CLINICAL_KEYS[key];
 
 const originalSetItem = Storage.prototype.setItem;
@@ -28,12 +35,51 @@ const originalRemoveItem = Storage.prototype.removeItem;
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const pending = new Set<string>();
 const conflicted = new Set<string>();
+const conflictServerValues = new Map<string, string | null>();
+const retryCounts = new Map<string, number>();
 const clinicalConflicted = new Set<string>();
 let active = false;
 let installed = false;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 
 const url = (key: string) => `/api/v1/module-data/${encodeURIComponent(key)}`;
+const conflictDraftKey = (key: string) => `hospital_module_conflict_${key}`;
+
+function emitModuleConflict(key: string, draftKey?: string, draftPreserved = false) {
+  window.dispatchEvent(new CustomEvent('module-data-conflict', { detail: { key, draftKey, draftPreserved } }));
+}
+
+async function reloadModuleAfterConflict(key: string): Promise<void> {
+  const response = await fetch(url(key), { credentials: 'same-origin' });
+  if (!response.ok && response.status !== 404) throw new Error(`Conflict refresh failed (HTTP ${response.status}).`);
+  const remote = response.ok
+    ? await response.json() as { data: string; version?: string; updatedAt?: string }
+    : null;
+  const remoteValue = remote?.data ?? null;
+  const draftKey = conflictDraftKey(key);
+  const currentLocalValue = localStorage.getItem(key);
+  let draftPreserved = false;
+  try {
+    if (currentLocalValue !== remoteValue) {
+      originalSetItem.call(localStorage, draftKey, currentLocalValue === null
+        ? JSON.stringify({ deleteRequested: true })
+        : currentLocalValue);
+      draftPreserved = true;
+    }
+  } catch (error) {
+    console.error(`[ModuleSync] Could not preserve conflicting local data for ${key}.`, error);
+    throw error;
+  }
+  if (remoteValue === null) originalRemoveItem.call(localStorage, key);
+  else originalSetItem.call(localStorage, key, remoteValue);
+  const versions = readVersions();
+  if (remote?.version || remote?.updatedAt) versions[key] = remote.version || remote.updatedAt!;
+  else delete versions[key];
+  writeVersions(versions);
+  conflictServerValues.set(key, remoteValue);
+  conflicted.add(key);
+  emitModuleConflict(key, draftPreserved ? draftKey : undefined, draftPreserved);
+}
 
 function readVersions(): Record<string, string> {
   try { return JSON.parse(localStorage.getItem(VERSIONS_KEY) || '{}'); } catch { return {}; }
@@ -43,6 +89,7 @@ function writeVersions(versions: Record<string, string>) {
 }
 
 type ClinicalVersions = Record<string, Record<string, string>>;
+type ClinicalCollectionVersions = Record<string, string>;
 type DeferredClinicalRecords = Record<string, Record<string, string>>;
 type ClinicalRecord = { id: string | number; [key: string]: unknown };
 
@@ -52,6 +99,14 @@ function readClinicalVersions(): ClinicalVersions {
 
 function writeClinicalVersions(versions: ClinicalVersions) {
   originalSetItem.call(localStorage, CLINICAL_VERSIONS_KEY, JSON.stringify(versions));
+}
+
+function readClinicalCollectionVersions(): ClinicalCollectionVersions {
+  try { return JSON.parse(localStorage.getItem(CLINICAL_COLLECTION_VERSIONS_KEY) || '{}'); } catch { return {}; }
+}
+
+function writeClinicalCollectionVersions(versions: ClinicalCollectionVersions) {
+  originalSetItem.call(localStorage, CLINICAL_COLLECTION_VERSIONS_KEY, JSON.stringify(versions));
 }
 
 function readDeferredClinicalRecords(): DeferredClinicalRecords {
@@ -97,29 +152,45 @@ function clinicalUrl(collection: string, id?: string | number) {
   return `/api/v1/clinical-records/${collection}${id === undefined ? '' : `/${encodeURIComponent(String(id))}`}`;
 }
 
-async function fetchClinicalCollection(collection: string) {
+async function fetchClinicalCollection(collection: string, knownVersion?: string) {
   const records: Array<{ id: string; data: ClinicalRecord; version: string }> = [];
+  const deletedIds: string[] = [];
+  let collectionVersion: string | undefined;
   let page = 1;
   let hasMore = true;
   do {
-    const response = await fetch(`${clinicalUrl(collection)}?page=${page}&limit=100`, { credentials: 'same-origin' });
+    const response = await fetch(`${clinicalUrl(collection)}?page=${page}&limit=100`, {
+      credentials: 'same-origin',
+      headers: page === 1 && knownVersion ? { 'If-None-Match': `"${knownVersion}"` } : undefined
+    });
+    if (page === 1 && response.status === 304) {
+      return { notModified: true, records: [], version: knownVersion };
+    }
     if (!response.ok) return response;
     const result = await response.json() as {
       data?: Array<{ id: string; data: ClinicalRecord; version: string }>;
       totalPages?: number | null;
       hasMore?: boolean;
+      collectionVersion?: string;
+      deletedIds?: string[];
     };
-    records.push(...(result.data || []));
+    if (page === 1) collectionVersion = result.collectionVersion;
+    for (const record of result.data || []) {
+      if (typeof record.data.deletedAt === 'string') deletedIds.push(record.id);
+      else records.push(record);
+    }
+    deletedIds.push(...(result.deletedIds || []));
     hasMore = typeof result.totalPages === 'number'
       ? page < result.totalPages
       : Boolean(result.hasMore);
     page += 1;
   } while (hasMore);
-  return records;
+  return { notModified: false, records, deletedIds, version: collectionVersion };
 }
 
 async function pushClinicalRecords(key: string): Promise<void> {
   if (clinicalConflicted.has(key)) return;
+  let retryableFailure = false;
   const collection = clinicalCollectionForKey(key);
   if (!collection) return;
   const raw = localStorage.getItem(key);
@@ -161,10 +232,26 @@ async function pushClinicalRecords(key: string): Promise<void> {
     }
     if (!response.ok) {
       console.warn(`[ModuleSync] ${key}/${id} gagal disimpan (HTTP ${response.status}).`);
+      if (response.status === 429 || response.status >= 500) {
+        retryableFailure = true;
+        scheduleRetry(key);
+      }
       continue;
     }
-    const result = await response.json() as { version: string };
+    const result = await response.json() as { version: string; data?: ClinicalRecord };
     collectionVersions[id] = result.version;
+    if (result.data && JSON.stringify(result.data) !== JSON.stringify(record)) {
+      const currentRecords = parseClinicalRecords(key, localStorage.getItem(key));
+      if (currentRecords) {
+        const currentRecord = currentRecords.find((item) => String(item.id) === id);
+        if (currentRecord && JSON.stringify(currentRecord) === JSON.stringify(record)) {
+          originalSetItem.call(localStorage, key, JSON.stringify(currentRecords.map((item) =>
+            String(item.id) === id ? result.data! : item
+          )));
+          window.dispatchEvent(new Event('simrs-interline-sync'));
+        }
+      }
+    }
     delete deferredCollection[id];
     writeClinicalVersions(versions);
     writeDeferredClinicalRecords(deferred);
@@ -199,6 +286,7 @@ async function pushClinicalRecords(key: string): Promise<void> {
   versions[collection] = collectionVersions;
   writeClinicalVersions(versions);
   writeDeferredClinicalRecords(deferred);
+  if (!retryableFailure) retryCounts.delete(key);
 }
 
 async function push(key: string): Promise<void> {
@@ -215,6 +303,9 @@ async function push(key: string): Promise<void> {
   try {
     if (value !== null && new Blob([value]).size > MAX_BYTES) {
       console.warn(`[ModuleSync] ${key} melebihi 900 KB; hanya tersimpan di browser ini.`);
+      window.dispatchEvent(new CustomEvent('module-data-sync-error', {
+        detail: { key, message: 'Data melebihi batas ukuran sinkronisasi; perubahan hanya ada di browser ini.' }
+      }));
       return;
     }
     const versions = readVersions();
@@ -226,27 +317,36 @@ async function push(key: string): Promise<void> {
       ? { method: 'DELETE', credentials: 'same-origin', headers: condition }
       : { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...condition }, body: JSON.stringify({ data: value }) });
     if (response.status === 412) {
-      const conflict = await response.json() as { version?: string | null };
-      if (conflict.version) {
-        versions[key] = conflict.version;
-        writeVersions(versions);
-        } else {
-          delete versions[key];
-          writeVersions(versions);
-      }
+      try {
+        await reloadModuleAfterConflict(key);
+      } catch (error) {
+        const currentLocalValue = localStorage.getItem(key);
+        try {
+          originalSetItem.call(localStorage, conflictDraftKey(key), currentLocalValue ?? JSON.stringify({ deleteRequested: true }));
+        } catch (preserveError) {
+          console.error(`[ModuleSync] Could not preserve conflicting local data for ${key}.`, preserveError);
+        }
+        conflictServerValues.set(key, currentLocalValue);
         conflicted.add(key);
-      window.dispatchEvent(new CustomEvent('module-data-conflict', { detail: { key } }));
+        console.warn(`[ModuleSync] ${key} berubah di server; refresh gagal dan perubahan lokal tetap diblokir.`, error);
+        emitModuleConflict(key, conflictDraftKey(key), true);
+      }
       console.warn(`[ModuleSync] ${key} berubah di server; perubahan lokal belum disimpan.`);
       return;
     }
     if (!response.ok) {
       console.warn(`[ModuleSync] ${key} gagal disimpan ke server (HTTP ${response.status}).`);
+      window.dispatchEvent(new CustomEvent('module-data-sync-error', {
+        detail: { key, message: `Gagal menyinkronkan data modul (HTTP ${response.status}).` }
+      }));
+      if (response.status === 429 || response.status >= 500) scheduleRetry(key);
       return;
     }
     const body = await response.json() as { version?: string; updatedAt?: string };
     if (value === null || !body.version) delete versions[key];
     else versions[key] = body.version;
     writeVersions(versions);
+    retryCounts.delete(key);
   } finally {
     pending.delete(key);
   }
@@ -255,7 +355,31 @@ async function push(key: string): Promise<void> {
 function schedule(key: string) {
   pending.add(key);
   clearTimeout(timers.get(key));
-  timers.set(key, setTimeout(() => void push(key).catch((error) => console.warn('[ModuleSync]', error)), 1500));
+  timers.set(key, setTimeout(() => void push(key).catch((error) => {
+    console.warn('[ModuleSync]', error);
+    window.dispatchEvent(new CustomEvent('module-data-sync-error', {
+      detail: { key, message: 'Gagal menyinkronkan data modul karena koneksi atau server bermasalah.' }
+    }));
+  }), 1500));
+}
+
+function scheduleRetry(key: string) {
+  if (!active) return;
+  const attempt = (retryCounts.get(key) || 0) + 1;
+  retryCounts.set(key, attempt);
+  clearTimeout(timers.get(key));
+  const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempt - 1, 5));
+  timers.set(key, setTimeout(() => {
+    if (!active) return;
+    pending.add(key);
+    void push(key).catch((error) => {
+      console.warn('[ModuleSync]', error);
+      window.dispatchEvent(new CustomEvent('module-data-sync-error', {
+        detail: { key, message: 'Gagal menyinkronkan data modul karena koneksi atau server bermasalah.' }
+      }));
+      scheduleRetry(key);
+    });
+  }, delay));
 }
 
 function install() {
@@ -264,6 +388,18 @@ function install() {
   Storage.prototype.setItem = function setItem(this: Storage, key: string, value: string) {
     originalSetItem.call(this, key, value);
     if (active && this === localStorage && isSyncedKey(key)) {
+      if (conflicted.has(key)) {
+        try {
+          originalSetItem.call(localStorage, conflictDraftKey(key), value);
+          const serverValue = conflictServerValues.get(key);
+          if (serverValue === null) originalRemoveItem.call(localStorage, key);
+          else if (serverValue !== undefined) originalSetItem.call(localStorage, key, serverValue);
+        } catch (error) {
+          console.error(`[ModuleSync] Could not preserve the new conflicting edit for ${key}.`, error);
+        }
+        emitModuleConflict(key, conflictDraftKey(key), true);
+        return;
+      }
       conflicted.delete(key);
       schedule(key);
     }
@@ -271,6 +407,18 @@ function install() {
   Storage.prototype.removeItem = function removeItem(this: Storage, key: string) {
     originalRemoveItem.call(this, key);
     if (active && this === localStorage && isSyncedKey(key)) {
+      if (conflicted.has(key)) {
+        try {
+          originalSetItem.call(localStorage, conflictDraftKey(key), JSON.stringify({ deleteRequested: true }));
+          const serverValue = conflictServerValues.get(key);
+          if (serverValue === null) originalRemoveItem.call(localStorage, key);
+          else if (serverValue !== undefined) originalSetItem.call(localStorage, key, serverValue);
+        } catch (error) {
+          console.error(`[ModuleSync] Could not preserve the conflicting deletion for ${key}.`, error);
+        }
+        emitModuleConflict(key, conflictDraftKey(key), true);
+        return;
+      }
       conflicted.delete(key);
       schedule(key);
     }
@@ -280,17 +428,22 @@ function install() {
 export async function pullModuleData(): Promise<void> {
   let clinicalUpdated = false;
   const clinicalVersions = readClinicalVersions();
+  const clinicalCollectionVersions = readClinicalCollectionVersions();
   const deferred = readDeferredClinicalRecords();
   const initialized = readInitializedClinicalCollections();
   for (const [key, collection] of Object.entries(CLINICAL_KEYS)) {
     if (pending.has(key) || clinicalConflicted.has(key)) continue;
-    const result = await fetchClinicalCollection(collection);
-    if (!Array.isArray(result)) {
+    const result = await fetchClinicalCollection(collection, clinicalCollectionVersions[collection]);
+    if (result instanceof Response) {
       if (result.status !== 401 && result.status !== 403) {
         console.warn(`[ModuleSync] Gagal membaca ${collection} (HTTP ${result.status}).`);
       }
       continue;
     }
+    if (result.notModified) continue;
+    if (result.version) clinicalCollectionVersions[collection] = result.version;
+    const records = result.records;
+    const deletedIds = new Set(result.deletedIds);
     const existing = localStorage.getItem(key);
     const localRecords = parseClinicalRecords(key, existing);
     if (!localRecords) {
@@ -298,7 +451,7 @@ export async function pullModuleData(): Promise<void> {
       continue;
     }
     const firstPull = !initialized[collection];
-    if (firstPull && result.length === 0 && existing !== null) {
+    if (firstPull && records.length === 0 && existing !== null) {
       const deferredCollection = deferred[collection] || (deferred[collection] = {});
       for (const record of localRecords) {
         const id = String(record.id);
@@ -310,11 +463,13 @@ export async function pullModuleData(): Promise<void> {
       console.warn(`[ModuleSync] ${key} punya data lokal lama; tidak diunggah otomatis.`);
       continue;
     }
-    const nextVersions = Object.fromEntries(result.map(({ id, version }) => [id, version]));
+    const nextVersions = Object.fromEntries(records.map(({ id, version }) => [id, version]));
     const remoteIds = new Set(Object.keys(nextVersions));
     const deferredCollection = deferred[collection] || (deferred[collection] = {});
-    const localById = new Map(localRecords.map((record) => [String(record.id), record]));
-    const nextRecords = result.map(({ data }) => data);
+    const localById = new Map(localRecords
+      .filter((record) => !deletedIds.has(String(record.id)))
+      .map((record) => [String(record.id), record]));
+    const nextRecords = records.map(({ data }) => data);
     let hasPendingLocalRecord = false;
     for (const [id, record] of localById) {
       if (remoteIds.has(id)) {
@@ -335,6 +490,7 @@ export async function pullModuleData(): Promise<void> {
     if (hasPendingLocalRecord) schedule(key);
   }
   writeClinicalVersions(clinicalVersions);
+  writeClinicalCollectionVersions(clinicalCollectionVersions);
   writeDeferredClinicalRecords(deferred);
   writeInitializedClinicalCollections(initialized);
 
@@ -391,6 +547,8 @@ export async function stopModuleSync(flush: boolean): Promise<void> {
   if (flush) await Promise.all(keys.map((key) => push(key).catch(() => undefined)));
   pending.clear();
   conflicted.clear();
+  conflictServerValues.clear();
+  retryCounts.clear();
   clinicalConflicted.clear();
   active = false;
 }

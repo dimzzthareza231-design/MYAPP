@@ -59,19 +59,23 @@ interface CoreStateNamespace {
 
 export default {
   async fetch(request: Request, _env: unknown, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
-    const limited = await checkAuthRateLimit(request, env.AUTH_LIMITER as RateLimiterLike | undefined);
+    const limiter = env.AUTH_LIMITER as RateLimiterLike | undefined;
+    const rateLimitRequest = request.clone();
+    const limited = await checkAuthRateLimit(request, limiter);
     if (limited) return limited;
+    let response: Response;
     const coreState = env.CORE_STATE as CoreStateNamespace | undefined;
     if (coreState) {
       const forwarded = new Request(request);
       forwarded.headers.set(TARGET_HEADER, ownTarget);
-      return coreState.get(coreState.idFromName('myitaru')).fetch(forwarded);
+      response = await coreState.get(coreState.idFromName('myitaru')).fetch(forwarded);
+    } else {
+      // Tanpa binding CORE_STATE: jalan per isolate seperti sebelumnya.
+      response = await serve(request, ownTarget);
+      // Startup jalan terus walau request pemicunya dibatalkan browser; tanpa ini login berikutnya ikut 503.
+      if (ready) ctx.waitUntil(ready.catch(() => undefined));
     }
 
-    // Tanpa binding CORE_STATE: jalan per isolate seperti sebelumnya.
-    const response = serve(request, ownTarget);
-    // Startup jalan terus walau request pemicunya dibatalkan browser; tanpa ini login berikutnya ikut 503.
-    if (ready) ctx.waitUntil(ready.catch(() => undefined));
-    return response;
+    return await checkAuthRateLimit(rateLimitRequest, limiter, response) || response;
   }
 };
