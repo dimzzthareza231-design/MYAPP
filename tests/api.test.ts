@@ -123,6 +123,22 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal(fullList.data.find((p: { id: string }) => p.id === admin.id).riwayat_penyakit, undefined);
   });
 
+  test('data modul: simpan, indeks, baca, hapus; kunci liar dan viewer ditolak', async () => {
+    const saved = await call(core, 'PUT', '/api/v1/module-data/hospital_billing_ralan', { data: '[{"id":"BIL-1"}]' }, 'cashier-token');
+    assert.equal(saved.status, 200);
+    const index = (await call(core, 'GET', '/api/v1/module-data', undefined, 'role:dokter')).body.index;
+    assert.equal(index.hospital_billing_ralan, saved.body.updatedAt);
+    assert.equal((await call(core, 'GET', '/api/v1/module-data/hospital_billing_ralan', undefined, 'role:apoteker')).body.data, '[{"id":"BIL-1"}]');
+    assert.equal((await call(core, 'PUT', '/api/v1/module-data/rahasia', { data: 'x' })).status, 400);
+    assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_igd_Penanganan IGD')}`, { data: '[]' })).status, 200);
+    assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_a/b')}`, { data: '[]' })).status, 400);
+    assert.equal((await call(core, 'PUT', '/api/v1/module-data/hospital_x', { data: 'x' }, 'viewer-token')).status, 403);
+    assert.equal((await call(core, 'GET', '/api/v1/module-data', undefined, 'role:it_support')).status, 403);
+    assert.equal((await call(core, 'DELETE', '/api/v1/module-data/hospital_billing_ralan', undefined, 'cashier-token')).status, 200);
+    assert.equal((await call(core, 'GET', '/api/v1/module-data/hospital_billing_ralan')).status, 404);
+    assert.equal((await call(core, 'GET', '/api/v1/module-data')).body.index.hospital_billing_ralan, undefined);
+  });
+
   test('pertukaran Firebase ID token menerbitkan cookie HttpOnly yang bisa dicabut', async () => {
     const issued = await call(core, 'POST', '/api/auth/session', { idToken: 'test-token' });
     assert.equal(issued.status, 204);

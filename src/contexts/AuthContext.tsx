@@ -17,6 +17,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, deleteDoc } from 'firebase/firestore';
 import { auth, db, googleProvider, isFirebaseConfigured, isLocalAuthMode } from '../lib/firebase';
+import { stopModuleSync } from '../lib/moduleSync';
 import { logAuthAttempt } from '../lib/activityLogger';
 import { hasModuleAccess, getRoleById } from '../data/roles';
 
@@ -182,6 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const path = new URL(url, window.location.origin);
       if (response.status === 401 && path.origin === window.location.origin &&
           path.pathname.startsWith('/api/') && !/^\/api\/(auth|gateway|patient|public)\//.test(path.pathname)) {
+        void stopModuleSync(false); // harus sebelum hapus cache: penghapusan lokal tidak boleh ikut terkirim ke server
         clearPatientCache();
         setCurrentUser(null);
       }
@@ -611,6 +613,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Revoke the server session before clearing the Firebase client session.
   const logout = async () => {
+    // Kirim perubahan modul yang tertunda, lalu hentikan sinkron sebelum cache lokal dihapus.
+    await stopModuleSync(true);
     clearPatientCache();
     if (currentUser) {
       logAuthAttempt({

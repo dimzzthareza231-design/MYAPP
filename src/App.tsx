@@ -20,6 +20,8 @@ const EmployeeAppLanding = lazyNamed(() => import('./components/Employee/Employe
 const EmployeePortal = lazyNamed(() => import('./components/Employee/EmployeePortal'), 'EmployeePortal');
 const EmployeeMobileApp = lazyNamed(() => import('./components/Employee/EmployeeMobileApp'), 'EmployeeMobileApp');
 import { OfflineIndicator } from './components/PWA/OfflineIndicator';
+import { startModuleSync, stopModuleSync } from './lib/moduleSync';
+import { usesServerPersistence } from './lib/firestoreService';
 
 // Existing Modules
 // Tiap modul dimuat saat dibuka; sebelumnya semua modul (~6 MB) diunduh sebelum halaman login bisa dipakai.
@@ -84,8 +86,22 @@ const ApiGatewayBridging = lazyNamed(() => import('./components/Bridging/ApiGate
 const CloudflareBridging = lazyNamed(() => import('./components/Bridging/CloudflareBridging'), 'CloudflareBridging');
 
 function AppContent() {
-  const { currentUser, logout, loading } = useAuth();
+  const { currentUser, logout, loading: authLoading } = useAuth();
   const { isDarkMode } = useHospital();
+  const [moduleSyncUser, setModuleSyncUser] = useState<string | null>(null);
+
+  // Data modul dari server dimuat ke localStorage sebelum modul tampil (komponen membacanya saat mount).
+  useEffect(() => {
+    if (!currentUser?.id || !usesServerPersistence) return;
+    let cancelled = false;
+    const timeout = new Promise((resolve) => setTimeout(resolve, 10_000));
+    void Promise.race([startModuleSync(), timeout]).finally(() => { if (!cancelled) setModuleSyncUser(currentUser.id); });
+    return () => {
+      cancelled = true;
+      void stopModuleSync(true);
+    };
+  }, [currentUser?.id]);
+  const loading = authLoading || Boolean(currentUser && usesServerPersistence && moduleSyncUser !== currentUser.id);
 
   useEffect(() => {
     if (isDarkMode) {

@@ -176,7 +176,7 @@ export function scopeForPath(path: string, req?: express.Request): string | null
     if (claims?.kind === 'document') return claims.scope || 'rekam-medis';
   }
   if (path === '/api/v1/health' || path === '/api/v1/system/stats' || path.startsWith('/api/v1/health-updates')) return 'dashboard';
-  if (path.startsWith('/api/v1/system-data')) return 'data-pasien';
+  if (path.startsWith('/api/v1/system-data') || path.startsWith('/api/v1/module-data')) return 'data-pasien';
   const isRead = req?.method === 'GET' || req?.method === 'HEAD';
   // Ubah status antrean dipakai poli, farmasi dan kasir, bukan hanya pendaftaran.
   if (path.startsWith('/api/v1/appointments/') && req?.method === 'PATCH') return 'antrean';

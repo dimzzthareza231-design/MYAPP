@@ -2,7 +2,7 @@ import express from 'express';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import {
@@ -852,6 +852,75 @@ export async function createApps(
       storage,
       timestamp: new Date().toISOString()
     });
+  });
+
+  // Data modul yang dulu hanya di localStorage tiap browser (billing, farmasi, dossier RME, lab, ...).
+  // shortcut: satu dokumen per kunci, yang terakhir menyimpan menang; ganti dengan API per modul bila perlu kontrol konflik.
+  // Spasi dipakai komponen (mis. "hospital_igd_Penanganan IGD"); garis miring ditolak karena memecah path dokumen.
+  const MODULE_DATA_KEY = /^(hospital_|simrs_|klinik_|bpjs_|myitaru_igd_)[A-Za-z0-9._:\- &()]{1,100}$/;
+  const MODULE_INDEX_ID = 'module-index';
+  // Id dokumen hanya [a-z0-9_]: Firestore REST meng-encode nama di body commit berbeda dari path GET.
+  const moduleDocId = (key: string) => `module_${createHash('sha256').update(key).digest('hex')}`;
+  type ModuleIndex = Record<string, string>;
+  const readModuleIndex = async () =>
+    (await persistence.get<{ index?: ModuleIndex }>('system_data', MODULE_INDEX_ID))?.index ?? {};
+
+  app.get('/api/v1/module-data', async (_req, res) => {
+    try {
+      return res.json({ success: true, index: await readModuleIndex() });
+    } catch (error) {
+      console.error('[Persistence] Could not read module index.', error);
+      return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
+    }
+  });
+
+  app.get('/api/v1/module-data/:key', async (req, res) => {
+    if (!MODULE_DATA_KEY.test(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
+    try {
+      const record = await persistence.get<{ data: string; updatedAt: string }>('system_data', moduleDocId(req.params.key));
+      if (!record) return res.status(404).json({ success: false, code: 'MODULE_DATA_NOT_FOUND' });
+      return res.json({ success: true, data: record.data, updatedAt: record.updatedAt });
+    } catch (error) {
+      console.error('[Persistence] Could not read module data.', error);
+      return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
+    }
+  });
+
+  const writeModuleData = async (key: string, data: string | null) => {
+    const updatedAt = new Date().toISOString();
+    const index = await readModuleIndex();
+    if (data === null) delete index[key];
+    else index[key] = updatedAt;
+    await persistence.commit([
+      { entity: 'system_data', id: moduleDocId(key), data: data === null ? null : { key, data, updatedAt } },
+      { entity: 'system_data', id: MODULE_INDEX_ID, data: { key: MODULE_INDEX_ID, index, updatedAt } }
+    ]);
+    return updatedAt;
+  };
+
+  app.put('/api/v1/module-data/:key', async (req, res) => {
+    const data = req.body?.data;
+    if (!MODULE_DATA_KEY.test(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
+    if (typeof data !== 'string' || Buffer.byteLength(data, 'utf8') > 900_000) {
+      return res.status(413).json({ success: false, code: 'INVALID_MODULE_PAYLOAD' });
+    }
+    try {
+      return res.json({ success: true, updatedAt: await writeModuleData(req.params.key, data) });
+    } catch (error) {
+      console.error('[Persistence] Could not write module data.', error);
+      return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
+    }
+  });
+
+  app.delete('/api/v1/module-data/:key', async (req, res) => {
+    if (!MODULE_DATA_KEY.test(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
+    try {
+      await writeModuleData(req.params.key, null);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('[Persistence] Could not delete module data.', error);
+      return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
+    }
   });
 
   app.get('/api/v1/system-data/:key', async (req, res) => {
