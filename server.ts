@@ -584,9 +584,12 @@ export async function createApps(
           await persistence.syncPending();
           await persistence.syncExternalBookings();
         }
-        for (const binding of persistentBindings) {
-          if (binding.entity === 'queues') continue;
-          const stored = await persistence.list<Record<string, unknown>>(binding.entity);
+        // Paralel: cold start dulu membaca koleksi satu per satu (~8 detik di Firestore).
+        const loadStartedAt = Date.now();
+        const loaded = await Promise.all(persistentBindings
+          .filter((binding) => binding.entity !== 'queues')
+          .map(async (binding) => ({ binding, stored: await persistence.list<Record<string, unknown>>(binding.entity) })));
+        for (const { binding, stored } of loaded) {
           for (const record of stored) {
             if (!record.data || typeof record.data !== 'object' || Array.isArray(record.data)) {
               throw new Error(`Invalid persisted ${binding.entity} record ${record.id}.`);
@@ -594,6 +597,7 @@ export async function createApps(
             binding.records.push({ ...record.data, id: record.id });
           }
         }
+        console.info(`[Persistence] Loaded ${loaded.map(({ binding, stored }) => `${binding.entity}=${stored.length}`).join(' ')} in ${Date.now() - loadStartedAt}ms`);
       } catch (error) {
         await persistence.close();
         throw new Error('Configured persistence is reachable but its records could not be loaded safely.', { cause: error });
