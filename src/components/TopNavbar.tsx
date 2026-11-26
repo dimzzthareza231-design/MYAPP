@@ -997,7 +997,8 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
       {/* ========================================================================= */}
       {/* 5. MODALS & POPUPS (dimuat saat dibuka)                                   */}
       {/* ========================================================================= */}
-      <React.Suspense fallback={null}>
+      {/* Portal ke body: backdrop-blur pada <header> mengurung elemen `fixed` di dalamnya. */}
+      {createPortal(<React.Suspense fallback={null}>
       {showQRScanner && (
         <PatientQRScannerModal
           isOpen={showQRScanner}
@@ -1034,7 +1035,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
           onClose={() => setShowVoiceScribeModal(false)}
         />
       )}
-      </React.Suspense>
+      </React.Suspense>, document.body)}
     </header>
   );
 }
