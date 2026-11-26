@@ -46,15 +46,20 @@ function printHelp() {
   console.log(`
 MYAPP Multi-Agent Dispatcher (sesuai AGENTS.md)
 
+Catatan: dispatcher ini hanya dapat memanggil CLI yang terinstal di PATH
+(Gemini CLI dan GitHub Copilot CLI). Claude dan Antigravity tidak dipanggil
+lewat CLI ini — keduanya bekerja via IDE/VS Code atau conversation mereka
+masing-masing. Gunakan --dry-run untuk melihat prompt tanpa mengeksekusi CLI.
+
 Perintah:
   npm run agent:check [-- --build]          Jalankan verifikasi wajib (typecheck, test, opsional build)
   npm run agent:light -- "<tugas>"           Jalankan tugas ringan via Gemini CLI / Copilot CLI
-  npm run agent:assist -- "<konteks>"        Jalankan mode pendamping Claude (riset/audit/test)
+  npm run agent:assist -- "<konteks>"        Jalankan mode pendamping (riset/audit/test) via Gemini / Copilot
   npm run agent:auto -- "<tugas>"            Klasifikasi otomatis (ringan vs berat) dan panggil agent
   npm run agent:parallel -- "<t1>" "<t2>"    Jalankan Gemini CLI & Copilot CLI secara paralel
 
 Opsi untuk light / assist / auto:
-  --agent=gemini|copilot                     Pilih CLI secara eksplisit (default: auto)
+  --agent=gemini|copilot                     Pilih CLI secara eksplisit (default: auto-detect di PATH)
   --dry-run                                  Tampilkan prompt & target tanpa mengeksekusi CLI
 `.trim());
 }

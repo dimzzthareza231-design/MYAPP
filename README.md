@@ -231,7 +231,10 @@ Untuk uji lokal Worker, isi `.dev.vars` dengan `FIRESTORE_SERVICE_ACCOUNT_JSON` 
 
 Keterbatasan: rate limiter in-memory berlaku per isolate Worker; koneksi SSE portal pasien dapat diputus dan klien harus menyambung ulang.
 
-### Vercel
+### Vercel _(legacy — tidak aktif dipertahankan)_
+
+> [!WARNING]
+> Deployment Cloudflare Workers adalah platform utama. Konfigurasi Vercel di bawah ini masih ada untuk referensi tetapi **tidak diuji secara rutin** dan mungkin tidak kompatibel dengan perubahan terbaru. Jangan gunakan untuk deployment produksi.
 
 Buat dua proyek yang terhubung ke repositori ini:
 

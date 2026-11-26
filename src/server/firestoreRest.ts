@@ -91,7 +91,20 @@ export class FirestoreRestAdapter implements PersistenceRepository {
 
   async health(): Promise<PersistenceHealth> {
     try {
-      await this.call(`${this.base}/_health?pageSize=1`);
+      // Check the database resource itself (not a document path) so that a
+      // wrong project/database configuration returns a non-200 and is not
+      // silently treated as "healthy" by the shared call() helper.
+      // GET .../databases/{id} returns 200 with database metadata when the
+      // database exists and the credentials are valid; any 4xx/5xx throws.
+      const dbUrl = this.base.replace(/\/documents$/, '');
+      const res = await this.fetcher(`https://firestore.googleapis.com/v1/${dbUrl}`, {
+        signal: AbortSignal.timeout(10_000),
+        headers: { Authorization: `Bearer ${await this.accessToken()}`, 'Content-Type': 'application/json' }
+      });
+      if (!res.ok) {
+        const body = (await res.text()).slice(0, 300);
+        throw new Error(`Firestore database check ${res.status}: ${body}`);
+      }
       return { mode: this.mode, mysqlConnected: false, firebaseConnected: true, persistentReady: true, pendingSync: 0 };
     } catch (error) {
       return { mode: this.mode, mysqlConnected: false, firebaseConnected: false, persistentReady: false, pendingSync: 0,
