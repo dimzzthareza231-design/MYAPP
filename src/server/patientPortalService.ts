@@ -1170,11 +1170,10 @@ export function registerPatientPortalRoutes(
           qr_value: qrValue
         }
       });
-    } catch (err: any) {
-      return res.status(500).json({
-        success: false,
-        message: err?.message || 'Gagal memproses pendaftaran janji temu.'
-      });
+    } catch (err) {
+      // Detail error hanya di log server; pesan internal tidak dikirim ke pengunjung publik.
+      console.error('[PatientPortal] Booking failed:', err);
+      return res.status(500).json({ success: false, message: 'Gagal memproses pendaftaran janji temu.' });
     }
   });
 
