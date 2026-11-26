@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import {
   executeResilientGemini,
   getGeminiModelFallbackChain,
+  GEMINI_REQUEST_TIMEOUT_MS,
   parseSafeJson,
   analyzeClinicalNoteDeterministic,
   generateClinicalDecisionSupportDeterministic,
@@ -55,8 +56,20 @@ interface PersistentArrayBinding {
   records: Array<{ id: string }>;
 }
 
+type PersistentArraySnapshot =
+  | { binding: PersistentArrayBinding; mode: 'copy'; records: Array<{ id: string }> }
+  | { binding: PersistentArrayBinding; mode: 'prepend'; originalLength: number };
+
 function arraySnapshot(records: Array<{ id: string }>): Array<{ id: string }> {
   return JSON.parse(JSON.stringify(records)) as Array<{ id: string }>;
+}
+
+function snapshotPersistentArray(binding: PersistentArrayBinding): PersistentArraySnapshot {
+  // These collections only receive new records at the front; keep their growing history out of snapshots.
+  if (binding.entity === 'documents' || binding.entity === 'audit_logs') {
+    return { binding, mode: 'prepend', originalLength: binding.records.length };
+  }
+  return { binding, mode: 'copy', records: arraySnapshot(binding.records) };
 }
 
 function diffPersistentArrays(
@@ -81,13 +94,58 @@ function diffPersistentArrays(
   return changes;
 }
 
-function restorePersistentArrays(
-  bindings: PersistentArrayBinding[],
-  snapshots: Array<Array<{ id: string }>>
-): void {
-  bindings.forEach((binding, index) => {
-    binding.records.splice(0, binding.records.length, ...snapshots[index]);
-  });
+function diffPersistentSnapshot(snapshot: PersistentArraySnapshot): PersistenceChange[] {
+  if (snapshot.mode === 'prepend') {
+    const added = snapshot.binding.records.length - snapshot.originalLength;
+    return snapshot.binding.records.slice(0, added).map((record) => ({
+      entity: snapshot.binding.entity,
+      id: record.id,
+      data: record
+    }));
+  }
+  return diffPersistentArrays(snapshot.binding.entity, snapshot.records, snapshot.binding.records);
+}
+
+function restorePersistentArrays(snapshots: PersistentArraySnapshot[]): void {
+  for (const snapshot of snapshots) {
+    if (snapshot.mode === 'prepend') {
+      const added = Math.max(0, snapshot.binding.records.length - snapshot.originalLength);
+      if (added) snapshot.binding.records.splice(0, added);
+    } else {
+      snapshot.binding.records.splice(0, snapshot.binding.records.length, ...snapshot.records);
+    }
+  }
+}
+
+function bindingsForMutation(
+  method: string,
+  path: string,
+  bindings: PersistentArrayBinding[]
+): PersistentArrayBinding[] {
+  const entities = new Set<PersistenceEntity>();
+  const add = (...items: PersistenceEntity[]) => items.forEach((item) => entities.add(item));
+
+  if (method === 'POST') {
+    if (path === '/api/v1/dossier/document-qr/issue' || path === '/api/v1/patient-qr/issue') add('qr_tokens', 'audit_logs');
+    else if (path === '/api/v1/patient-qr/resolve') add('audit_logs');
+    else if (path === '/api/v1/patient-qr/redeem') add('registrations', 'qr_tokens', 'audit_logs');
+    else if (path === '/api/v1/patients') add('patients', 'audit_logs');
+    else if (path === '/api/v1/appointments') add('registrations');
+    else if (path === '/api/v1/inventory/dispense') add('inventory', 'audit_logs');
+    else if (path === '/api/v1/dossier/documents') add('documents');
+    else if (path === '/api/v1/audit/logs' || path === '/api/patient/verify') add('audit_logs');
+    else if (path === '/api/patient/appointments') add('patients', 'registrations', 'qr_tokens', 'audit_logs');
+    else if (path === '/api/patient/notifications/test') add('registrations', 'audit_logs');
+    else if (path.startsWith('/api/gateway/')) add('audit_logs');
+  } else if (method === 'PATCH') {
+    if (path.startsWith('/api/v1/patients/')) add('patients');
+    else if (path.startsWith('/api/v1/appointments/')) add('registrations');
+    else if (path.startsWith('/api/gateway/')) add('audit_logs');
+  } else if (method === 'PUT' || method === 'DELETE') {
+    if (path.startsWith('/api/gateway/')) add('audit_logs');
+  }
+
+  return bindings.filter((binding) => entities.has(binding.entity));
 }
 
 function installPersistenceMiddleware(
@@ -104,13 +162,20 @@ function installPersistenceMiddleware(
       // Route ini tidak menulis array persisten; jangan antre di belakang panggilan Gemini yang lambat.
       if (req.path.startsWith('/api/ai/') || req.path.startsWith('/api/cloudflare/')) return next();
 
+      const affectedBindings = bindingsForMutation(req.method, req.path, bindings);
+      const needsSerialization = affectedBindings.length > 0 ||
+        req.path.startsWith('/api/v1/module-data/') ||
+        req.path.startsWith('/api/v1/auth/users') ||
+        req.path.startsWith('/api/gateway/');
+      if (!needsSerialization) return next();
+
       let release!: () => void;
       const currentWrite = new Promise<void>((resolve) => { release = resolve; });
       const previousWrite = writeQueue;
       writeQueue = currentWrite;
       await previousWrite;
 
-      const snapshots = bindings.map((binding) => arraySnapshot(binding.records));
+      const snapshots = affectedBindings.map(snapshotPersistentArray);
       const sendJson = res.json.bind(res);
       let finalized = false;
       const finish = (body: unknown) => {
@@ -118,17 +183,15 @@ function installPersistenceMiddleware(
         finalized = true;
         void (async () => {
           if (res.statusCode >= 400) {
-            restorePersistentArrays(bindings, snapshots);
+            restorePersistentArrays(snapshots);
             sendJson(body);
             return;
           }
-          const changes = bindings.flatMap((binding, index) =>
-            diffPersistentArrays(binding.entity, snapshots[index], binding.records)
-          );
-          await persistence.commit(changes);
+          const changes = snapshots.flatMap(diffPersistentSnapshot);
+          if (changes.length) await persistence.commit(changes);
           sendJson(body);
         })().catch((error: unknown) => {
-          restorePersistentArrays(bindings, snapshots);
+          restorePersistentArrays(snapshots);
           console.error('[Persistence] Write-through failed; API mutation rolled back.', error);
           if (!res.headersSent) {
             res.status(503);
@@ -146,7 +209,7 @@ function installPersistenceMiddleware(
       res.once('close', () => {
         if (finalized) return;
         finalized = true;
-        restorePersistentArrays(bindings, snapshots);
+        restorePersistentArrays(snapshots);
         release();
       });
       return next();
@@ -185,8 +248,9 @@ export async function createApps(
     if (persistence.mode === 'firebase' || persistence.mode === 'hybrid') {
       throw new Error('AUTH_MODE=local supports only MySQL, D1 or in-memory development storage; Firebase and hybrid storage are not supported for offline local authentication.');
     }
-    resolvedAuthOptions.localAuth ||= new LocalAuthService(persistence);
-    await resolvedAuthOptions.localAuth.initialize();
+    const localAuth = resolvedAuthOptions.localAuth || new LocalAuthService(persistence);
+    resolvedAuthOptions.localAuth = localAuth;
+    await localAuth.initialize();
   }
 
   for (const target of [app, publicApp]) {
@@ -241,7 +305,12 @@ export async function createApps(
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
+    const localHmrSource = process.env.NODE_ENV === 'production' ? '' : ' ws://localhost:*';
+    res.setHeader(
+      'Content-Security-Policy',
+      `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://accounts.google.com; script-src 'self' https://challenges.cloudflare.com https://apis.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self'${localHmrSource} https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://firebasestorage.googleapis.com https://challenges.cloudflare.com wss://*.firebaseio.com; frame-src 'self' https://accounts.google.com https://*.firebaseapp.com https://challenges.cloudflare.com; worker-src 'self' blob:`
+    );
     next();
   });
 
@@ -849,7 +918,7 @@ export async function createApps(
   });
 
   // Data modul yang dulu hanya di localStorage tiap browser (billing, farmasi, dossier RME, lab, ...).
-  // shortcut: satu dokumen per kunci, yang terakhir menyimpan menang; ganti dengan API per modul bila perlu kontrol konflik.
+  // shortcut: satu dokumen per kunci; critical transactional modules should move to dedicated APIs.
   // Spasi dipakai komponen (mis. "hospital_igd_Penanganan IGD"); garis miring ditolak karena memecah path dokumen.
   const MODULE_DATA_KEY = /^(hospital_|simrs_|klinik_|bpjs_|myitaru_igd_)[A-Za-z0-9._:\- &()]{1,100}$/;
   const MODULE_INDEX_ID = 'module-index';
@@ -865,8 +934,8 @@ export async function createApps(
       if (typeof req.query.keys === 'string') {
         const keys = req.query.keys.split(',').filter((key) => MODULE_DATA_KEY.test(key)).slice(0, 200);
         const records = await Promise.all(keys.map(async (key) =>
-          [key, await persistence.get<{ data: string; updatedAt: string }>('system_data', moduleDocId(key))] as const));
-        return res.json({ success: true, records: Object.fromEntries(records.filter(([, record]) => record).map(([key, record]) => [key, { data: record!.data, updatedAt: record!.updatedAt }])) });
+          [key, await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(key))] as const));
+        return res.json({ success: true, records: Object.fromEntries(records.filter(([, record]) => record).map(([key, record]) => [key, { data: record!.data, updatedAt: record!.updatedAt, version: record!.version || record!.updatedAt }])) });
       }
       return res.json({ success: true, index: await readModuleIndex() });
     } catch (error) {
@@ -878,9 +947,9 @@ export async function createApps(
   app.get('/api/v1/module-data/:key', async (req, res) => {
     if (!MODULE_DATA_KEY.test(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
     try {
-      const record = await persistence.get<{ data: string; updatedAt: string }>('system_data', moduleDocId(req.params.key));
+      const record = await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(req.params.key));
       if (!record) return res.status(404).json({ success: false, code: 'MODULE_DATA_NOT_FOUND' });
-      return res.json({ success: true, data: record.data, updatedAt: record.updatedAt });
+      return res.set('ETag', `"${record.version || record.updatedAt}"`).json({ success: true, data: record.data, updatedAt: record.updatedAt, version: record.version || record.updatedAt });
     } catch (error) {
       console.error('[Persistence] Could not read module data.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
@@ -889,14 +958,15 @@ export async function createApps(
 
   const writeModuleData = async (key: string, data: string | null) => {
     const updatedAt = new Date().toISOString();
+    const version = randomUUID();
     const index = await readModuleIndex();
     if (data === null) delete index[key];
-    else index[key] = updatedAt;
+    else index[key] = version;
     await persistence.commit([
-      { entity: 'system_data', id: moduleDocId(key), data: data === null ? null : { key, data, updatedAt } },
+      { entity: 'system_data', id: moduleDocId(key), data: data === null ? null : { key, data, updatedAt, version } },
       { entity: 'system_data', id: MODULE_INDEX_ID, data: { key: MODULE_INDEX_ID, index, updatedAt } }
     ]);
-    return updatedAt;
+    return { updatedAt, version };
   };
 
   app.put('/api/v1/module-data/:key', async (req, res) => {
@@ -906,7 +976,20 @@ export async function createApps(
       return res.status(413).json({ success: false, code: 'INVALID_MODULE_PAYLOAD' });
     }
     try {
-      return res.json({ success: true, updatedAt: await writeModuleData(req.params.key, data) });
+      const ifMatch = req.get('if-match');
+      const createOnly = req.get('if-none-match') === '*';
+      if ((!ifMatch && !createOnly) || (ifMatch && createOnly)) {
+        return res.status(428).json({ success: false, code: 'MODULE_DATA_PRECONDITION_REQUIRED' });
+      }
+      const current = await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(req.params.key));
+      const currentVersion = current?.version || current?.updatedAt;
+      if ((createOnly && current) || (ifMatch && ifMatch !== `"${currentVersion}"`)) {
+        const conflict = res.status(412);
+        if (currentVersion) conflict.set('ETag', `"${currentVersion}"`);
+        return conflict.json({ success: false, code: 'MODULE_DATA_CONFLICT', updatedAt: current?.updatedAt ?? null, version: currentVersion ?? null });
+      }
+      const saved = await writeModuleData(req.params.key, data);
+      return res.set('ETag', `"${saved.version}"`).json({ success: true, ...saved });
     } catch (error) {
       console.error('[Persistence] Could not write module data.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
@@ -916,6 +999,15 @@ export async function createApps(
   app.delete('/api/v1/module-data/:key', async (req, res) => {
     if (!MODULE_DATA_KEY.test(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
     try {
+      const ifMatch = req.get('if-match');
+      if (!ifMatch) return res.status(428).json({ success: false, code: 'MODULE_DATA_PRECONDITION_REQUIRED' });
+      const current = await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(req.params.key));
+      const currentVersion = current?.version || current?.updatedAt;
+      if (!current || ifMatch !== `"${currentVersion}"`) {
+        const conflict = res.status(412);
+        if (currentVersion) conflict.set('ETag', `"${currentVersion}"`);
+        return conflict.json({ success: false, code: 'MODULE_DATA_CONFLICT', updatedAt: current?.updatedAt ?? null, version: currentVersion ?? null });
+      }
       await writeModuleData(req.params.key, null);
       return res.json({ success: true });
     } catch (error) {
@@ -1520,7 +1612,7 @@ export async function createApps(
   });
 
   // =========================================================================
-  // 🧠 AI MEDICAL INTELLIGENCE ENDPOINTS (Powered by Google Gemini 4)
+  // AI medical intelligence endpoints use the configured Gemini model fallback chain.
   // =========================================================================
 
   // AI Medical Assistant Endpoint
@@ -1802,6 +1894,7 @@ Task:
       const ai = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY,
         httpOptions: {
+          timeout: GEMINI_REQUEST_TIMEOUT_MS,
           headers: {
             'User-Agent': 'aistudio-build'
           }
@@ -1890,6 +1983,7 @@ Instructions:
       const ai = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY,
         httpOptions: {
+          timeout: GEMINI_REQUEST_TIMEOUT_MS,
           headers: {
             'User-Agent': 'aistudio-build'
           }
@@ -2421,6 +2515,10 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
       });
     }
   });
+
+  for (const target of [app, publicApp]) {
+    target.use('/api', (_req, res) => res.status(404).json({ success: false, code: 'NOT_FOUND' }));
+  }
 
   return { app, publicApp, persistence };
 }

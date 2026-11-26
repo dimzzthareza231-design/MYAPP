@@ -49,16 +49,16 @@ import { PWAInstallButton } from '../PWA/PWAInstallButton';
 import { BrandLogo } from '../Common/BrandLogo';
 import { SystemCopyrightFooterBadge } from '../AboutCopyrightModal';
 
-import heroHospitalImg from '../../assets/images/myitaru_building_hero.jpg';
-import campusDropoffImg from '../../assets/images/myitaru_campus_dropoff.jpg';
-import lobbyMainImg from '../../assets/images/myitaru_lobby_main_branded.jpg';
-import lobbyApmImg from '../../assets/images/myitaru_lobby_apm_01.jpg';
-import excellenceSuiteImg from '../../assets/images/myitaru_center_of_excellence.jpg';
-import doctorConsultImg from '../../assets/images/myitaru_poli_consult.jpg';
-import medicalEducationImg from '../../assets/images/edukasi_medis_myitaru.jpg';
-import inpatientSuiteImg from '../../assets/images/myitaru_inpatient_room.jpg';
-import physiotherapyImg from '../../assets/images/myitaru_physiotherapy_rehab.jpg';
-import mobileLifestyleImg from '../../assets/images/patient_mobile_lifestyle_1794532011071.jpg';
+import heroHospitalImg from '../../assets/images/myitaru_building_hero.webp';
+import campusDropoffImg from '../../assets/images/myitaru_campus_dropoff.webp';
+import lobbyMainImg from '../../assets/images/myitaru_lobby_main_branded.webp';
+import lobbyApmImg from '../../assets/images/myitaru_lobby_apm_01.webp';
+import excellenceSuiteImg from '../../assets/images/myitaru_center_of_excellence.webp';
+import doctorConsultImg from '../../assets/images/myitaru_poli_consult.webp';
+import medicalEducationImg from '../../assets/images/edukasi_medis_myitaru.webp';
+import inpatientSuiteImg from '../../assets/images/myitaru_inpatient_room.webp';
+import physiotherapyImg from '../../assets/images/myitaru_physiotherapy_rehab.webp';
+import mobileLifestyleImg from '../../assets/images/patient_mobile_lifestyle_1794532011071.webp';
 
 interface LiveDoctor extends Doctor {
   kuota_tersisa?: number;

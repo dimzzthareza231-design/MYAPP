@@ -26,7 +26,7 @@ export function makeConfig(target: AppTarget) {
       // PWA hanya untuk aplikasi pasien.
       isPublic && VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'logo-myitaru.png', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        includeAssets: ['favicon.ico', 'logo-myitaru.webp', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
           id: '/',
           name: 'MYITARU SIMK · App Pasien',
@@ -62,8 +62,8 @@ export function makeConfig(target: AppTarget) {
         workbox: {
           navigateFallback: 'public.html',
           navigateFallbackDenylist: [/^\/api\//],
-          maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
-          globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
+          maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
+          globPatterns: ['**/*.{js,css,html,ico,png,jpg,webp,svg,woff,woff2}'],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

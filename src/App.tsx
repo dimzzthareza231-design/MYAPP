@@ -117,8 +117,19 @@ function AppContent() {
         id: 'viewer-block-toast',
       });
     };
+    const handleModuleSyncConflict = (event: Event) => {
+      const key = (event as CustomEvent<{ key?: string }>).detail?.key;
+      toast.error(`Data modul${key ? ` ${key}` : ''} berubah di perangkat lain. Perubahan lokal belum tersimpan; salin sebelum memuat ulang.`, {
+        id: `module-sync-conflict-${key || 'unknown'}`,
+        duration: 8000,
+      });
+    };
     window.addEventListener('viewer-mode-block', handleViewerBlock);
-    return () => window.removeEventListener('viewer-mode-block', handleViewerBlock);
+    window.addEventListener('module-data-conflict', handleModuleSyncConflict);
+    return () => {
+      window.removeEventListener('viewer-mode-block', handleViewerBlock);
+      window.removeEventListener('module-data-conflict', handleModuleSyncConflict);
+    };
   }, []);
 
   return (

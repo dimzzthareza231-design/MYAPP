@@ -51,7 +51,7 @@ interface AuthContextType {
   hasAccess: (moduleId: string) => boolean;
   isAdmin: boolean;
   // User management
-  addUser: (user: Omit<User, 'id' | 'dibuatPada'>) => Promise<void>;
+  addUser: (user: Omit<User, 'id' | 'dibuatPada' | 'password'> & { password: string }) => Promise<void>;
   updateUser: (id: string, data: Partial<User>) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
 }
@@ -67,7 +67,7 @@ function parseLocalUser(value: unknown): User | null {
   const record = value as Record<string, unknown>;
   if (typeof record.id !== 'string' || typeof record.username !== 'string' ||
       typeof record.nama !== 'string' || typeof record.email !== 'string' ||
-      typeof record.roleId !== 'string' || record.aktif !== true) {
+      typeof record.roleId !== 'string' || typeof record.aktif !== 'boolean') {
     return null;
   }
   if (!getRoleById(record.roleId)) return null;
@@ -77,9 +77,25 @@ function parseLocalUser(value: unknown): User | null {
     nama: record.nama,
     email: record.email,
     roleId: record.roleId,
-    aktif: true,
+    aktif: record.aktif,
     dibuatPada: typeof record.dibuatPada === 'string' ? record.dibuatPada : ''
   };
+}
+
+async function readLocalAuthResponse(response: Response): Promise<Record<string, unknown>> {
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = payload && typeof payload === 'object' && !Array.isArray(payload) &&
+      typeof (payload as Record<string, unknown>).message === 'string'
+      ? (payload as Record<string, unknown>).message as string
+      : `Permintaan manajemen pengguna gagal (HTTP ${response.status}).`;
+    throw new Error(message);
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+      (payload as Record<string, unknown>).success !== true) {
+    throw new Error('Respons manajemen pengguna lokal tidak valid.');
+  }
+  return payload as Record<string, unknown>;
 }
 
 async function loadAuthorizedProfile(firebaseUser: FirebaseUser, issueServerSession = true): Promise<User> {
@@ -194,6 +210,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isLocalAuthMode) return;
+    if (import.meta.env.VITE_APP_TARGET === 'public') {
+      setLoading(false);
+      return;
+    }
 
     let isMounted = true;
     const controller = new AbortController();
@@ -240,13 +260,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isLocalAuthMode) return;
+    if (!['super_admin', 'admin'].includes(currentUser?.roleId || '')) {
+      setUsers([]);
+      return;
+    }
+
+    let isMounted = true;
+    const controller = new AbortController();
+    const loadLocalUsers = async () => {
+      try {
+        const response = await fetch('/api/v1/auth/users', {
+          credentials: 'same-origin',
+          signal: controller.signal
+        });
+        const payload = await readLocalAuthResponse(response);
+        const records = payload.users;
+        if (!Array.isArray(records)) throw new Error('Daftar pengguna lokal tidak valid.');
+        const loadedUsers = records.map(parseLocalUser);
+        if (loadedUsers.some((user) => !user)) throw new Error('Server mengirim profil pengguna lokal yang tidak valid.');
+        if (isMounted) setUsers(loadedUsers.filter((user): user is User => user !== null));
+      } catch (error) {
+        if (isMounted && !(error instanceof Error && error.name === 'AbortError')) {
+          console.error('Could not load local staff users:', error);
+        }
+      }
+    };
+    void loadLocalUsers();
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [currentUser?.roleId]);
+
   // Sync users list from Cloud Firestore only when authenticated as Super Admin / Admin
   useEffect(() => {
     const isAdminSession =
       currentUser?.roleId === 'super_admin' ||
       currentUser?.roleId === 'admin';
 
-    if (!isFirebaseConfigured || !db || !firebaseUser || !isAdminSession) {
+    if (isLocalAuthMode || !isFirebaseConfigured || !db || !firebaseUser || !isAdminSession) {
       return;
     }
 
@@ -276,6 +330,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Restore access only from Firebase and a server-issued session cookie.
   useEffect(() => {
+    if (import.meta.env.VITE_APP_TARGET === 'public') {
+      setLoading(false);
+      return;
+    }
     if (isLocalAuthMode) return;
     if (!isFirebaseConfigured) {
       setLoading(false);
@@ -651,7 +709,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return hasModuleAccess(currentUser.roleId, moduleId);
   }, [currentUser]);
 
-  const addUser = async (userData: Omit<User, 'id' | 'dibuatPada'>) => {
+  const addUser = async (userData: Omit<User, 'id' | 'dibuatPada' | 'password'> & { password: string }) => {
+    if (isLocalAuthMode) {
+      const response = await fetch('/api/v1/auth/users', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData)
+      });
+      const payload = await readLocalAuthResponse(response);
+      const user = parseLocalUser(payload.user);
+      if (!user) throw new Error('Server mengirim profil pengguna baru yang tidak valid.');
+      setUsers((previous) => [...previous, user]);
+      return;
+    }
+
     const newId = 'u_' + Date.now().toString();
     const newUser: User = {
       ...userData,
@@ -675,6 +747,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateUser = async (id: string, data: Partial<User>) => {
+    if (isLocalAuthMode) {
+      const updates = {
+        ...(data.email === undefined ? {} : { email: data.email }),
+        ...(data.nama === undefined ? {} : { nama: data.nama }),
+        ...(data.roleId === undefined ? {} : { roleId: data.roleId }),
+        ...(data.password === undefined ? {} : { password: data.password }),
+        ...(data.aktif === undefined ? {} : { aktif: data.aktif })
+      };
+      const response = await fetch(`/api/v1/auth/users/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      const payload = await readLocalAuthResponse(response);
+      const user = parseLocalUser(payload.user);
+      if (!user) throw new Error('Server mengirim profil pengguna yang diperbarui dengan format tidak valid.');
+      setUsers((previous) => previous.map((item) => item.id === id ? user : item));
+      if (currentUser?.id === id) setCurrentUser(user);
+      return;
+    }
+
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...data } : u));
     if (currentUser && (currentUser.id === id || currentUser.username === data.username)) {
       const updated = { ...currentUser, ...data };
@@ -695,6 +789,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteUser = async (id: string) => {
+    if (isLocalAuthMode) {
+      const response = await fetch(`/api/v1/auth/users/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin'
+      });
+      await readLocalAuthResponse(response);
+      setUsers((previous) => previous.filter((user) => user.id !== id));
+      return;
+    }
+
     setUsers(prev => prev.filter(u => u.id !== id));
     try {
       if (isFirebaseConfigured && db && auth?.currentUser) {

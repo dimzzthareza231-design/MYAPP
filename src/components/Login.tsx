@@ -440,6 +440,8 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
     return loginCard;
   }
 
+  const showRoleCards = import.meta.env.DEV;
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8 dark:bg-slate-950 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl">
@@ -456,10 +458,10 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
           </p>
         </header>
 
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
+        <div className={`grid grid-cols-1 items-start gap-6 ${showRoleCards ? 'lg:grid-cols-12' : ''}`}>
           {/* Form login lebih dulu di DOM agar Tab langsung ke username; di desktop tetap tampil di kanan. */}
-          <div className="lg:col-span-5 lg:order-2">{loginCard}</div>
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-7 lg:order-1">
+          <div className={showRoleCards ? 'lg:col-span-5 lg:order-2' : 'mx-auto w-full max-w-xl'}>{loginCard}</div>
+          {showRoleCards && <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-7 lg:order-1">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">
@@ -518,7 +520,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
                 ? `Peran dipilih: ${ROLE_CARDS.find((role) => role.roleId === selectedRoleId)?.title}. Hak akses akhir tetap mengikuti profil akun yang diverifikasi server.`
                 : `Kartu peran hanya membantu memilih konteks kerja. Kartu ini tidak melewati login atau memberikan akses tanpa akun staf aktif${isLocalAuthMode ? '.' : ' dan verifikasi MFA.'}`}
             </div>
-          </section>
+          </section>}
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { ROLES } from '../data/roles';
 import type { CorePrincipal } from './coreAuth';
 import type { PersistenceChange, PersistenceRepository } from './databaseAdapter';
 
@@ -31,7 +32,7 @@ export interface LocalAuthPublicUser {
   email: string;
   nama: string;
   roleId: string;
-  aktif: true;
+  aktif: boolean;
   dibuatPada: string;
 }
 
@@ -46,6 +47,30 @@ export interface LocalAuthSession {
   principal: CorePrincipal;
 }
 
+export interface LocalAuthUserInput {
+  username: string;
+  email: string;
+  nama: string;
+  roleId: string;
+  password: string;
+  aktif?: boolean;
+}
+
+export interface LocalAuthUserUpdate {
+  email?: string;
+  nama?: string;
+  roleId?: string;
+  password?: string;
+  aktif?: boolean;
+}
+
+export class LocalAuthUserError extends Error {
+  constructor(readonly code: 'INVALID_USER' | 'USER_EXISTS' | 'USER_NOT_FOUND' | 'LAST_ADMIN', message: string) {
+    super(message);
+    this.name = 'LocalAuthUserError';
+  }
+}
+
 export interface LocalAuthProvider {
   initialize(): Promise<void>;
   login(identifier: string, password: string): Promise<LocalAuthLoginResult | null>;
@@ -53,6 +78,10 @@ export interface LocalAuthProvider {
   resolveSession(token: string): Promise<LocalAuthSession | null>;
   logout(token: string): Promise<void>;
   changePassword?(token: string, currentPassword: string, newPassword: string): Promise<'OK' | 'INVALID_SESSION' | 'WRONG_PASSWORD' | 'WEAK_PASSWORD'>;
+  listUsers(): Promise<LocalAuthPublicUser[]>;
+  createUser(input: LocalAuthUserInput): Promise<LocalAuthPublicUser>;
+  updateUser(id: string, input: LocalAuthUserUpdate): Promise<LocalAuthPublicUser>;
+  deleteUser(id: string): Promise<void>;
 }
 
 interface LocalAuthBootstrapUser {
@@ -69,8 +98,9 @@ interface LocalAuthOptions {
   bootstrapUsers?: LocalAuthBootstrapUser[];
 }
 
-// Sandi bawaan per role = <username>123 (permintaan pemilik). Naikkan versi untuk me-reset ulang semua akun bawaan.
+// Sandi bawaan hanya untuk development; production bootstrap memakai secret.
 const PASSWORD_SEED = 'rbac-default-v1';
+const PRODUCTION_BOOTSTRAP_SEED = 'production-bootstrap-v1';
 const ROLE_SEEDS = [
   { username: 'admin', email: process.env.LOCAL_AUTH_ADMIN_EMAIL?.trim() || 'admin@myitaru.local', nama: 'Administrator SIMK', roleId: 'admin' },
   { username: 'dokter', email: 'dokter@myitaru.local', nama: 'Dokter MYITARU', roleId: 'dokter' },
@@ -113,7 +143,7 @@ function asPublicUser(user: LocalStaffUserRecord): LocalAuthPublicUser {
     email: user.email,
     nama: user.nama,
     roleId: user.roleId,
-    aktif: true,
+    aktif: user.aktif,
     dibuatPada: user.dibuatPada
   };
 }
@@ -123,7 +153,57 @@ function isValidPasswordHash(value: string): boolean {
 }
 
 function getBootstrapUsers(): LocalAuthBootstrapUser[] {
+  if (process.env.NODE_ENV === 'production') {
+    const raw = process.env.LOCAL_AUTH_BOOTSTRAP_USERS_JSON;
+    if (!raw) return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw new Error('LOCAL_AUTH_BOOTSTRAP_USERS_JSON must contain valid JSON.', { cause: error });
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error('LOCAL_AUTH_BOOTSTRAP_USERS_JSON must be an array of bootstrap users.');
+    }
+    return parsed.map((value, index) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error(`Production bootstrap user ${index + 1} is invalid.`);
+      }
+      const account = value as Record<string, unknown>;
+      if (typeof account.username !== 'string' || typeof account.email !== 'string' ||
+          typeof account.nama !== 'string' || typeof account.roleId !== 'string' ||
+          typeof account.password !== 'string') {
+        throw new Error(`Production bootstrap user ${index + 1} must include username, email, nama, roleId, and password.`);
+      }
+      return {
+        username: account.username,
+        email: account.email,
+        nama: account.nama,
+        roleId: account.roleId,
+        password: account.password
+      };
+    });
+  }
   return ROLE_SEEDS.map((seed) => ({ ...seed, password: `${seed.username}123` }));
+}
+
+function isStrongProductionPassword(password: string): boolean {
+  return password.length >= 16 && /[a-z]/.test(password) && /[A-Z]/.test(password) &&
+    /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
+}
+
+function validateUserFields(input: { username: string; email: string; nama: string; roleId: string; password?: string }): void {
+  if (typeof input.username !== 'string' || typeof input.email !== 'string' ||
+      typeof input.nama !== 'string' || typeof input.roleId !== 'string' ||
+      !/^[a-zA-Z0-9._-]{3,64}$/.test(input.username.trim()) ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim()) ||
+      input.nama.trim().length < 1 || input.nama.trim().length > 120 ||
+      !ROLES.some(({ id }) => id === input.roleId) ||
+      (input.password !== undefined && (input.password.length < 12 || input.password.length > 128 ||
+        !/[a-z]/.test(input.password) || !/[A-Z]/.test(input.password) ||
+        !/\d/.test(input.password) || !/[^A-Za-z0-9]/.test(input.password)))) {
+    throw new LocalAuthUserError('INVALID_USER', 'Periksa nama, username, email, role, dan kekuatan kata sandi.');
+  }
 }
 
 export class LocalAuthService implements LocalAuthProvider {
@@ -148,6 +228,7 @@ export class LocalAuthService implements LocalAuthProvider {
   }
 
   async initialize(): Promise<void> {
+    const production = process.env.NODE_ENV === 'production';
     this.dummySalt = randomBytes(16).toString('hex');
     this.dummyHash = await derivePassword(randomBytes(32).toString('hex'), this.dummySalt);
 
@@ -184,10 +265,13 @@ export class LocalAuthService implements LocalAuthProvider {
         }
         // Akun lama (sandi dari secret, tanpa penanda) di-reset sekali ke sandi bawaan; akun yang sudah
         // di-reset atau sudah ganti sandi sendiri ('changed') dilewati.
-        if (stored.passwordSeed) continue;
+        if (stored.passwordSeed && !(production && stored.passwordSeed === PASSWORD_SEED)) continue;
       }
       if (account.password.length < 6 || account.password.length > 128) {
         throw new Error(`Local staff password for ${username} must contain between 6 and 128 characters.`);
+      }
+      if (production && !isStrongProductionPassword(account.password)) {
+        throw new Error(`Production bootstrap password for ${username} must be at least 16 characters and include lower-case, upper-case, numeric, and symbol characters.`);
       }
 
       const salt = randomBytes(16).toString('hex');
@@ -205,12 +289,28 @@ export class LocalAuthService implements LocalAuthProvider {
           passwordHash,
           aktif: true,
           dibuatPada: stored?.dibuatPada || new Date().toISOString(),
-          passwordSeed: PASSWORD_SEED
+          passwordSeed: production ? PRODUCTION_BOOTSTRAP_SEED : PASSWORD_SEED
         } satisfies LocalStaffUserRecord
       });
     }
 
+    if (production) {
+      const bootstrapIds = new Set(this.bootstrapUsers.map(({ username }) => accountId(username)));
+      for (const { id, data } of existing) {
+        if (data.passwordSeed === PASSWORD_SEED && !bootstrapIds.has(id) && data.aktif) {
+          changes.push({ entity: 'local_auth_users', id, data: { ...data, aktif: false } });
+        }
+      }
+    }
+
     if (changes.length) await this.persistence.commit(changes);
+    if (production) {
+      const activeAdmins = (await this.persistence.list<LocalStaffUserRecord>('local_auth_users'))
+        .some(({ data }) => data.aktif && ['admin', 'super_admin'].includes(data.roleId));
+      if (!activeAdmins) {
+        throw new Error('Production local authentication requires an active admin and a strong LOCAL_AUTH_BOOTSTRAP_USERS_JSON secret.');
+      }
+    }
     const now = Date.now();
     const expiredSessions = (await this.persistence.list<LocalAuthSessionRecord>('local_auth_sessions'))
       .filter(({ data }) => !Number.isFinite(data.expiresAt) || data.expiresAt <= now)
@@ -259,6 +359,102 @@ export class LocalAuthService implements LocalAuthProvider {
     const users = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
     const user = users.map(({ data }) => data).find((record) => record.aktif && record.email.toLowerCase() === wanted);
     return user ? this.createSession(user) : null;
+  }
+
+  async listUsers(): Promise<LocalAuthPublicUser[]> {
+    return (await this.persistence.list<LocalStaffUserRecord>('local_auth_users'))
+      .map(({ data }) => asPublicUser(data));
+  }
+
+  async createUser(input: LocalAuthUserInput): Promise<LocalAuthPublicUser> {
+    if (!input || typeof input !== 'object' || typeof input.username !== 'string' ||
+        typeof input.email !== 'string' || typeof input.nama !== 'string' ||
+        typeof input.roleId !== 'string' || typeof input.password !== 'string' ||
+        (typeof input.aktif !== 'undefined' && typeof input.aktif !== 'boolean')) {
+      throw new LocalAuthUserError('INVALID_USER', 'Data pengguna tidak valid.');
+    }
+    const username = input.username.trim();
+    const email = input.email.trim().toLowerCase();
+    const nama = input.nama.trim();
+    validateUserFields({ ...input, username, email, nama });
+    const users = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
+    if (users.some(({ data }) => data.username.toLowerCase() === username.toLowerCase() || data.email.toLowerCase() === email)) {
+      throw new LocalAuthUserError('USER_EXISTS', 'Username atau email sudah digunakan.');
+    }
+
+    const id = accountId(username);
+    if (await this.persistence.get<LocalStaffUserRecord>('local_auth_users', id)) {
+      throw new LocalAuthUserError('USER_EXISTS', 'Username atau email sudah digunakan.');
+    }
+    const passwordSalt = randomBytes(16).toString('hex');
+    const passwordHash = (await derivePassword(input.password, passwordSalt)).toString('hex');
+    const user: LocalStaffUserRecord = {
+      id,
+      username,
+      email,
+      nama,
+      roleId: input.roleId,
+      passwordSalt,
+      passwordHash,
+      aktif: input.aktif ?? true,
+      dibuatPada: new Date().toISOString(),
+      passwordSeed: 'managed'
+    };
+    await this.persistence.commit([{ entity: 'local_auth_users', id, data: user }]);
+    return asPublicUser(user);
+  }
+
+  async updateUser(id: string, input: LocalAuthUserUpdate): Promise<LocalAuthPublicUser> {
+    const existing = await this.persistence.get<LocalStaffUserRecord>('local_auth_users', id);
+    if (!existing) throw new LocalAuthUserError('USER_NOT_FOUND', 'Pengguna tidak ditemukan.');
+    if (!input || typeof input !== 'object' ||
+        (typeof input.email !== 'undefined' && typeof input.email !== 'string') ||
+        (typeof input.nama !== 'undefined' && typeof input.nama !== 'string') ||
+        (typeof input.roleId !== 'undefined' && typeof input.roleId !== 'string') ||
+        (typeof input.password !== 'undefined' && typeof input.password !== 'string') ||
+        (typeof input.aktif !== 'undefined' && typeof input.aktif !== 'boolean')) {
+      throw new LocalAuthUserError('INVALID_USER', 'Data pengguna tidak valid.');
+    }
+
+    const updated = {
+      ...existing,
+      ...(input.email === undefined ? {} : { email: input.email.trim().toLowerCase() }),
+      ...(input.nama === undefined ? {} : { nama: input.nama.trim() }),
+      ...(input.roleId === undefined ? {} : { roleId: input.roleId }),
+      ...(input.aktif === undefined ? {} : { aktif: input.aktif })
+    };
+    validateUserFields(updated);
+    const users = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
+    if (users.some(({ id: otherId, data }) => otherId !== id &&
+        (data.email.toLowerCase() === updated.email || data.username.toLowerCase() === updated.username.toLowerCase()))) {
+      throw new LocalAuthUserError('USER_EXISTS', 'Username atau email sudah digunakan.');
+    }
+    if (existing.aktif && ['admin', 'super_admin'].includes(existing.roleId) &&
+        (!updated.aktif || !['admin', 'super_admin'].includes(updated.roleId)) &&
+        !users.some(({ id: otherId, data }) => otherId !== id && data.aktif && ['admin', 'super_admin'].includes(data.roleId))) {
+      throw new LocalAuthUserError('LAST_ADMIN', 'Tidak dapat menonaktifkan atau menurunkan role admin terakhir.');
+    }
+
+    if (input.password) {
+      validateUserFields({ ...updated, password: input.password });
+      updated.passwordSalt = randomBytes(16).toString('hex');
+      updated.passwordHash = (await derivePassword(input.password, updated.passwordSalt)).toString('hex');
+      updated.passwordSeed = 'changed';
+    }
+    await this.persistence.commit([{ entity: 'local_auth_users', id, data: updated }]);
+    return asPublicUser(updated);
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    const existing = await this.persistence.get<LocalStaffUserRecord>('local_auth_users', id);
+    if (!existing) throw new LocalAuthUserError('USER_NOT_FOUND', 'Pengguna tidak ditemukan.');
+    if (existing.aktif && ['admin', 'super_admin'].includes(existing.roleId)) {
+      const users = await this.persistence.list<LocalStaffUserRecord>('local_auth_users');
+      if (!users.some(({ id: otherId, data }) => otherId !== id && data.aktif && ['admin', 'super_admin'].includes(data.roleId))) {
+        throw new LocalAuthUserError('LAST_ADMIN', 'Tidak dapat menghapus admin terakhir.');
+      }
+    }
+    await this.persistence.commit([{ entity: 'local_auth_users', id, data: null }]);
   }
 
   private async createSession(user: LocalStaffUserRecord): Promise<LocalAuthLoginResult> {

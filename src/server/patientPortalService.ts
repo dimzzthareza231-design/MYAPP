@@ -257,7 +257,13 @@ export function registerPatientPortalRoutes(
       .map((part) => part.trim())
       .find((part) => part.startsWith(`${patientSessionCookieName}=`))
       ?.slice(patientSessionCookieName.length + 1);
-    return patientSessions.get(bearer || cookieToken || '');
+    let decodedCookieToken = '';
+    try {
+      decodedCookieToken = decodeURIComponent(cookieToken || '');
+    } catch {
+      decodedCookieToken = '';
+    }
+    return patientSessions.get(bearer) || patientSessions.get(decodedCookieToken);
   }
 
   function setPatientSessionCookie(res: express.Response, token: string, maxAgeSeconds = 12 * 60 * 60): void {
@@ -971,8 +977,14 @@ export function registerPatientPortalRoutes(
       .map((part) => part.trim())
       .find((part) => part.startsWith(`${patientSessionCookieName}=`))
       ?.slice(patientSessionCookieName.length + 1);
-    const token = bearer || cookieToken || '';
-    if (token) patientSessions.delete(token);
+    if (bearer) patientSessions.delete(bearer);
+    if (cookieToken) {
+      try {
+        patientSessions.delete(decodeURIComponent(cookieToken));
+      } catch {
+        // Ignore malformed cookie values while still clearing the cookie.
+      }
+    }
     setPatientSessionCookie(res, '', 0);
     return res.status(204).end();
   });

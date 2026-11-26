@@ -72,7 +72,7 @@ export const EmployeePortal: React.FC = () => {
   // Gateway auth state
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('myitaru_emp_token'));
   const [loginIdentifier, setLoginIdentifier] = useState('');
-  const [loginPassword, setLoginPassword] = useState('myitaru2026');
+  const [loginPassword, setLoginPassword] = useState('');
   const [selectedLoginDivId, setSelectedLoginDivId] = useState<string>('keperawatan');
   const [loginCategoryFilter, setLoginCategoryFilter] = useState<'Semua' | DivisionCategory>('Semua');
   const [authLoading, setAuthLoading] = useState(false);
@@ -468,9 +468,16 @@ export const EmployeePortal: React.FC = () => {
                     </p>
                   </div>
 
+                  {import.meta.env.PROD && (
+                    <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+                      Login belum tersedia: autentikasi HRIS dan penyimpanan portal karyawan belum dikonfigurasi untuk produksi.
+                    </p>
+                  )}
+
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
+                      if (import.meta.env.PROD) return;
                       executeGatewayLogin('nip');
                     }}
                     className="space-y-4"
@@ -481,6 +488,7 @@ export const EmployeePortal: React.FC = () => {
                         type="text"
                         value={loginIdentifier}
                         onChange={(e) => setLoginIdentifier(e.target.value)}
+                        disabled={import.meta.env.PROD}
                         placeholder="Contoh: NIP-19840920-015 atau kosongkan untuk demo"
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                       />
@@ -491,6 +499,7 @@ export const EmployeePortal: React.FC = () => {
                       <select
                         value={selectedLoginDivId}
                         onChange={(e) => setSelectedLoginDivId(e.target.value)}
+                        disabled={import.meta.env.PROD}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         {HOSPITAL_DIVISIONS.map((d) => (
@@ -507,16 +516,17 @@ export const EmployeePortal: React.FC = () => {
                         type="password"
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
+                        disabled={import.meta.env.PROD}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
 
                     <button
                       type="submit"
-                      disabled={authLoading}
+                      disabled={authLoading || import.meta.env.PROD}
                       className="w-full py-3 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm transition cursor-pointer disabled:opacity-60"
                     >
-                      {authLoading ? 'Memverifikasi via API Gateway...' : 'Lanjutkan Login'}
+                      {authLoading ? 'Memverifikasi via API Gateway...' : import.meta.env.PROD ? 'Belum tersedia di produksi' : 'Lanjutkan Login'}
                     </button>
                   </form>
 

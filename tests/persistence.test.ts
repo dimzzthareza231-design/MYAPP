@@ -319,6 +319,30 @@ describe('integrasi Express dengan persistence', () => {
         'Diperiksa'
       );
 
+      const dossier = await fetch(`${firstUrl}/api/v1/dossier/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          no_rm: 'RM-TEST-1',
+          pasien_nama: 'Pasien Persisten',
+          doc_type: 'CatatanUji',
+          title: 'Dokumen Persisten',
+          data: { catatan: 'Catatan uji persistensi.' }
+        })
+      });
+      const dossierBody = await dossier.json() as { data: { id: string } };
+      assert.equal(dossier.status, 201);
+      assert.ok(await durableStore.get('documents', dossierBody.data.id));
+
+      const audit = await fetch(`${firstUrl}/api/v1/audit/logs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'PERSISTENCE_TEST', module: 'test' })
+      });
+      const auditBody = await audit.json() as { data: { id: string } };
+      assert.equal(audit.status, 201);
+      assert.ok(await durableStore.get('audit_logs', auditBody.data.id));
+
       const systemDataValue = JSON.stringify([{ id: 'POL-TEST', nama: 'Poli Persisten' }]);
       const systemDataWrite = await fetch(`${firstUrl}/api/v1/system-data/hospital_poli_master`, {
         method: 'PUT',

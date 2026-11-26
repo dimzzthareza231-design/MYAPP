@@ -5,7 +5,7 @@ interface BrandLogoProps {
   className?: string;
 }
 
-export const OFFICIAL_LOGO_URL = '/logo-myitaru.png';
+export const OFFICIAL_LOGO_URL = '/logo-myitaru.webp';
 
 export const BrandLogo: React.FC<BrandLogoProps> = ({
   alt = 'MYITARU',

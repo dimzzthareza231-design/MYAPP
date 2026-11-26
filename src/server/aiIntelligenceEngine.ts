@@ -17,8 +17,9 @@ export interface AiExecutionResult<T = any> {
   latencyMs: number;
 }
 
-export const GEMINI_PRIMARY_MODEL = 'gemini-2.5-flash';
-export const GEMINI_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
+export const GEMINI_PRIMARY_MODEL = process.env.GEMINI_PRIMARY_MODEL?.trim() || 'gemini-2.5-flash';
+export const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL?.trim() || 'gemini-3.1-flash-lite';
+export const GEMINI_REQUEST_TIMEOUT_MS = 20_000;
 
 export function getGeminiModelFallbackChain(preferredModel?: string): string[] {
   return [...new Set([preferredModel || GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL])];
@@ -77,6 +78,7 @@ export async function executeResilientGemini(params: {
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
     httpOptions: {
+      timeout: GEMINI_REQUEST_TIMEOUT_MS,
       headers: {
         'User-Agent': 'aistudio-build'
       }

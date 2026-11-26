@@ -16,6 +16,7 @@ const originalSetItem = Storage.prototype.setItem;
 const originalRemoveItem = Storage.prototype.removeItem;
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const pending = new Set<string>();
+const conflicted = new Set<string>();
 let active = false;
 let installed = false;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -37,17 +38,35 @@ async function push(key: string): Promise<void> {
       console.warn(`[ModuleSync] ${key} melebihi 900 KB; hanya tersimpan di browser ini.`);
       return;
     }
+    const versions = readVersions();
+    const version = versions[key];
+    const condition: Record<string, string> = version
+      ? { 'If-Match': `"${version}"` }
+      : { 'If-None-Match': '*' };
     const response = await fetch(url(key), value === null
-      ? { method: 'DELETE', credentials: 'same-origin' }
-      : { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: value }) });
+      ? { method: 'DELETE', credentials: 'same-origin', headers: condition }
+      : { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...condition }, body: JSON.stringify({ data: value }) });
+    if (response.status === 412) {
+      const conflict = await response.json() as { version?: string | null };
+      if (conflict.version) {
+        versions[key] = conflict.version;
+        writeVersions(versions);
+        } else {
+          delete versions[key];
+          writeVersions(versions);
+      }
+        conflicted.add(key);
+      window.dispatchEvent(new CustomEvent('module-data-conflict', { detail: { key } }));
+      console.warn(`[ModuleSync] ${key} berubah di server; perubahan lokal belum disimpan.`);
+      return;
+    }
     if (!response.ok) {
       console.warn(`[ModuleSync] ${key} gagal disimpan ke server (HTTP ${response.status}).`);
       return;
     }
-    const body = await response.json() as { updatedAt?: string };
-    const versions = readVersions();
-    if (value === null || !body.updatedAt) delete versions[key];
-    else versions[key] = body.updatedAt;
+    const body = await response.json() as { version?: string; updatedAt?: string };
+    if (value === null || !body.version) delete versions[key];
+    else versions[key] = body.version;
     writeVersions(versions);
   } finally {
     pending.delete(key);
@@ -65,11 +84,17 @@ function install() {
   installed = true;
   Storage.prototype.setItem = function setItem(this: Storage, key: string, value: string) {
     originalSetItem.call(this, key, value);
-    if (active && this === localStorage && isSyncedKey(key)) schedule(key);
+    if (active && this === localStorage && isSyncedKey(key)) {
+      conflicted.delete(key);
+      schedule(key);
+    }
   };
   Storage.prototype.removeItem = function removeItem(this: Storage, key: string) {
     originalRemoveItem.call(this, key);
-    if (active && this === localStorage && isSyncedKey(key)) schedule(key);
+    if (active && this === localStorage && isSyncedKey(key)) {
+      conflicted.delete(key);
+      schedule(key);
+    }
   };
 }
 
@@ -78,20 +103,20 @@ export async function pullModuleData(): Promise<void> {
   if (!response.ok) return;
   const { index = {} } = await response.json() as { index?: Record<string, string> };
   const versions = readVersions();
-  const changed = Object.entries(index).filter(([key, updatedAt]) => isSyncedKey(key) && versions[key] !== updatedAt && !pending.has(key));
+  const changed = Object.entries(index).filter(([key, version]) => isSyncedKey(key) && versions[key] !== version && !pending.has(key) && !conflicted.has(key));
   // Satu request per 20 kunci (bukan satu per kunci): login di browser baru turun dari ~5 detik.
   const batches = Array.from({ length: Math.ceil(changed.length / 20) }, (_, i) => changed.slice(i * 20, i * 20 + 20).map(([key]) => key));
   await Promise.all(batches.map(async (keys) => {
     const batch = await fetch(`/api/v1/module-data?keys=${keys.map(encodeURIComponent).join(',')}`, { credentials: 'same-origin' });
     if (!batch.ok) return;
-    const { records = {} } = await batch.json() as { records?: Record<string, { data: string; updatedAt: string }> };
+    const { records = {} } = await batch.json() as { records?: Record<string, { data: string; updatedAt: string; version?: string }> };
     for (const [key, record] of Object.entries(records)) {
       originalSetItem.call(localStorage, key, record.data);
-      versions[key] = record.updatedAt;
+      versions[key] = record.version || record.updatedAt;
     }
   }));
   for (const key of Object.keys(localStorage)) {
-    if (!isSyncedKey(key) || key in index || pending.has(key)) continue;
+    if (!isSyncedKey(key) || key in index || pending.has(key) || conflicted.has(key)) continue;
     if (versions[key]) {
       // Pernah tersinkron lalu dihapus di PC lain.
       originalRemoveItem.call(localStorage, key);
@@ -122,5 +147,6 @@ export async function stopModuleSync(flush: boolean): Promise<void> {
   for (const key of keys) clearTimeout(timers.get(key));
   if (flush) await Promise.all(keys.map((key) => push(key).catch(() => undefined)));
   pending.clear();
+  conflicted.clear();
   active = false;
 }

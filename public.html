@@ -12,27 +12,7 @@
     <link rel="icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <script>
-      // Ensure window.fetch has both getter and setter so polyfills and wrappers can attach safely
-      (function () {
-        try {
-          var origFetch = typeof window !== 'undefined' && window.fetch ? window.fetch.bind(window) : undefined;
-          var currentFetch = origFetch;
-          Object.defineProperty(window, 'fetch', {
-            get: function () {
-              return currentFetch;
-            },
-            set: function (fn) {
-              currentFetch = fn;
-            },
-            configurable: true,
-            enumerable: true
-          });
-        } catch (e) {
-          // Silently continue if environment disallows redefining fetch
-        }
-      })();
-    </script>
+    <script src="/fetch-compat.js"></script>
     <title>Web Publik MYITARU</title>
     <meta name="description" content="MYITARU - Sistem informasi manajemen dan rekam medis elektronik terintegrasi." />
     <meta property="og:title" content="MYITARU SIMK" />

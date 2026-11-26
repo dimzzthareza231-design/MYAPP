@@ -3,6 +3,7 @@ import { Users, Plus, Edit2, Trash2, Shield, Eye, EyeOff, X, Save, UserCheck, Ke
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { ROLES, getRoleById } from '../../data/roles';
+import { isLocalAuthMode } from '../../lib/firebase';
 
 export function UserManagement() {
   const { users, currentUser, addUser, updateUser, deleteUser } = useAuth();
@@ -21,13 +22,13 @@ export function UserManagement() {
 
   const openEditModal = (user: any) => {
     setEditingUser(user);
-    setFormData({ nama: user.nama, username: user.username, password: user.password, email: user.email, roleId: user.roleId, aktif: user.aktif });
+    setFormData({ nama: user.nama, username: user.username, password: '', email: user.email, roleId: user.roleId, aktif: user.aktif });
     setShowModal(true);
   };
 
-  const handleSave = () => {
-    if (!formData.nama || !formData.username || !formData.password) {
-      toast.error('Nama, username, dan password wajib diisi');
+  const handleSave = async () => {
+    if (!formData.nama.trim() || !formData.username.trim() || !formData.email.trim() || (!editingUser && !formData.password)) {
+      toast.error('Nama, username, email, dan password akun baru wajib diisi');
       return;
     }
 
@@ -38,32 +39,50 @@ export function UserManagement() {
       return;
     }
 
-    if (editingUser) {
-      updateUser(editingUser.id, formData);
-      toast.success('User berhasil diupdate');
-    } else {
-      addUser(formData);
-      toast.success('User baru berhasil ditambahkan');
+    try {
+      if (editingUser) {
+        await updateUser(editingUser.id, {
+          nama: formData.nama,
+          email: formData.email,
+          roleId: formData.roleId,
+          aktif: formData.aktif,
+          password: formData.password || undefined
+        });
+        toast.success('User berhasil diupdate');
+      } else {
+        await addUser(formData);
+        toast.success('User baru berhasil ditambahkan');
+      }
+      setShowModal(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Perubahan pengguna gagal disimpan.');
     }
-    setShowModal(false);
   };
 
-  const handleDelete = (user: any) => {
+  const handleDelete = async (user: any) => {
     if (user.id === currentUser?.id) {
       toast.error('Tidak bisa menghapus akun sendiri');
       return;
     }
-    deleteUser(user.id);
-    toast.success(`User ${user.nama} berhasil dihapus`);
+    try {
+      await deleteUser(user.id);
+      toast.success(`User ${user.nama} berhasil dihapus`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Pengguna gagal dihapus.');
+    }
   };
 
-  const toggleAktif = (user: any) => {
+  const toggleAktif = async (user: any) => {
     if (user.id === currentUser?.id) {
       toast.error('Tidak bisa menonaktifkan akun sendiri');
       return;
     }
-    updateUser(user.id, { aktif: !user.aktif });
-    toast.success(user.aktif ? 'User dinonaktifkan' : 'User diaktifkan');
+    try {
+      await updateUser(user.id, { aktif: !user.aktif });
+      toast.success(user.aktif ? 'User dinonaktifkan' : 'User diaktifkan');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Status pengguna gagal diubah.');
+    }
   };
 
   return (
@@ -112,7 +131,7 @@ export function UserManagement() {
                   <td className="p-4 text-slate-600 dark:text-slate-400">{user.email}</td>
                   <td className="p-4">
                     <button
-                      onClick={() => toggleAktif(user)}
+                      onClick={() => void toggleAktif(user)}
                       className={`px-2 py-1 rounded-full text-xs font-bold transition-colors ${
                         user.aktif
                           ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
@@ -127,7 +146,7 @@ export function UserManagement() {
                       <button onClick={() => openEditModal(user)} className="p-1.5 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDelete(user)} className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded">
+                      <button onClick={() => void handleDelete(user)} className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -230,6 +249,7 @@ export function UserManagement() {
                     type="text" 
                     value={formData.username} 
                     onChange={(e) => setFormData({...formData, username: e.target.value})}
+                    disabled={isLocalAuthMode && Boolean(editingUser)}
                     placeholder="dr_budi"
                     className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs sm:text-sm bg-slate-50 dark:bg-slate-950/70 text-slate-900 dark:text-white font-mono focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" 
                   />
@@ -237,14 +257,14 @@ export function UserManagement() {
 
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
-                    Password <span className="text-rose-500">*</span>
+                    Password {editingUser ? '(opsional)' : <span className="text-rose-500">*</span>}
                   </label>
                   <div className="relative">
                     <input 
                       type={showPassword ? 'text' : 'password'} 
                       value={formData.password} 
                       onChange={(e) => setFormData({...formData, password: e.target.value})}
-                      placeholder="••••••••"
+                      placeholder={editingUser ? 'Kosongkan jika tidak diganti' : 'Min. 12 karakter, huruf besar/kecil, angka, simbol'}
                       className="w-full p-2.5 pr-9 border border-slate-300 dark:border-slate-700 rounded-xl text-xs sm:text-sm bg-slate-50 dark:bg-slate-950/70 text-slate-900 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" 
                     />
                     <button 

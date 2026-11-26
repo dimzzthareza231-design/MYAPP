@@ -5,6 +5,8 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { COMMON_MODULES, MODULE_ALIASES, PATIENT_DATA_MODULES, ROLES } from '../data/roles';
 import { getDocumentQrScope, readSecurePatientQrToken } from './securePatientQr';
+import { LocalAuthUserError } from './localAuth';
+import type { LocalAuthLoginResult, LocalAuthSession, LocalAuthUserInput, LocalAuthUserUpdate } from './localAuth';
 
 const SESSION_COOKIE = 'myitaru_core_session';
 const LOCAL_SESSION_COOKIE = 'myitaru_local_session';
@@ -38,37 +40,14 @@ export interface CoreAuthOptions {
   localAuth?: {
     initialize(): Promise<void>;
     changePassword?(token: string, currentPassword: string, newPassword: string): Promise<'OK' | 'INVALID_SESSION' | 'WRONG_PASSWORD' | 'WEAK_PASSWORD'>;
-    loginWithEmail?(email: string): Promise<{
-      token: string;
-      user: { id: string; username: string; email: string; nama: string; roleId: string; aktif: true; dibuatPada: string };
-      principal: CorePrincipal;
-    } | null>;
-    login(identifier: string, password: string): Promise<{
-      token: string;
-      user: {
-        id: string;
-        username: string;
-        email: string;
-        nama: string;
-        roleId: string;
-        aktif: true;
-        dibuatPada: string;
-      };
-      principal: CorePrincipal;
-    } | null>;
-    resolveSession(token: string): Promise<{
-      user: {
-        id: string;
-        username: string;
-        email: string;
-        nama: string;
-        roleId: string;
-        aktif: true;
-        dibuatPada: string;
-      };
-      principal: CorePrincipal;
-    } | null>;
+    loginWithEmail?(email: string): Promise<LocalAuthLoginResult | null>;
+    login(identifier: string, password: string): Promise<LocalAuthLoginResult | null>;
+    resolveSession(token: string): Promise<LocalAuthSession | null>;
     logout(token: string): Promise<void>;
+    listUsers(): Promise<LocalAuthSession['user'][]>;
+    createUser(input: LocalAuthUserInput): Promise<LocalAuthSession['user']>;
+    updateUser(id: string, input: LocalAuthUserUpdate): Promise<LocalAuthSession['user']>;
+    deleteUser(id: string): Promise<void>;
   };
 }
 
@@ -168,6 +147,7 @@ function isSameOrigin(req: express.Request): boolean {
 }
 
 export function scopeForPath(path: string, req?: express.Request): string | null {
+  if (path === '/api/v1/auth/users' || path.startsWith('/api/v1/auth/users/')) return 'user-management';
   if (path === '/api/v1/dossier/document-qr/issue') {
     return getDocumentQrScope(req?.body?.documentType);
   }
@@ -198,6 +178,7 @@ export function scopeForPath(path: string, req?: express.Request): string | null
 }
 
 export function hasScope(roleId: string, scope: string): boolean {
+  if (scope === 'user-management') return ['super_admin', 'admin'].includes(roleId);
   if (roleId === 'super_admin' || COMMON_MODULES.includes(scope)) return true;
   const role = ROLES.find((item) => item.id === roleId);
   if (!role) return false;
@@ -230,6 +211,14 @@ function setSessionCookie(
     'Set-Cookie',
     `${cookieName}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`,
   );
+}
+
+function sendLocalUserError(error: unknown, res: express.Response): boolean {
+  if (!(error instanceof LocalAuthUserError)) return false;
+  const status = error.code === 'USER_NOT_FOUND' ? 404 :
+    error.code === 'USER_EXISTS' || error.code === 'LAST_ADMIN' ? 409 : 400;
+  res.status(status).json({ success: false, code: error.code, message: error.message });
+  return true;
 }
 
 export function getCoreAuthMode(): CoreAuthMode {
@@ -436,6 +425,8 @@ export function registerCoreAuthentication(
       ? ['/api/auth/login', '/api/auth/me', '/api/auth/logout', '/api/auth/password', '/api/auth/google', '/api/auth/google/callback'].includes(apiPath)
       : apiPath === '/api/auth/session';
     if (publicAuthEndpoint || apiPath === '/api/v1/health') return next();
+    const scope = scopeForPath(apiPath, req);
+    if (!scope) return res.status(404).json({ success: false, code: 'NOT_FOUND' });
 
     const cookieName = authMode === 'local' ? LOCAL_SESSION_COOKIE : SESSION_COOKIE;
     const cookieToken = getCookie(req, cookieName);
@@ -456,12 +447,8 @@ export function registerCoreAuthentication(
         return res.status(401).json({ success: false, code: 'INVALID_SESSION' });
       }
 
-      const scope = scopeForPath(apiPath, req);
-      if (scope && !hasScope(principal.roleId, scope)) {
+      if (!hasScope(principal.roleId, scope)) {
         return res.status(403).json({ success: false, code: 'FORBIDDEN' });
-      }
-      if (!scope) {
-        return res.status(404).json({ success: false, code: 'NOT_FOUND' });
       }
       if (scope !== 'dashboard' && !principal.mfaVerified && principal.authMode !== 'local') {
         return res.status(403).json({ success: false, code: 'MFA_REQUIRED' });
@@ -487,6 +474,67 @@ export function registerCoreAuthentication(
       return next(error);
     }
   });
+
+  if (authMode === 'local') {
+    app.get('/api/v1/auth/users', async (_req, res, next) => {
+      try {
+        return res.json({ success: true, users: await localAuth!.listUsers() });
+      } catch (error) {
+        return next(error);
+      }
+    });
+
+    app.post('/api/v1/auth/users', async (req: CoreAuthRequest, res, next) => {
+      if (req.corePrincipal?.roleId !== 'super_admin' && req.body?.roleId === 'super_admin') {
+        return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+      }
+      try {
+        const user = await localAuth!.createUser(req.body);
+        return res.status(201).json({ success: true, user });
+      } catch (error) {
+        if (sendLocalUserError(error, res)) return;
+        return next(error);
+      }
+    });
+
+    app.patch('/api/v1/auth/users/:id', async (req: CoreAuthRequest, res, next) => {
+      const { id } = req.params;
+      const roleId = req.body?.roleId;
+      if ((req.corePrincipal?.roleId !== 'super_admin' && roleId === 'super_admin') ||
+          (id === req.corePrincipal?.uid && (req.body?.aktif === false ||
+            (typeof roleId === 'string' && !['admin', 'super_admin'].includes(roleId))))) {
+        return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+      }
+      try {
+        if (req.corePrincipal?.roleId !== 'super_admin' &&
+            (await localAuth!.listUsers()).some((user) => user.id === id && user.roleId === 'super_admin')) {
+          return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+        }
+        const user = await localAuth!.updateUser(id, req.body);
+        return res.json({ success: true, user });
+      } catch (error) {
+        if (sendLocalUserError(error, res)) return;
+        return next(error);
+      }
+    });
+
+    app.delete('/api/v1/auth/users/:id', async (req: CoreAuthRequest, res, next) => {
+      if (req.params.id === req.corePrincipal?.uid) {
+        return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+      }
+      try {
+        if (req.corePrincipal?.roleId !== 'super_admin' &&
+            (await localAuth!.listUsers()).some((user) => user.id === req.params.id && user.roleId === 'super_admin')) {
+          return res.status(403).json({ success: false, code: 'FORBIDDEN' });
+        }
+        await localAuth!.deleteUser(req.params.id);
+        return res.json({ success: true });
+      } catch (error) {
+        if (sendLocalUserError(error, res)) return;
+        return next(error);
+      }
+    });
+  }
 }
 
 export function assertProductionAuthConfiguration(authMode = getCoreAuthMode()): void {

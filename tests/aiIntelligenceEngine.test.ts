@@ -7,12 +7,11 @@ import {
 } from '../src/server/aiIntelligenceEngine';
 
 describe('Gemini model selection', () => {
-  test('uses Gemini 2.5 Flash as the default primary model', () => {
+  test('uses the configured primary and fallback models', () => {
     assert.deepEqual(getGeminiModelFallbackChain(), [
       GEMINI_PRIMARY_MODEL,
       GEMINI_FALLBACK_MODEL
     ]);
-    assert.equal(GEMINI_PRIMARY_MODEL, 'gemini-2.5-flash');
   });
 
   test('honors a preferred model without duplicating the fallback', () => {

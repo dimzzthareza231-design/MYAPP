@@ -159,7 +159,7 @@ export function setCloudStatus(patch: Partial<CloudStatus>) {
 // Replaces physical localStorage completely for all module datasets!
 const writeDebounceTimers = new Map<string, any>();
 const storageMode = import.meta.env.VITE_STORAGE_MODE || 'firebase';
-if (!['mysql', 'firebase', 'hybrid', 'memory', 'd1'].includes(storageMode)) {
+if (!['mysql', 'firebase', 'hybrid', 'memory', 'd1', 'firestore'].includes(storageMode)) {
   throw new Error(`Unsupported VITE_STORAGE_MODE: ${storageMode}.`);
 }
 const isCoreApp = import.meta.env.VITE_APP_TARGET !== 'public';

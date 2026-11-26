@@ -36,6 +36,7 @@ async function call(
   body?: unknown,
   token?: string | null,
   cookie?: string,
+  extraHeaders: Record<string, string> = {},
 ): Promise<Res> {
   const authToken = token === undefined && base === core ? 'test-token' : token;
   const res = await fetch(base + path, {
@@ -44,7 +45,8 @@ async function call(
       'Content-Type': 'application/json',
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...(cookie ? { Cookie: cookie } : {}),
-      ...(path === '/api/auth/session' ? { Origin: base } : {})
+      ...(path === '/api/auth/session' ? { Origin: base } : {}),
+      ...extraHeaders
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -78,13 +80,27 @@ after(() => servers.forEach((s) => s.close()));
 
 describe('isolasi web publik dan aplikasi inti', () => {
   test('API data pasien inti tidak tersedia di web publik', async () => {
-    assert.equal((await call(pub, 'GET', '/api/v1/patients')).status, 404);
+    const response = await call(pub, 'GET', '/api/v1/patients');
+    assert.equal(response.status, 404);
+    assert.deepEqual(response.body, { success: false, code: 'NOT_FOUND' });
   });
   test('API AI tidak tersedia di web publik', async () => {
     assert.equal((await call(pub, 'POST', '/api/ai/analyze', { clinicalNote: 'x' })).status, 404);
   });
   test('API publik tidak tersedia di aplikasi inti', async () => {
     assert.equal((await call(core, 'GET', '/api/public/hospital-catalog')).status, 404);
+  });
+  test('API yang tidak dikenal selalu menjawab JSON 404', async () => {
+    const publicResponse = await call(pub, 'GET', '/api/not-a-route');
+    const coreResponse = await call(core, 'GET', '/api/v1/not-a-route');
+    assert.deepEqual(publicResponse.body, { success: false, code: 'NOT_FOUND' });
+    assert.deepEqual(coreResponse.body, { success: false, code: 'NOT_FOUND' });
+  });
+  test('security headers mengizinkan kamera dan mikrofon serta menetapkan CSP', async () => {
+    const response = await fetch(`${core}/api/v1/health`);
+    assert.equal(response.headers.get('permissions-policy'), 'camera=(self), microphone=(self), geolocation=(self)');
+    assert.match(response.headers.get('content-security-policy') || '', /object-src 'none'/);
+    assert.match(response.headers.get('content-security-policy') || '', /script-src 'self'/);
   });
   test('health check aplikasi inti', async () => {
     const r = await call(core, 'GET', '/api/v1/health');
@@ -124,19 +140,32 @@ describe('isolasi web publik dan aplikasi inti', () => {
   });
 
   test('data modul: simpan, indeks, baca, hapus; kunci liar dan viewer ditolak', async () => {
-    const saved = await call(core, 'PUT', '/api/v1/module-data/hospital_billing_ralan', { data: '[{"id":"BIL-1"}]' }, 'cashier-token');
+    const key = '/api/v1/module-data/hospital_billing_ralan';
+    const missingCondition = await call(core, 'PUT', key, { data: '[{"id":"BIL-1"}]' }, 'cashier-token');
+    assert.equal(missingCondition.status, 428);
+    const saved = await call(core, 'PUT', key, { data: '[{"id":"BIL-1"}]' }, 'cashier-token', undefined, { 'If-None-Match': '*' });
     assert.equal(saved.status, 200);
+    assert.equal(typeof saved.body.version, 'string');
     const index = (await call(core, 'GET', '/api/v1/module-data', undefined, 'role:dokter')).body.index;
-    assert.equal(index.hospital_billing_ralan, saved.body.updatedAt);
-    assert.equal((await call(core, 'GET', '/api/v1/module-data/hospital_billing_ralan', undefined, 'role:apoteker')).body.data, '[{"id":"BIL-1"}]');
+    assert.equal(index.hospital_billing_ralan, saved.body.version);
+    const fetched = await call(core, 'GET', key, undefined, 'role:apoteker');
+    assert.equal(fetched.body.data, '[{"id":"BIL-1"}]');
+    assert.equal(fetched.body.version, saved.body.version);
+    const updated = await call(core, 'PUT', key, { data: '[{"id":"BIL-2"}]' }, 'cashier-token', undefined, { 'If-Match': `"${saved.body.version}"` });
+    assert.equal(updated.status, 200);
+    const staleWrite = await call(core, 'PUT', key, { data: '[{"id":"BIL-3"}]' }, 'cashier-token', undefined, { 'If-Match': `"${saved.body.version}"` });
+    assert.equal(staleWrite.status, 412);
+    assert.equal(staleWrite.body.code, 'MODULE_DATA_CONFLICT');
+    assert.equal((await call(core, 'GET', key, undefined, 'role:apoteker')).body.data, '[{"id":"BIL-2"}]');
     const batch = (await call(core, 'GET', '/api/v1/module-data?keys=hospital_billing_ralan,hospital_tidak_ada,rahasia')).body.records;
     assert.deepEqual(Object.keys(batch), ['hospital_billing_ralan']);
+    assert.equal(batch.hospital_billing_ralan.version, updated.body.version);
     assert.equal((await call(core, 'PUT', '/api/v1/module-data/rahasia', { data: 'x' })).status, 400);
-    assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_igd_Penanganan IGD')}`, { data: '[]' })).status, 200);
+    assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_igd_Penanganan IGD')}`, { data: '[]' }, 'cashier-token', undefined, { 'If-None-Match': '*' })).status, 200);
     assert.equal((await call(core, 'PUT', `/api/v1/module-data/${encodeURIComponent('hospital_a/b')}`, { data: '[]' })).status, 400);
     assert.equal((await call(core, 'PUT', '/api/v1/module-data/hospital_x', { data: 'x' }, 'viewer-token')).status, 403);
     assert.equal((await call(core, 'GET', '/api/v1/module-data', undefined, 'role:it_support')).status, 403);
-    assert.equal((await call(core, 'DELETE', '/api/v1/module-data/hospital_billing_ralan', undefined, 'cashier-token')).status, 200);
+    assert.equal((await call(core, 'DELETE', key, undefined, 'cashier-token', undefined, { 'If-Match': `"${updated.body.version}"` })).status, 200);
     assert.equal((await call(core, 'GET', '/api/v1/module-data/hospital_billing_ralan')).status, 404);
     assert.equal((await call(core, 'GET', '/api/v1/module-data')).body.index.hospital_billing_ralan, undefined);
   });
@@ -291,7 +320,8 @@ describe('web publik pasien', () => {
     const cookie = issued.cookie.split(';')[0];
 
     assert.equal((await call(pub, 'GET', '/api/patient/dossier', undefined, null, cookie)).status, 200);
-    assert.equal((await call(pub, 'DELETE', '/api/patient/session', undefined, null, cookie)).status, 204);
+    assert.equal((await call(pub, 'GET', '/api/patient/dossier', undefined, 'cookie-session', cookie)).status, 200);
+    assert.equal((await call(pub, 'DELETE', '/api/patient/session', undefined, 'cookie-session', cookie)).status, 204);
     assert.equal((await call(pub, 'GET', '/api/patient/dossier', undefined, null, cookie)).status, 401);
   });
 

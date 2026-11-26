@@ -84,6 +84,7 @@ const fadeSlideTransition = {
 };
 
 const PATIENT_TOKEN_KEY = 'myitaru_patient_token';
+const COOKIE_SESSION_TOKEN = 'cookie-session';
 
 export const PatientMobileApp: React.FC = () => {
   const navigate = useNavigate();
@@ -92,13 +93,7 @@ export const PatientMobileApp: React.FC = () => {
   const poliklinikList = useMemo(() => getPublicPoliklinik(), []);
   const fallbackDoctors = useMemo(() => getPublicDoctors(), []);
 
-  const [token, setToken] = useState<string | null>(() => {
-    try {
-      return sessionStorage.getItem(PATIENT_TOKEN_KEY);
-    } catch {
-      return null;
-    }
-  });
+  const [token, setToken] = useState<string | null>(null);
 
   const [dossier, setDossier] = useState<PatientDossierPayload | null>(null);
 
@@ -195,9 +190,10 @@ export const PatientMobileApp: React.FC = () => {
   // Fetch the public service catalog; patient credentials are never published.
   useEffect(() => {
     try {
+      sessionStorage.removeItem(PATIENT_TOKEN_KEY);
       localStorage.removeItem('myitaru_patient_cached_dossier');
     } catch (error) {
-      console.warn('Could not clear the legacy patient data cache:', error);
+      console.warn('Could not clear legacy patient session data:', error);
     }
     fetch('/api/public/hospital-catalog')
       .then((r) => (r.ok ? r.json() : null))
@@ -211,23 +207,20 @@ export const PatientMobileApp: React.FC = () => {
     setToken(newToken);
     setDossier(newDossier);
     setPendingGoogleUser(null);
-    try {
-      sessionStorage.setItem(PATIENT_TOKEN_KEY, newToken);
-    } catch {
-      // Ignore storage quota exceptions
-    }
   }, []);
 
   const fetchDossierSilent = useCallback(async () => {
-    if (!token || !navigator.onLine) return;
+    if (!navigator.onLine) return;
     try {
       const res = await fetch('/api/patient/dossier', {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'same-origin',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (res.ok) {
         const data = await res.json();
         if (data?.dossier) {
           setDossier(data.dossier);
+          if (!token) setToken(COOKIE_SESSION_TOKEN);
         }
       }
     } catch {
@@ -253,7 +246,6 @@ export const PatientMobileApp: React.FC = () => {
         toast.error('Sesi verifikasi berakhir. Silakan verifikasi ulang.');
         setToken(null);
         setDossier(null);
-        sessionStorage.removeItem(PATIENT_TOKEN_KEY);
       }
     } catch {
       toast('Menampilkan data tersimpan terakhir (offline).', { icon: 'ℹ️' });
@@ -262,11 +254,9 @@ export const PatientMobileApp: React.FC = () => {
     }
   }, [token]);
 
-  // Refresh silently on mount when token exists & online
+  // Restore the HttpOnly-cookie session on startup; no patient token is kept in browser storage.
   useEffect(() => {
-    if (token && navigator.onLine) {
-      fetchDossierSilent();
-    }
+    if (navigator.onLine) fetchDossierSilent();
   }, [token, fetchDossierSilent]);
 
   const handleIncomingRealtimeAlert = useCallback(
@@ -685,12 +675,6 @@ export const PatientMobileApp: React.FC = () => {
     setLiveBannerAlert(null);
     setFcmMode('inactive');
     seenNotifIdsRef.current.clear();
-    try {
-      sessionStorage.removeItem(PATIENT_TOKEN_KEY);
-    } catch {
-      toast.error('Penyimpanan sesi lokal tidak dapat dibersihkan.');
-      return;
-    }
     toast.success('Anda telah keluar dari sesi pasien.');
   };
 
@@ -795,7 +779,11 @@ export const PatientMobileApp: React.FC = () => {
               </p>
             </div>
 
-            {pendingGoogleUser ? (
+            {import.meta.env.PROD ? (
+              <div role="status" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                Login pasien belum tersedia. Verifikasi identitas pasien untuk produksi belum dikonfigurasi; data dan sesi yang sudah valid tetap dapat diakses.
+              </div>
+            ) : pendingGoogleUser ? (
               <div className="space-y-4">
                 <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 text-xs space-y-1">
                   <p className="font-bold text-[#0B3D91] flex items-center gap-1.5">
@@ -1991,7 +1979,7 @@ export const PatientMobileApp: React.FC = () => {
                     className={`px-3 py-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 ${
                       queueAlertsEnabled
                         ? 'bg-white border-[#0B3D91]/40 text-slate-900'
-                        : 'bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-100 border-slate-200 text-slate-700'
                     }`}
                   >
                     <div>
@@ -2000,7 +1988,7 @@ export const PatientMobileApp: React.FC = () => {
                     </div>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                        queueAlertsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                        queueAlertsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
                       }`}
                     >
                       {queueAlertsEnabled ? 'ON' : 'OFF'}
@@ -2013,7 +2001,7 @@ export const PatientMobileApp: React.FC = () => {
                     className={`px-3 py-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 ${
                       labAlertsEnabled
                         ? 'bg-white border-[#0B3D91]/40 text-slate-900'
-                        : 'bg-slate-100 border-slate-200 text-slate-500'
+                        : 'bg-slate-100 border-slate-200 text-slate-700'
                     }`}
                   >
                     <div>
@@ -2022,7 +2010,7 @@ export const PatientMobileApp: React.FC = () => {
                     </div>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                        labAlertsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                        labAlertsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
                       }`}
                     >
                       {labAlertsEnabled ? 'ON' : 'OFF'}
@@ -2117,7 +2105,7 @@ export const PatientMobileApp: React.FC = () => {
                               ? 'Hasil Laboratorium'
                               : 'Sistem'}
                           </span>
-                          <span className="text-[10px] font-mono text-slate-500">
+                          <span className="text-[10px] font-mono text-slate-700">
                             {new Date(item.createdAt).toLocaleTimeString('id-ID', {
                               hour: '2-digit',
                               minute: '2-digit'
