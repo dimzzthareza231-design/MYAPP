@@ -106,13 +106,15 @@ export class FirestoreRestAdapter implements PersistenceRepository {
 
   async commit(changes: PersistenceChange[]): Promise<void> {
     if (!changes.length) return;
-    if (changes.length > 450) throw new Error('Batch Firestore melebihi batas 450 tulis.');
     const writes = changes.map((c) => {
       assertEntity(c.entity); assertRecordId(c.id);
       const name = `${this.base}/${FIRESTORE_COLLECTIONS[c.entity]}/${encodeURIComponent(c.id)}`;
       return c.data === null ? { delete: name } : { update: { name, fields: toFs(c.data).mapValue ? (toFs(c.data).mapValue as { fields: unknown }).fields : { value: toFs(c.data) } } };
     });
-    await this.call(`${this.base}:commit`, { method: 'POST', body: JSON.stringify({ writes }) });
+    // Firestore menolak >500 tulis per commit. shortcut: batch besar (pembersihan sesi/QR) tidak atomik antar potongan.
+    for (let i = 0; i < writes.length; i += 400) {
+      await this.call(`${this.base}:commit`, { method: 'POST', body: JSON.stringify({ writes: writes.slice(i, i + 400) }) });
+    }
   }
 
   async close(): Promise<void> {}

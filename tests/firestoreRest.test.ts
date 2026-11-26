@@ -30,5 +30,9 @@ describe('firestoreRest', () => {
     assert.deepEqual(await db.get('patients', 'p1'), { nama: 'Budi' });
     assert.equal(await db.get('patients', 'none'), null);
     assert.deepEqual(await db.list('patients'), [{ id: 'p1', data: { nama: 'Budi' } }]);
+
+    calls.length = 0;
+    await db.commit(Array.from({ length: 850 }, (_, i) => ({ entity: 'patients' as const, id: `x${i}`, data: null })));
+    assert.deepEqual(calls.filter((c) => c.url.endsWith(':commit')).map((c) => JSON.parse(c.body!).writes.length), [400, 400, 50]);
   });
 });

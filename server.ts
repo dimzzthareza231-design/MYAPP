@@ -936,7 +936,7 @@ export async function createApps(
       results = results.filter(p => p.status.toLowerCase() === status.toLowerCase());
     }
 
-    const pageNum = Math.max(1, parseInt(page as string, 10));
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
     const startIndex = (pageNum - 1) * limitNum;
     const paginated = results.slice(startIndex, startIndex + limitNum);
@@ -1122,21 +1122,25 @@ export async function createApps(
     }
 
     const patient = patientsStore.find(p => p.id === pasien_id || p.no_rm === no_rm);
-    const pasien_nama = patient ? patient.nama : req.body.pasien_nama || 'Pasien Terdaftar';
-    const patientRm = patient ? patient.no_rm : no_rm || 'RM-BARU';
+    // Kunjungan tanpa pasien terdaftar menjadi yatim (id pasien acak, RM-BARU); tolak.
+    if (!patient) return res.status(400).json({ success: false, code: 'PATIENT_NOT_FOUND', error: 'Pasien belum terdaftar.' });
+    const pasien_nama = patient.nama;
+    const patientRm = patient.no_rm;
+    const tanggal = String(req.body.tanggal || new Date().toISOString()).slice(0, 10);
 
     const queuePrefix = poli.includes('Dalam') ? 'PD' : poli.includes('Jantung') ? 'JT' : poli.includes('Anak') ? 'AN' : 'Q';
-    const currentQueueCount = appointmentsStore.filter(a => a.poli === poli).length + 1;
+    // Nomor antrean mulai dari 001 setiap hari per poli.
+    const currentQueueCount = appointmentsStore.filter(a => a.poli === poli && String(a.tanggal).slice(0, 10) === tanggal).length + 1;
     const nomor_antrian = `${queuePrefix}-${String(currentQueueCount).padStart(3, '0')}`;
 
     const newAppointment: AppointmentRecord = {
       id: `apt-${randomUUID()}`,
-      pasien_id: patient ? patient.id : `p-${randomUUID()}`,
+      pasien_id: patient.id,
       pasien_nama,
       no_rm: patientRm,
       poli,
       dokter,
-      tanggal: req.body.tanggal || new Date().toISOString().split('T')[0],
+      tanggal,
       jam_praktek: jam_praktek || '09:00 - 12:00',
       nomor_antrian,
       status: 'Menunggu',
@@ -1381,7 +1385,7 @@ export async function createApps(
       logs = logs.filter(l => l.user.toLowerCase().includes(user.toLowerCase()));
     }
 
-    const limitNum = Math.min(200, parseInt(limit as string, 10));
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
     res.json({
       success: true,
       total: logs.length,

@@ -99,6 +99,17 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal((await call(core, 'POST', '/api/v1/inventory/dispense', { items: [] }, 'viewer-token')).status, 403);
   });
 
+  test('kunjungan: pasien wajib terdaftar, nomor antrean mulai 001 per hari per poli', async () => {
+    assert.equal((await call(core, 'POST', '/api/v1/appointments', { pasien_id: 'tidak-ada', poli: 'Poli Uji', dokter: 'dr. Uji' })).body?.code, 'PATIENT_NOT_FOUND');
+    const patientId = (await call(core, 'GET', '/api/v1/patients?limit=1')).body.data[0].id;
+    const kemarin = await call(core, 'POST', '/api/v1/appointments', { pasien_id: patientId, poli: 'Poli Uji', dokter: 'dr. Uji', tanggal: '2026-01-01T08:00:00Z' });
+    const hariIni = await call(core, 'POST', '/api/v1/appointments', { pasien_id: patientId, poli: 'Poli Uji', dokter: 'dr. Uji', tanggal: '2026-01-02' });
+    assert.equal(kemarin.body.data.nomor_antrian, 'Q-001');
+    assert.equal(kemarin.body.data.tanggal, '2026-01-01');
+    assert.equal(hariIni.body.data.nomor_antrian, 'Q-001');
+    assert.equal((await call(core, 'GET', '/api/v1/patients?page=abc&limit=1')).body.page, 1);
+  });
+
   test('pertukaran Firebase ID token menerbitkan cookie HttpOnly yang bisa dicabut', async () => {
     const issued = await call(core, 'POST', '/api/auth/session', { idToken: 'test-token' });
     assert.equal(issued.status, 204);
