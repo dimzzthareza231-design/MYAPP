@@ -27,6 +27,9 @@
     { "binding": "DB", "database_name": "myitaru-db", "database_id": "80e76ffa-de80-4bfd-8863-30c640ab007f", "migrations_dir": "migrations" }
   ],
   "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } }],
+  // Semua /api aplikasi inti diproses satu Durable Object agar data di memori tidak terpecah per isolate.
+  "durable_objects": { "bindings": [{ "name": "CORE_STATE", "class_name": "CoreState" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CoreState"] }],
   "alias": {
     "firebase-admin/app": "./worker/stubs/firebase-admin.ts",
     "firebase-admin/auth": "./worker/stubs/firebase-admin.ts",
@@ -79,7 +82,9 @@
         { "binding": "DB", "database_name": "myitaru-db", "database_id": "80e76ffa-de80-4bfd-8863-30c640ab007f", "migrations_dir": "migrations" }
       ],
       // Login: maks 5 percobaan per IP per endpoint per 60 detik, berlaku di semua isolate.
-      "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } }]
+      "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } }],
+      "durable_objects": { "bindings": [{ "name": "CORE_STATE", "class_name": "CoreState" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CoreState"] }]
     }
   }
 }

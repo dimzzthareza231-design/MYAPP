@@ -2,6 +2,9 @@
 // shortcut: avoids loading @cloudflare/workers-types globally (clashes with DOM lib); switch to `wrangler types` if the Worker grows.
 declare module 'cloudflare:workers' {
   export const env: Record<string, unknown>;
+  export class DurableObject {
+    constructor(ctx: unknown, env: unknown);
+  }
 }
 declare module 'cloudflare:node' {
   export function handleAsNodeRequest(port: number, request: Request): Promise<Response>;
