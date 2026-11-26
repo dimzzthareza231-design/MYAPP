@@ -15,10 +15,7 @@ import {
   checkDrugInteractionsDeterministic,
   analyzeRadiologyDeterministic,
   auditDocumentCompletenessDeterministic,
-  generateDischargeSummaryDeterministic,
   generateMedicalSearchEvidenceDeterministic,
-  generateGeospatialHealthLocatorDeterministic,
-  generateClinicalCopilotReplyDeterministic,
   generateHealthUpdates2026
 } from './src/server/aiIntelligenceEngine';
 import { registerPatientPortalRoutes } from './src/server/patientPortalService';
@@ -570,7 +567,6 @@ export async function createApps(
   const persistentBindings: PersistentArrayBinding[] = [
     { entity: 'patients', records: patientsStore },
     { entity: 'registrations', records: appointmentsStore },
-    { entity: 'queues', records: appointmentsStore },
     { entity: 'beds', records: bedsStore },
     { entity: 'inventory', records: inventoryStore },
     { entity: 'documents', records: dossierStore },
@@ -589,7 +585,6 @@ export async function createApps(
         // Paralel: cold start dulu membaca koleksi satu per satu (~8 detik di Firestore).
         const loadStartedAt = Date.now();
         const loaded = await Promise.all(persistentBindings
-          .filter((binding) => binding.entity !== 'queues')
           .map(async (binding) => ({ binding, stored: await persistence.list<Record<string, unknown>>(binding.entity) })));
         for (const { binding, stored } of loaded) {
           for (const record of stored) {
@@ -624,7 +619,6 @@ export async function createApps(
     persistence.startSyncWorker();
   }
 
-  let sepCounter = 100245;
 
   const findActiveQrRecord = (
     token: string,
