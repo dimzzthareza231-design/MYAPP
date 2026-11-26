@@ -648,7 +648,7 @@ export async function createApps(
       role: principal?.roleId || 'unknown',
       action,
       module: 'Rekam Medis',
-      ip: req.ip || 'unknown',
+      ip: clientIp(req),
       status: 'SUCCESS',
       details: `Akses QR untuk identitas internal ${subject}.`
     });
@@ -815,7 +815,7 @@ export async function createApps(
       role: req.corePrincipal?.roleId || 'unknown',
       action: 'PATIENT_RESERVATION_CHECK_IN',
       module: 'Pendaftaran',
-      ip: req.ip || 'unknown',
+      ip: clientIp(req),
       status: 'SUCCESS',
       details: `Check-in antrean ${appointment.nomor_antrian} untuk No. RM ${appointment.no_rm}.`
     });
@@ -2350,8 +2350,9 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
       const formData = new URLSearchParams();
       formData.append('secret', secret);
       formData.append('response', token);
-      if (req.ip) {
-        formData.append('remoteip', req.ip);
+      const ip = clientIp(req);
+      if (ip !== 'unknown') {
+        formData.append('remoteip', ip);
       }
 
       const cfResponse = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
