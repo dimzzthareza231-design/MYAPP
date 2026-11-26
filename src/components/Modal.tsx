@@ -38,11 +38,12 @@ export function Modal({
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     const dialog = dialogRef.current;
-    const getFocusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
+    if (!dialog) return;
+    const getFocusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    ) || []).filter((element) => element.getClientRects().length > 0);
+    )).filter((element) => element.getClientRects().length > 0);
     const focusable = getFocusable();
-    (focusable[0] || dialog)?.focus();
+    (focusable[0] || dialog).focus();
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -126,11 +127,11 @@ export function Modal({
       onClick={onClose}
     >
       <div 
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        ref={dialogRef}
-        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         className={`relative bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl shadow-2xl w-full max-w-[calc(100vw-1.5rem)] ${widthClass} flex flex-col max-h-[92vh] overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200`}
       >
@@ -161,7 +162,9 @@ export function Modal({
             </div>
           </div>
           <button 
+            type="button"
             onClick={onClose}
+            aria-label="Tutup modal"
             className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors rounded-xl hover:bg-slate-200/60 dark:hover:bg-slate-700/60 shrink-0 ml-2"
             title="Tutup (Esc)"
           >

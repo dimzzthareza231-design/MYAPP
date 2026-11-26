@@ -390,18 +390,20 @@ describe('akun bawaan per role', () => {
 });
 
 describe('ganti kata sandi', () => {
-  test('sandi baru berlaku, sandi lama ditolak, dan restart tidak me-reset ke bawaan', async () => {
+  test('sandi baru berlaku, sandi lama ditolak, mustChangePassword bersih, dan restart tidak me-reset ke bawaan', async () => {
     const store = new MemoryPersistenceRepository();
     const service = new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) });
     await service.initialize();
     const session = await loginWithMfa(service, store, 'kasir', 'kasir123');
     assert.ok(session);
+    // Sebelum ganti sandi: mustChangePassword harus true
     assert.equal(session.user.mustChangePassword, true);
     assert.equal(await service.changePassword(session.token, 'salah', 'SandiBaru-2026'), 'WRONG_PASSWORD');
     assert.equal(await service.changePassword(session.token, 'kasir123', 'pendek'), 'WEAK_PASSWORD');
     assert.equal(await service.changePassword(session.token, 'kasir123', 'SandiBaru-2026'), 'OK');
     assert.equal(await service.resolveSession(session.token), null);
 
+    // Setelah ganti sandi: re-login harus mengembalikan mustChangePassword = undefined/false
     const restarted = new LocalAuthService(store, { sessionSecret: 'x'.repeat(32) });
     await restarted.initialize();
     assert.equal(await restarted.login('kasir', 'kasir123'), null);

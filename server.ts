@@ -171,8 +171,14 @@ function installPersistenceMiddleware(
   for (const target of targets) {
     target.use(async (req, res, next) => {
       if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
-      // Route ini tidak menulis array persisten; jangan antre di belakang panggilan Gemini yang lambat.
-      if (req.path.startsWith('/api/ai/') || req.path.startsWith('/api/cloudflare/')) return next();
+      // Route ini tidak menulis array persisten; jangan antre di belakang panggilan Gemini atau sync modul yang lambat.
+      if (
+        req.path.startsWith('/api/ai/') ||
+        req.path.startsWith('/api/cloudflare/') ||
+        req.path.startsWith('/api/v1/module-data') ||
+        req.path.startsWith('/api/v1/system-data') ||
+        req.path.startsWith('/api/auth/')
+      ) return next();
 
       const affectedBindings = bindingsForMutation(req.method, req.path, bindings);
       const needsSerialization = affectedBindings.length > 0 ||
@@ -2603,7 +2609,9 @@ Evaluasi 4 Aspek Wajib KLPCM (Ketidaklengkapan Pengisian Catatan Medis):
   }
 
   for (const target of [app, publicApp]) {
-    target.use('/api', (_req, res) => res.status(404).json({ success: false, code: 'NOT_FOUND' }));
+    target.use('/api', (_req, res) => {
+      res.status(404).json({ success: false, code: 'NOT_FOUND' });
+    });
   }
 
   return { app, publicApp, persistence };

@@ -119,8 +119,10 @@ describe('isolasi web publik dan aplikasi inti', () => {
   });
   test('API yang tidak dikenal selalu menjawab JSON 404', async () => {
     const publicResponse = await call(pub, 'GET', '/api/not-a-route');
+    const publicAuthMe = await call(pub, 'GET', '/api/auth/me');
     const coreResponse = await call(core, 'GET', '/api/v1/not-a-route');
     assert.deepEqual(publicResponse.body, { success: false, code: 'NOT_FOUND' });
+    assert.deepEqual(publicAuthMe.body, { success: false, code: 'NOT_FOUND' });
     assert.deepEqual(coreResponse.body, { success: false, code: 'NOT_FOUND' });
   });
   test('JSON publik dibatasi 100 KB sebelum handler route berjalan', async () => {
