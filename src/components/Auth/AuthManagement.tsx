@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 import { ActivityLogsTab } from './ActivityLogsTab';
 import { UserManagement } from './UserManagement';
 import { useAuth } from '../../contexts/AuthContext';
-import { ROLES, getRoleById, getCustomPermissions, saveCustomPermissions, COMMON_MODULES } from '../../data/roles';
+import { ROLES, getRoleById, COMMON_MODULES } from '../../data/roles';
 import { MODULE_REGISTRY } from '../../data/moduleRegistry';
 import { subscribeActivityLogs, ActivityLogEntry } from '../../lib/activityLogger';
 
@@ -151,10 +151,9 @@ function RolesTab() {
   const [selectedRoleId, setSelectedRoleId] = useState<string>('dokter');
   const [searchModule, setSearchModule] = useState('');
   const [permissions, setPermissions] = useState<Record<string, string[]>>(() => {
-    const custom = getCustomPermissions();
     const initial: Record<string, string[]> = {};
     ROLES.forEach(r => {
-      initial[r.id] = custom[r.id] || [...r.moduleAccess];
+      initial[r.id] = [...r.moduleAccess];
     });
     return initial;
   });
@@ -202,8 +201,8 @@ function RolesTab() {
   };
 
   const handleSave = () => {
-    saveCustomPermissions(permissions);
-    toast.success(`Izin akses untuk role [${selectedRole.nama}] berhasil disimpan secara permanen.`);
+    // Hak akses ditegakkan server dari src/data/roles.ts; matriks ini hanya pratinjau.
+    toast.error(`Perubahan izin role [${selectedRole.nama}] belum bisa disimpan dari layar ini. Hak akses diatur di konfigurasi server (src/data/roles.ts).`);
   };
 
   const handleResetDefault = () => {

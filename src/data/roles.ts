@@ -260,26 +260,6 @@ export const getRoleById = (roleId: string): Role | undefined => {
   return ROLES.find(r => r.id === roleId);
 };
 
-// Helper: dapatkan custom permission override dari localStorage jika ada
-export const getCustomPermissions = (): Record<string, string[]> => {
-  try {
-    const saved = localStorage.getItem('simrs_role_custom_permissions');
-    return saved ? JSON.parse(saved) : {};
-  } catch (e) {
-    console.warn('Error reading custom role permissions:', e);
-    return {};
-  }
-};
-
-// Helper: simpan custom permission override ke localStorage
-export const saveCustomPermissions = (permissions: Record<string, string[]>) => {
-  try {
-    localStorage.setItem('simrs_role_custom_permissions', JSON.stringify(permissions));
-  } catch (e) {
-    console.warn('Error saving custom role permissions:', e);
-  }
-};
-
 // Helper: cek apakah role memiliki akses ke modul tertentu
 export const hasModuleAccess = (roleId: string, moduleId: string): boolean => {
   if (roleId === 'super_admin') return true;

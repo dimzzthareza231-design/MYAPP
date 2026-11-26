@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Users, Plus, Edit2, Trash2, Shield, Eye, EyeOff, X, Save, UserCheck, KeyRound } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
-import { ROLES, getRoleById, getCustomPermissions } from '../../data/roles';
+import { ROLES, getRoleById } from '../../data/roles';
 
 export function UserManagement() {
   const { users, currentUser, addUser, updateUser, deleteUser } = useAuth();
@@ -153,7 +153,7 @@ export function UserManagement() {
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{role.deskripsi}</p>
               <div className="text-xs text-blue-600 dark:text-blue-400 font-bold">
-                {role.id === 'super_admin' ? 'Seluruh Modul (Akses Penuh)' : `${(getCustomPermissions()[role.id] || role.moduleAccess).length} modul diakses`}
+                {role.id === 'super_admin' ? 'Seluruh Modul (Akses Penuh)' : `${role.moduleAccess.length} modul diakses`}
               </div>
             </div>
           ))}
