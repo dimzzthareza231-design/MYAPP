@@ -6,6 +6,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createSecurePatientQrToken } from '../src/server/securePatientQr';
 import type { PersistenceRepository } from '../src/server/databaseAdapter';
+import { jakartaDate } from '../src/utils/jakartaDate';
 
 process.env.VERCEL = '1'; // cegah server.ts menjalankan listen() sendiri
 process.env.SESSION_SECRET = 'test-secret';
@@ -472,7 +473,7 @@ describe('web publik pasien', () => {
   test('pendaftaran daring menerbitkan antrean tanpa sesi atau data rekam medis', async () => {
     const cat = (await call(pub, 'GET', '/api/public/hospital-catalog')).body;
     const d = (cat.doctors ?? cat.data.doctors)[0];
-    const appointmentDate = new Date().toISOString().slice(0, 10);
+    const appointmentDate = jakartaDate();
     const missingTurnstile = await call(pub, 'POST', '/api/patient/appointments', {
       poli_id: d.poli_id, dokter_id: d.id, tanggal: appointmentDate
     });
