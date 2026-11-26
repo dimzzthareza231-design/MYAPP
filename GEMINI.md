@@ -30,5 +30,5 @@ Whenever you create, execute, or suggest a `git commit` in this repository, you 
 3. Append the following `Co-authored-by` trailer at the **very end** of every commit message without exception:
 
 ```text
-Co-authored-by: gemini-cli <gemini-cli@google.com>
+Co-authored-by: gemini-cli <dimzzthareza231@gmail.com>
 ```

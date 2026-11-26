@@ -8,4 +8,4 @@ Whenever you create or execute a `git commit` in this repository, you MUST:
 2. Leave one blank line after the commit message body.
 3. Append this exact trailer at the very end of the commit message:
 
-Co-authored-by: Google Antigravity <gemini-cli@google.com>
+Co-authored-by: Google Antigravity <dimzzthareza231@gmail.com>

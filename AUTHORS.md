@@ -15,7 +15,7 @@
 ### AI Agents & Automation Contributors
 
 * **Google Antigravity** _(AI Coding Agent — Google DeepMind)_
-  * **Identitas Commit:** `Google Antigravity <gemini-cli@google.com>`
+  * **Identitas Commit:** `Google Antigravity <dimzzthareza231@gmail.com>` (terhubung ke akun GitHub `dimzzthareza231-design`)
   * **Peran:** Verifikasi & rekonsiliasi branch agent lain, perbaikan bug terisolasi (`fix(auth): expose mustChangePassword`, `fix: Modal a11y`), konfigurasi multi-agent workflow (`AGENTS.md`, dispatcher `agent-dispatch.mjs`), pemeliharaan CI/CD gate (pre-push hook), serta pendamping Claude pada kasus berat (audit, typecheck, build).
   * **Konfigurasi:** `.agent/rules/`, `.agent/skills/jobdesk-router/`
 
@@ -30,6 +30,6 @@
   * **Konfigurasi:** `.github/copilot-instructions.md`, `.github/prompts/`
 
 * **Gemini CLI** _(AI Coding Agent — Google)_
-  * **Identitas Commit:** `gemini-cli <gemini-cli@google.com>`
+  * **Identitas Commit:** `gemini-cli <dimzzthareza231@gmail.com>` (terhubung ke akun GitHub `dimzzthareza231-design`)
   * **Peran:** Riset codebase, audit, tugas ringan (UI minor, docs, konfigurasi), pendamping kasus berat bersama Claude.
   * **Konfigurasi:** `GEMINI.md`, `.gemini/commands/`
