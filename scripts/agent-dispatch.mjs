@@ -149,10 +149,13 @@ async function runParallel(args) {
     process.exit(1);
   }
 
-  const available = ['gemini', 'copilot'].filter(hasCli);
+  let available = ['gemini', 'copilot'].filter(hasCli);
   if (available.length === 0) {
-    console.error('[agent:parallel] Tidak ada CLI gemini atau copilot di PATH.');
-    process.exit(1);
+    if (!dryRun) {
+      console.error('[agent:parallel] Tidak ada CLI gemini atau copilot di PATH.');
+      process.exit(1);
+    }
+    available = ['gemini', 'copilot'];
   }
 
   const jobs = tasks.map((task, idx) => {
