@@ -225,6 +225,37 @@ describe('isolasi web publik dan aplikasi inti', () => {
     assert.equal((await call(core, 'GET', '/api/v1/module-data')).body.index.hospital_billing_ralan, undefined);
   });
 
+  test('data modul: pembaruan bersamaan dengan ETag sama hanya meloloskan satu penulis', async () => {
+    const key = '/api/v1/module-data/hospital_concurrent_test';
+    const [createA, createB] = await Promise.all([
+      call(core, 'PUT', key, { data: '{"writer":"init-A"}' }, 'cashier-token', undefined, { 'If-None-Match': '*' }),
+      call(core, 'PUT', key, { data: '{"writer":"init-B"}' }, 'cashier-token', undefined, { 'If-None-Match': '*' })
+    ]);
+    const createStatuses = [createA.status, createB.status].sort((a, b) => a - b);
+    assert.deepEqual(createStatuses, [200, 412]);
+
+    const winnerCreate = createA.status === 200 ? createA : createB;
+    const etag = `"${winnerCreate.body.version}"`;
+
+    const [updateA, updateB] = await Promise.all([
+      call(core, 'PUT', key, { data: '{"writer":"A"}' }, 'cashier-token', undefined, { 'If-Match': etag }),
+      call(core, 'PUT', key, { data: '{"writer":"B"}' }, 'cashier-token', undefined, { 'If-Match': etag })
+    ]);
+    const updateStatuses = [updateA.status, updateB.status].sort((a, b) => a - b);
+    assert.deepEqual(updateStatuses, [200, 412]);
+
+    const loserUpdate = updateA.status === 412 ? updateA : updateB;
+    const winnerUpdate = updateA.status === 200 ? updateA : updateB;
+    assert.equal(loserUpdate.body.code, 'MODULE_DATA_CONFLICT');
+
+    const fetched = await call(core, 'GET', key, undefined, 'cashier-token');
+    assert.equal(fetched.status, 200);
+    assert.equal(fetched.body.version, winnerUpdate.body.version);
+    assert.equal(fetched.body.data, updateA.status === 200 ? '{"writer":"A"}' : '{"writer":"B"}');
+
+    await call(core, 'DELETE', key, undefined, 'cashier-token', undefined, { 'If-Match': `"${winnerUpdate.body.version}"` });
+  });
+
   test('clinical records use paginated entity APIs, validation, and version preconditions', async () => {
     const path = '/api/v1/clinical-records/billings/BIL-API-001';
     const billing = {

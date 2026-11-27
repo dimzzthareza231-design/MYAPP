@@ -972,10 +972,35 @@ export async function createApps(
   // Id dokumen hanya [a-z0-9_]: Firestore REST meng-encode nama di body commit berbeda dari path GET.
   const moduleDocId = (key: string) => `module_${createHash('sha256').update(key).digest('hex')}`;
   type ModuleIndex = Record<string, string>;
+  type ModuleRecord = { key?: string; data: string; updatedAt: string; version?: string };
   const readModuleIndex = async () =>
     (await persistence.get<{ index?: ModuleIndex }>('system_data', MODULE_INDEX_ID))?.index ?? {};
   const canAccessModuleData = (req: CoreAuthRequest, key: string) =>
     !isModuleDataConfigKey(key) && Boolean(req.corePrincipal && hasScope(req.corePrincipal.roleId, moduleDataScopeForKey(key)));
+
+  let moduleWriteQueue: Promise<void> = Promise.resolve();
+  const enqueueModuleWrite = <T>(operation: () => Promise<T>): Promise<T> => {
+    const run = moduleWriteQueue.then(operation, operation);
+    moduleWriteQueue = run.then(() => undefined, () => undefined);
+    return run;
+  };
+
+  const updateModuleIndex = async (key: string, version: string | null, updatedAt: string) => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const currentDoc = await persistence.get<{ key?: string; index?: ModuleIndex; updatedAt?: string }>('system_data', MODULE_INDEX_ID);
+      const nextIndex: ModuleIndex = { ...(currentDoc?.index ?? {}) };
+      if (version === null) delete nextIndex[key];
+      else nextIndex[key] = version;
+      const swapped = await persistence.compareAndSwap(
+        'system_data',
+        MODULE_INDEX_ID,
+        currentDoc ?? null,
+        { key: MODULE_INDEX_ID, index: nextIndex, updatedAt }
+      );
+      if (swapped) return;
+    }
+    throw new Error('MODULE_INDEX_CONFLICT');
+  };
 
   app.get('/api/v1/module-data', async (req: CoreAuthRequest, res) => {
     try {
@@ -1008,40 +1033,43 @@ export async function createApps(
     }
   });
 
-  const writeModuleData = async (key: string, data: string | null) => {
-    const updatedAt = new Date().toISOString();
-    const version = randomUUID();
-    const index = await readModuleIndex();
-    if (data === null) delete index[key];
-    else index[key] = version;
-    await persistence.commit([
-      { entity: 'system_data', id: moduleDocId(key), data: data === null ? null : { key, data, updatedAt, version } },
-      { entity: 'system_data', id: MODULE_INDEX_ID, data: { key: MODULE_INDEX_ID, index, updatedAt } }
-    ]);
-    return { updatedAt, version };
-  };
-
   app.put('/api/v1/module-data/:key', async (req, res) => {
     const data = req.body?.data;
     if (!MODULE_DATA_KEY.test(req.params.key) || isModuleDataConfigKey(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
     if (typeof data !== 'string' || Buffer.byteLength(data, 'utf8') > 900_000) {
       return res.status(413).json({ success: false, code: 'INVALID_MODULE_PAYLOAD' });
     }
+    const ifMatch = req.get('if-match');
+    const createOnly = req.get('if-none-match') === '*';
+    if ((!ifMatch && !createOnly) || (ifMatch && createOnly)) {
+      return res.status(428).json({ success: false, code: 'MODULE_DATA_PRECONDITION_REQUIRED' });
+    }
     try {
-      const ifMatch = req.get('if-match');
-      const createOnly = req.get('if-none-match') === '*';
-      if ((!ifMatch && !createOnly) || (ifMatch && createOnly)) {
-        return res.status(428).json({ success: false, code: 'MODULE_DATA_PRECONDITION_REQUIRED' });
-      }
-      const current = await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(req.params.key));
-      const currentVersion = current?.version || current?.updatedAt;
-      if ((createOnly && current) || (ifMatch && ifMatch !== `"${currentVersion}"`)) {
+      const result = await enqueueModuleWrite(async () => {
+        const docId = moduleDocId(req.params.key);
+        const current = await persistence.get<ModuleRecord>('system_data', docId);
+        const currentVersion = current?.version || current?.updatedAt;
+        if ((createOnly && current) || (ifMatch && ifMatch !== `"${currentVersion}"`)) {
+          return { conflict: true as const, updatedAt: current?.updatedAt ?? null, version: currentVersion ?? null };
+        }
+        const updatedAt = new Date().toISOString();
+        const version = randomUUID();
+        const nextRecord: ModuleRecord = { key: req.params.key, data, updatedAt, version };
+        const swapped = await persistence.compareAndSwap('system_data', docId, current ?? null, nextRecord);
+        if (!swapped) {
+          const latest = await persistence.get<ModuleRecord>('system_data', docId);
+          const latestVersion = latest?.version || latest?.updatedAt || null;
+          return { conflict: true as const, updatedAt: latest?.updatedAt ?? null, version: latestVersion };
+        }
+        await updateModuleIndex(req.params.key, version, updatedAt);
+        return { conflict: false as const, updatedAt, version };
+      });
+      if (result.conflict) {
         const conflict = res.status(412);
-        if (currentVersion) conflict.set('ETag', `"${currentVersion}"`);
-        return conflict.json({ success: false, code: 'MODULE_DATA_CONFLICT', updatedAt: current?.updatedAt ?? null, version: currentVersion ?? null });
+        if (result.version) conflict.set('ETag', `"${result.version}"`);
+        return conflict.json({ success: false, code: 'MODULE_DATA_CONFLICT', updatedAt: result.updatedAt, version: result.version });
       }
-      const saved = await writeModuleData(req.params.key, data);
-      return res.set('ETag', `"${saved.version}"`).json({ success: true, ...saved });
+      return res.set('ETag', `"${result.version}"`).json({ success: true, updatedAt: result.updatedAt, version: result.version });
     } catch (error) {
       logSafeError('[Persistence] Could not write module data.', error);
       return res.status(503).json({ success: false, code: 'PERSISTENCE_UNAVAILABLE' });
@@ -1050,17 +1078,26 @@ export async function createApps(
 
   app.delete('/api/v1/module-data/:key', async (req, res) => {
     if (!MODULE_DATA_KEY.test(req.params.key) || isModuleDataConfigKey(req.params.key)) return res.status(400).json({ success: false, code: 'INVALID_MODULE_KEY' });
+    const ifMatch = req.get('if-match');
+    if (!ifMatch) return res.status(428).json({ success: false, code: 'MODULE_DATA_PRECONDITION_REQUIRED' });
     try {
-      const ifMatch = req.get('if-match');
-      if (!ifMatch) return res.status(428).json({ success: false, code: 'MODULE_DATA_PRECONDITION_REQUIRED' });
-      const current = await persistence.get<{ data: string; updatedAt: string; version?: string }>('system_data', moduleDocId(req.params.key));
-      const currentVersion = current?.version || current?.updatedAt;
-      if (!current || ifMatch !== `"${currentVersion}"`) {
+      const result = await enqueueModuleWrite(async () => {
+        const docId = moduleDocId(req.params.key);
+        const current = await persistence.get<ModuleRecord>('system_data', docId);
+        const currentVersion = current?.version || current?.updatedAt;
+        if (!current || ifMatch !== `"${currentVersion}"`) {
+          return { conflict: true as const, updatedAt: current?.updatedAt ?? null, version: currentVersion ?? null };
+        }
+        const updatedAt = new Date().toISOString();
+        await persistence.commit([{ entity: 'system_data', id: docId, data: null }]);
+        await updateModuleIndex(req.params.key, null, updatedAt);
+        return { conflict: false as const };
+      });
+      if (result.conflict) {
         const conflict = res.status(412);
-        if (currentVersion) conflict.set('ETag', `"${currentVersion}"`);
-        return conflict.json({ success: false, code: 'MODULE_DATA_CONFLICT', updatedAt: current?.updatedAt ?? null, version: currentVersion ?? null });
+        if (result.version) conflict.set('ETag', `"${result.version}"`);
+        return conflict.json({ success: false, code: 'MODULE_DATA_CONFLICT', updatedAt: result.updatedAt, version: result.version });
       }
-      await writeModuleData(req.params.key, null);
       return res.json({ success: true });
     } catch (error) {
       logSafeError('[Persistence] Could not delete module data.', error);
