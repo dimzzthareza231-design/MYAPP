@@ -109,26 +109,58 @@ function isHeavyTask(task) {
   return /\b(arsitektur|architecture|refactor|migrasi|migration|security|keamanan|auth|kripto|crypto|schema|d1|firestore|cross-module)\b/i.test(task);
 }
 
-function buildPrompt(kind, task) {
-  if (kind === 'light') {
-    return `Ikuti AGENTS.md untuk TUGAS RINGAN. Gunakan terminologi Klinik/SIMK/RME, jaga strict TypeScript. Jangan jalankan perintah shell, commit, push, atau deploy; Claude yang memverifikasi (npm run agent:check). Jawab ringkas dan sebutkan file yang diubah. Tugas: ${task}`;
-  }
-  return `Ikuti AGENTS.md sebagai PENDAMPING CLAUDE untuk KASUS BERAT (riset, audit, verifikasi regresi, dan test; jangan ubah arsitektur inti tanpa arahan; jangan commit, push, atau deploy). Konteks: ${task}`;
+// Gemini & Antigravity hanya untuk UI/UX & frontend ringan (AGENTS.md bagian 1); backend milik Claude/Copilot/Cloudflare.
+const UI_AGENTS = ['agy', 'gemini'];
+
+function isUiTask(task) {
+  return /\b(ui|ux|frontend|front-end|komponen|component|tampilan|layout|css|tailwind|styling|responsif|responsive|tombol|button|halaman|form|label|aksesibilitas|accessibility|copy|teks antarmuka)\b/i.test(task);
 }
+
+// Pilih agent sesuai jobdesk bila tidak ditentukan; null bila tidak ada CLI yang cocok.
+function pickAgent(task, available, idx = 0) {
+  if (isUiTask(task) && !isHeavyTask(task)) {
+    const ui = UI_AGENTS.filter((a) => available.includes(a));
+    if (ui.length) return ui[idx % ui.length];
+  }
+  return available.includes('copilot') ? 'copilot' : null;
+}
+
+function outOfJobdesk(agent, task) {
+  return UI_AGENTS.includes(agent) && (!isUiTask(task) || isHeavyTask(task));
+}
+
+const HONESTY = 'Jangan menulis LULUS/BERHASIL/SELESAI tanpa bukti (perintah + hasil); bila tidak bisa memverifikasi tulis BELUM DIVERIFIKASI. ' +
+  'Hal sensitif (secret, data pasien, autentikasi, produksi, hapus data): berhenti dan laporkan ke Claude. Jangan commit, push, atau deploy.';
+
+// Agent headless tidak punya izin shell npm; Antigravity membatalkan seluruh jawaban bila satu perintah ditolak.
+const NO_SHELL = 'Jangan menjalankan perintah shell/terminal (npm, git, dll.); Claude yang menjalankan typecheck/test.';
+const COPILOT_SHELL = 'Boleh menjalankan git status/diff/log; jangan menjalankan npm/npx; Claude yang menjalankan typecheck/test.';
+
+function buildPrompt(kind, task, agent) {
+  const shell = agent === 'copilot' ? COPILOT_SHELL : NO_SHELL;
+  if (kind === 'light') {
+    return `Ikuti AGENTS.md dan skill jobdesk Anda. Gunakan terminologi Klinik/SIMK/RME, jaga strict TypeScript. Hanya ubah file yang ditugaskan. ${shell} ${HONESTY} Jawab ringkas: status dan file yang diubah. Tugas: ${task}`;
+  }
+  return `Ikuti AGENTS.md dan skill jobdesk Anda. Mode READ-ONLY: jangan mengubah file. ${shell} Laporkan temuan dengan path:baris. ${HONESTY} Konteks: ${task}`;
+}
+
+// Copilot boleh mengedit dan membaca git; commit/push/reset/deploy ditolak eksplisit.
+const COPILOT_DENY = ['shell(git push:*)', 'shell(git commit:*)', 'shell(git reset:*)', 'shell(git rebase:*)', 'shell(npx wrangler:*)', 'shell(wrangler:*)', 'shell(rm:*)']
+  .flatMap((t) => ['--deny-tool', t]);
+const COPILOT_READ = ['shell(git status:*)', 'shell(git diff:*)', 'shell(git log:*)'].flatMap((t) => ['--allow-tool', t]);
+// shortcut: Copilot belum diberi shell npm karena deny untuk `npm run cf:deploy` belum terbukti (kuota habis saat diuji); verifikasi dipegang Claude.
+const COPILOT_VERIFY = ['--allow-tool', 'write'];
 
 function cliInvocation(resolvedAgent, kind, prompt) {
   if (resolvedAgent === 'gemini') {
-    return {
-      command: 'gemini',
-      args: kind === 'assist' ? ['--approval-mode', 'plan', '-p', prompt] : ['-p', prompt]
-    };
+    return { command: 'gemini', args: ['--approval-mode', kind === 'assist' ? 'plan' : 'auto_edit', '-p', prompt] };
   }
   if (resolvedAgent === 'agy') {
     return { command: 'agy', args: ['-p', prompt, '--mode', kind === 'assist' ? 'plan' : 'accept-edits'] };
   }
   return {
     command: 'copilot',
-    args: ['-p', prompt, '--silent']
+    args: ['-p', prompt, '--silent', ...COPILOT_READ, ...(kind === 'assist' ? [] : COPILOT_VERIFY), ...COPILOT_DENY]
   };
 }
 
@@ -150,11 +182,15 @@ async function runAgentTask(kind, args) {
   }
 
   const effectiveKind = kind === 'auto' ? (isHeavyTask(task) ? 'assist' : 'light') : kind;
+  if (agent !== 'auto' && outOfJobdesk(agent, task)) {
+    console.error(`[agent:${kind}] Ditolak: ${agent} hanya untuk UI/UX & frontend ringan (AGENTS.md). Serahkan ke copilot atau Claude.`);
+    process.exit(2);
+  }
   const resolvedAgent = agent === 'auto'
-    ? (AGENTS.find(hasCli) ?? null)
+    ? pickAgent(task, AGENTS.filter(hasCli))
     : (hasCli(agent) ? agent : null);
 
-  const prompt = buildPrompt(effectiveKind, task);
+  const prompt = buildPrompt(effectiveKind, task, resolvedAgent);
 
   if (!resolvedAgent || dryRun) {
     console.log(`[agent:${kind}] Mode: ${effectiveKind} | Agent target: ${resolvedAgent || 'tidak ditemukan di PATH (gunakan Antigravity/VS Code)'}`);
@@ -186,13 +222,21 @@ async function runParallel(args) {
     available = AGENTS;
   }
 
-  // Awalan 'gemini:' / 'copilot:' / 'agy:' memilih agent sesuai kemampuan; tanpa awalan dibagi round-robin.
+  // Awalan 'gemini:' / 'copilot:' / 'agy:' memilih agent; tanpa awalan dipilih sesuai jobdesk.
   const jobs = tasks.map((raw, idx) => {
     const [, picked, body] = raw.match(/^(gemini|copilot|agy):\s*(.*)$/s) ?? [];
     const task = picked ? body : raw;
-    const target = picked ?? available[idx % available.length];
+    if (picked && outOfJobdesk(picked, task)) {
+      console.error(`[agent:parallel] Ditolak: "${task}" bukan jobdesk ${picked} (hanya UI/UX & frontend ringan).`);
+      process.exit(2);
+    }
+    const target = picked ?? pickAgent(task, available, idx);
+    if (!target) {
+      console.error(`[agent:parallel] Tidak ada CLI yang cocok untuk: ${task}`);
+      process.exit(1);
+    }
     const kind = isHeavyTask(task) ? 'assist' : 'light';
-    const prompt = buildPrompt(kind, task);
+    const prompt = buildPrompt(kind, task, target);
     return { target, kind, task, ...cliInvocation(target, kind, prompt) };
   });
 

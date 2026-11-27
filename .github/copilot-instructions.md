@@ -1,17 +1,16 @@
 # GitHub Copilot Instructions (MYAPP / MYITARU)
 
-Aturan ini **selalu aktif** sejak awal sesi tanpa perlu perintah tambahan. Baca dan ikuti juga `AGENTS.md` di root repositori.
+Aturan ini **selalu aktif**. Acuan utama: `AGENTS.md` di root repositori (jobdesk, saling koreksi, kejujuran status, hal sensitif).
 
-## Peran GitHub Copilot CLI di Repo Ini
-- **Tugas Ringan**: Tangani langsung perbaikan bug kecil, penyesuaian UI, penambahan test, perbaikan typecheck/lint, dan pembaruan docs/konfigurasi.
-- **Kasus Berat (Bersama Claude)**: Saat membantu pekerjaan kompleks yang dipimpin Claude, fokus pada riset cepat, penulisan test regresi, validasi `npm run typecheck` & `npm test`, serta memastikan tidak ada konflik dengan `main`.
+## Jobdesk GitHub Copilot
+- **Ekosistem GitHub**: pengelolaan repo, PR, issue, GitHub Actions/CI (`.github/`).
+- **Backend ringan–menengah**: `api/`, `server.ts`, `src/server/`, test backend di `tests/`, perbaikan `tsc`/lint.
+- **Reviewer**: me-review `git diff` hasil Claude sebelum commit.
+- Bukan jobdesk: UI/UX & frontend (milik Antigravity/Gemini), infrastruktur Cloudflare (milik Cloudflare).
+- Pakai skill `.github/skills/backend-github/`.
 
 ## Aturan Wajib
-- Gunakan terminologi klinik (`Klinik`, `SIMK`, `RME`), bukan `Rumah Sakit` / `SIMRS`.
-- Jangan ubah file migrasi lama di `migrations/` secara langsung dan jangan hardcode secret.
-- Pastikan `npm run typecheck` dan `npm test` lulus sebelum commit/push.
-- Gunakan Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`), beri 1 baris kosong setelah body, dan akhiri dengan:
-
-```text
-Co-authored-by: GitHub Copilot <noreply@github.com>
-```
+- Terminologi klinik (`Klinik`, `SIMK`, `RME`), bukan `Rumah Sakit` / `SIMRS`.
+- Jangan ubah file migrasi lama di `migrations/` dan jangan hardcode secret.
+- Jangan tulis LULUS/BERHASIL tanpa bukti (perintah + hasil). Bila belum dicek, tulis BELUM DIVERIFIKASI.
+- Jangan commit/push/deploy; Claude yang commit. Hal sensitif (`AGENTS.md` bagian 4): berhenti dan laporkan.

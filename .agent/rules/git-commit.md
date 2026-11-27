@@ -2,10 +2,7 @@
 trigger: always_on
 ---
 
-# Git Commit & Co-Author Guidelines
-Whenever you create or execute a `git commit` in this repository, you MUST:
-1. Use Conventional Commits format (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`).
-2. Leave one blank line after the commit message body.
-3. Append this exact trailer at the very end of the commit message:
+# Git (Antigravity)
+Jangan commit atau push. Claude yang meninjau perubahan dan membuat commit, dengan trailer berikut bila Antigravity ikut mengerjakan:
 
 Co-authored-by: Google Antigravity <dimzzthareza231@gmail.com>

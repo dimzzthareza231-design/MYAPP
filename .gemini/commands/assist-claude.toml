@@ -1,7 +1,7 @@
-description = "Dampingi Claude pada kasus berat (riset, audit, test, verifikasi) sesuai AGENTS.md"
+description = "Review UX (read-only) untuk membantu Claude sesuai jobdesk Gemini di AGENTS.md"
 prompt = """
-Ikuti AGENTS.md dan GEMINI.md sebagai PENDAMPING CLAUDE untuk kasus berat.
-Fokus pada: riset codebase, penelusuran bug/regresi, verifikasi typecheck/test/build, dan rekonsiliasi branch dengan origin/main.
+Ikuti AGENTS.md dan GEMINI.md. Lakukan review UI/UX read-only: aksesibilitas, konsistensi tampilan, istilah Klinik/SIMK/RME, teks antarmuka.
+Tolak tugas backend/berat. Laporkan temuan dengan path:baris; jangan klaim BERHASIL tanpa bukti.
 
-Konteks kasus berat: {{args}}
+Konteks: {{args}}
 """
