@@ -93,8 +93,10 @@ jobs:
         id: versions
         if: steps.secret.outputs.ok == 'true'
         run: |
-          echo "public=$(npx wrangler versions list --env public --json | jq -r '.[-1].id // empty')" >> "$GITHUB_OUTPUT"
-          echo "core=$(npx wrangler versions list --env core --json | jq -r '.[-1].id // empty')" >> "$GITHUB_OUTPUT"
+          bash .github/retry.sh sh -c 'npx wrangler versions list --env public --json > public-versions.json'
+          bash .github/retry.sh sh -c 'npx wrangler versions list --env core --json > core-versions.json'
+          echo "public=$(jq -r '.[-1].id // empty' public-versions.json)" >> "$GITHUB_OUTPUT"
+          echo "core=$(jq -r '.[-1].id // empty' core-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Build Worker mode Cloudflare
         if: steps.secret.outputs.ok == 'true'
@@ -103,16 +105,21 @@ jobs:
       - name: Deploy web publik
         id: deploy_public
         if: steps.secret.outputs.ok == 'true'
-        run: npx wrangler deploy --env public
+        run: bash .github/retry.sh npx wrangler deploy --env public
 
       - name: Deploy aplikasi inti
         id: deploy_core
         if: steps.secret.outputs.ok == 'true'
-        run: npx wrangler deploy --env core
+        run: bash .github/retry.sh npx wrangler deploy --env core
 
+      # workers.dev tidak aktif (404), jadi cek lewat custom domain produksi.
+      # Endpoint membalas 200 juga saat DEGRADED (storage belum siap), jadi status di body ikut dicek.
       - name: Cek health aplikasi inti
         if: steps.secret.outputs.ok == 'true'
-        run: curl -fsS --retry 5 --retry-delay 5 https://myitaru-core.myappv1.workers.dev/api/v1/health
+        run: |
+          body="$(curl -fsS --retry 5 --retry-delay 10 --retry-all-errors https://myitaru.my.id/api/v1/health)"
+          echo "$body"
+          [ "$(printf '%s' "$body" | jq -r '.status')" = "HEALTHY" ]
 
       - name: Rollback aplikasi inti jika deploy atau health check gagal
         if: failure() && steps.secret.outputs.ok == 'true' && steps.versions.outputs.core != ''
