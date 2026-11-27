@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 
 import { useHospital } from '../contexts/HospitalContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { storage } from '../utils/storage';
 import { BillingRecord, JasaMedisDokterRecord } from './Finance/types';
@@ -25,14 +26,26 @@ import { generateHospitalDocument } from '../utils/documentGenerator';
 export function AnalyticsDashboard() {
   const toast = useToast();
   const { pasien, kunjungan, dokter, penjamin } = useHospital();
+  const { facilityMode } = useAuth();
   
   // Outlet context or search params
   const outletCtx = useOutletContext<{ activeTab?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryTab = searchParams.get('tab');
 
+  const sanitizeTab = (tab: string | null | undefined) => {
+    const candidate = tab || 'Laporan Keuangan';
+    if (
+      facilityMode === 'klinik' &&
+      (candidate === 'Laporan BPJS' || candidate.toLowerCase().includes('bpjs'))
+    ) {
+      return 'Laporan Keuangan';
+    }
+    return candidate;
+  };
+
   const [activeTab, setActiveTab] = useState<string>(
-    queryTab || outletCtx?.activeTab || 'Laporan Keuangan'
+    sanitizeTab(queryTab || outletCtx?.activeTab)
   );
 
   const [period, setPeriod] = useState<'Hari Ini' | 'Minggu Ini' | 'Bulan Ini' | 'Tahun Ini'>('Bulan Ini');
@@ -42,11 +55,13 @@ export function AnalyticsDashboard() {
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
     if (tabFromUrl) {
-      setActiveTab(tabFromUrl);
+      setActiveTab(sanitizeTab(tabFromUrl));
     } else if (outletCtx?.activeTab) {
-      setActiveTab(outletCtx.activeTab);
+      setActiveTab(sanitizeTab(outletCtx.activeTab));
+    } else if (facilityMode === 'klinik' && activeTab.toLowerCase().includes('bpjs')) {
+      setActiveTab('Laporan Keuangan');
     }
-  }, [searchParams, outletCtx?.activeTab]);
+  }, [searchParams, outletCtx?.activeTab, facilityMode]);
 
   // Load finance records
   const billings = storage.getItem<BillingRecord[]>('hospital_finance_billings', INITIAL_BILLINGS);
@@ -59,11 +74,17 @@ export function AnalyticsDashboard() {
   // Revenue by Unit Data
   const revenueByUnitData = [
     { name: 'Rawat Jalan', value: billings.filter((b: BillingRecord) => b.tipeLayanan === 'Rawat Jalan').reduce((sum: number, b: BillingRecord) => sum + b.totalTagihan, 0), color: '#3b82f6' },
-    { name: 'Rawat Inap', value: billings.filter((b: BillingRecord) => b.tipeLayanan === 'Rawat Inap').reduce((sum: number, b: BillingRecord) => sum + b.totalTagihan, 0), color: '#6366f1' },
+    ...(facilityMode === 'rumah_sakit'
+      ? [{ name: 'Rawat Inap', value: billings.filter((b: BillingRecord) => b.tipeLayanan === 'Rawat Inap').reduce((sum: number, b: BillingRecord) => sum + b.totalTagihan, 0), color: '#6366f1' }]
+      : []),
     { name: 'Farmasi Resep', value: 42500000, color: '#10b981' },
     { name: 'Laboratorium', value: 18400000, color: '#f59e0b' },
-    { name: 'Radiologi', value: 12600000, color: '#8b5cf6' },
-    { name: 'Kamar Bedah / OK', value: 34800000, color: '#ec4899' },
+    ...(facilityMode === 'rumah_sakit'
+      ? [
+          { name: 'Radiologi', value: 12600000, color: '#8b5cf6' },
+          { name: 'Kamar Bedah / OK', value: 34800000, color: '#ec4899' }
+        ]
+      : [])
   ];
 
   // Daily Trend Data
@@ -193,7 +214,9 @@ export function AnalyticsDashboard() {
     { id: 'Laporan Laba Rugi', label: 'Laba Rugi (P&L)', icon: Activity },
     { id: 'Laporan Pasien', label: 'Laporan Pasien & Pelayanan', icon: Users },
     { id: 'Laporan Obat', label: 'Laporan Farmasi & Obat', icon: Pill },
-    { id: 'Laporan BPJS', label: 'Laporan BPJS & Piutang', icon: ShieldCheck }
+    ...(facilityMode === 'rumah_sakit'
+      ? [{ id: 'Laporan BPJS', label: 'Laporan BPJS & Piutang', icon: ShieldCheck }]
+      : [])
   ];
 
   return (
@@ -419,8 +442,12 @@ export function AnalyticsDashboard() {
                   <tr>
                     <th className="p-3">Nama Dokter & Spesialisasi</th>
                     <th className="p-3 text-center">Pasien Ralan</th>
-                    <th className="p-3 text-center">Visite Ranap</th>
-                    <th className="p-3 text-center">Tindakan / OK</th>
+                    {facilityMode === 'rumah_sakit' && (
+                      <>
+                        <th className="p-3 text-center">Visite Ranap</th>
+                        <th className="p-3 text-center">Tindakan / OK</th>
+                      </>
+                    )}
                     <th className="p-3 text-right">Jasa Medis Bruto</th>
                     <th className="p-3 text-right">PPh 21 (Pajak)</th>
                     <th className="p-3 text-right font-extrabold">JM Netto Diterima</th>
@@ -438,8 +465,12 @@ export function AnalyticsDashboard() {
                           <span className="text-[10px] text-slate-400">{jm.spesialisasi}</span>
                         </td>
                         <td className="p-3 text-center">{jm.totalPasien}</td>
-                        <td className="p-3 text-center">{jm.totalVisiteRanap}</td>
-                        <td className="p-3 text-center">{jm.totalTindakanOperatif}</td>
+                        {facilityMode === 'rumah_sakit' && (
+                          <>
+                            <td className="p-3 text-center">{jm.totalVisiteRanap}</td>
+                            <td className="p-3 text-center">{jm.totalTindakanOperatif}</td>
+                          </>
+                        )}
                         <td className="p-3 text-right font-medium">Rp {jm.brutoJasaMedis.toLocaleString('id-ID')}</td>
                         <td className="p-3 text-right text-rose-500">- Rp {pph.toLocaleString('id-ID')}</td>
                         <td className="p-3 text-right font-bold text-blue-600 dark:text-blue-400">
@@ -469,13 +500,15 @@ export function AnalyticsDashboard() {
       {(activeTab === 'Laporan Laba Rugi' || activeTab.toLowerCase().includes('laba rugi')) && (() => {
         // P&L Calculations
         const totalPendapatanRalan = billings.filter((b: BillingRecord) => b.tipeLayanan === 'Rawat Jalan').reduce((sum: number, b: BillingRecord) => sum + b.totalTagihan, 0);
-        const totalPendapatanRanap = billings.filter((b: BillingRecord) => b.tipeLayanan === 'Rawat Inap').reduce((sum: number, b: BillingRecord) => sum + b.totalTagihan, 0);
+        const totalPendapatanRanap = facilityMode === 'rumah_sakit'
+          ? billings.filter((b: BillingRecord) => b.tipeLayanan === 'Rawat Inap').reduce((sum: number, b: BillingRecord) => sum + b.totalTagihan, 0)
+          : 0;
         
         // Static mockups for non-billing segments for realistic view
         const totalPendapatanFarmasi = 42500000;
         const totalPendapatanLab = 18400000;
-        const totalPendapatanRad = 12600000;
-        const totalPendapatanOK = 34800000;
+        const totalPendapatanRad = facilityMode === 'rumah_sakit' ? 12600000 : 0;
+        const totalPendapatanOK = facilityMode === 'rumah_sakit' ? 34800000 : 0;
         
         const totalPendapatanKotor = totalPendapatanRalan + totalPendapatanRanap + totalPendapatanFarmasi + totalPendapatanLab + totalPendapatanRad + totalPendapatanOK;
 
@@ -533,22 +566,28 @@ export function AnalyticsDashboard() {
                       <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">Pendapatan Poli Rawat Jalan</td>
                       <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">{totalPendapatanRalan.toLocaleString('id-ID')}</td>
                     </tr>
+                    {facilityMode === 'rumah_sakit' && (
+                      <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                        <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">Pendapatan Akomodasi Rawat Inap</td>
+                        <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">{totalPendapatanRanap.toLocaleString('id-ID')}</td>
+                      </tr>
+                    )}
                     <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                      <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">Pendapatan Akomodasi Rawat Inap</td>
-                      <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">{totalPendapatanRanap.toLocaleString('id-ID')}</td>
-                    </tr>
-                    <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                      <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">Pendapatan Farmasi & Obat-obatan</td>
+                      <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">Pendapatan Farmasi &amp; Obat-obatan</td>
                       <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">{totalPendapatanFarmasi.toLocaleString('id-ID')}</td>
                     </tr>
                     <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                      <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">Pendapatan Penunjang (Lab & Radiologi)</td>
+                      <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">
+                        {facilityMode === 'klinik' ? 'Pendapatan Penunjang Laboratorium' : 'Pendapatan Penunjang (Lab & Radiologi)'}
+                      </td>
                       <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">{(totalPendapatanLab + totalPendapatanRad).toLocaleString('id-ID')}</td>
                     </tr>
-                    <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                      <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">Pendapatan Tindakan & Kamar Bedah (OK)</td>
-                      <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">{totalPendapatanOK.toLocaleString('id-ID')}</td>
-                    </tr>
+                    {facilityMode === 'rumah_sakit' && (
+                      <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                        <td className="p-3 pl-8 text-slate-700 dark:text-slate-300">Pendapatan Tindakan &amp; Kamar Bedah (OK)</td>
+                        <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">{totalPendapatanOK.toLocaleString('id-ID')}</td>
+                      </tr>
+                    )}
                     <tr className="bg-slate-50 dark:bg-slate-800/80 font-bold border-y-2 border-slate-200 dark:border-slate-700">
                       <td className="p-3 text-slate-900 dark:text-white pl-4">TOTAL PENDAPATAN KOTOR</td>
                       <td className="p-3 text-right text-blue-600 dark:text-blue-400">{totalPendapatanKotor.toLocaleString('id-ID')}</td>
@@ -697,32 +736,34 @@ export function AnalyticsDashboard() {
       {(activeTab === 'Laporan Pasien' || activeTab.toLowerCase().includes('pasien')) && (
         <div className="space-y-6">
           
-          {/* Hospital Performance Standard Indicators */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
-            <h3 className="font-bold text-base text-slate-900 dark:text-white">
-              Indikator Kinerja Pelayanan Rawat Inap (Depkes RI / Kemenkes)
-            </h3>
-            
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-              {hospitalKPIs.map((kpi) => (
-                <div key={kpi.label} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 space-y-1">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-semibold text-slate-500">{kpi.label}</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                      {kpi.status}
-                    </span>
+          {/* Hospital Performance Standard Indicators (Rumah Sakit only) */}
+          {facilityMode === 'rumah_sakit' && (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+              <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                Indikator Kinerja Pelayanan Rawat Inap (Depkes RI / Kemenkes)
+              </h3>
+              
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                {hospitalKPIs.map((kpi) => (
+                  <div key={kpi.label} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-slate-500">{kpi.label}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                        {kpi.status}
+                      </span>
+                    </div>
+                    <div className="text-2xl font-black text-blue-600 dark:text-blue-400">
+                      {kpi.value}
+                    </div>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                      Standar Ideal: <strong>{kpi.target}</strong>
+                    </div>
+                    <p className="text-[10px] text-slate-400">{kpi.desc}</p>
                   </div>
-                  <div className="text-2xl font-black text-blue-600 dark:text-blue-400">
-                    {kpi.value}
-                  </div>
-                  <div className="text-[11px] text-slate-600 dark:text-slate-400">
-                    Standar Ideal: <strong>{kpi.target}</strong>
-                  </div>
-                  <p className="text-[10px] text-slate-400">{kpi.desc}</p>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Top 10 ICD-10 Diseases */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
@@ -731,7 +772,11 @@ export function AnalyticsDashboard() {
                 <h3 className="font-bold text-base text-slate-900 dark:text-white">
                   10 Besar Penyakit Terbanyak (Top 10 Morbiditas ICD-10)
                 </h3>
-                <p className="text-xs text-slate-500">Berdasarkan data input SOAP dan resume medis rawat jalan & rawat inap</p>
+                <p className="text-xs text-slate-500">
+                  {facilityMode === 'klinik'
+                    ? 'Berdasarkan data input SOAP dan resume medis rawat jalan'
+                    : 'Berdasarkan data input SOAP dan resume medis rawat jalan & rawat inap'}
+                </p>
               </div>
             </div>
 
@@ -778,7 +823,9 @@ export function AnalyticsDashboard() {
               <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1.5">
                 Rp 86.450.000
               </div>
-              <span className="text-[11px] text-slate-500 mt-1 block">Ralan + Ranap + Resep Bebas</span>
+              <span className="text-[11px] text-slate-500 mt-1 block">
+                {facilityMode === 'klinik' ? 'Rawat Jalan + Resep Bebas' : 'Ralan + Ranap + Resep Bebas'}
+              </span>
             </div>
 
             <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
@@ -849,8 +896,8 @@ export function AnalyticsDashboard() {
         </div>
       )}
 
-      {/* TAB 4: LAPORAN BPJS & PIUTANG */}
-      {(activeTab === 'Laporan BPJS' || activeTab.toLowerCase().includes('bpjs')) && (
+      {/* TAB 4: LAPORAN BPJS & PIUTANG (Rumah Sakit only) */}
+      {facilityMode === 'rumah_sakit' && (activeTab === 'Laporan BPJS' || activeTab.toLowerCase().includes('bpjs')) && (
         <div className="space-y-6">
           
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">

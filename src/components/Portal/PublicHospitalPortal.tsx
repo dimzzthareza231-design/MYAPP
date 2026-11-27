@@ -24,7 +24,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Activity,
-  Sparkles
+  Sparkles,
+  LayoutGrid
 } from 'lucide-react';
 import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -210,6 +211,23 @@ const HERO_SLIDES: HeroSlide[] = [
 const RECENT_TICKETS_KEY = 'myitaru_public_recent_tickets';
 const EASE_OUT_EXPO = [0.16, 1, 0.3, 1] as const;
 const VIEWPORT_CONFIG = { once: true, amount: 0.14 } as const;
+
+function getCoreAppUrl(): string {
+  const configured = import.meta.env.VITE_CORE_APP_URL;
+  if (typeof configured === 'string' && configured.trim()) {
+    return configured.trim();
+  }
+  if (typeof window !== 'undefined') {
+    const { hostname } = window.location;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return `http://${hostname}:3001/staff/login`;
+    }
+    if (hostname.startsWith('www.')) {
+      return `https://${hostname.slice(4)}/staff/login`;
+    }
+  }
+  return 'https://myitaru.my.id/staff/login';
+}
 
 export const PublicHospitalPortal: React.FC = () => {
   const navigate = useNavigate();
@@ -2707,6 +2725,26 @@ export const PublicHospitalPortal: React.FC = () => {
             </motion.div>
           )}
         </AnimatePresence>
+        {/* Floating Core App (Aplikasi Inti SIMK) Corner Icon */}
+        <a
+          href={getCoreAppUrl()}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Buka Aplikasi Inti SIMK"
+          title="Aplikasi Inti SIMK"
+          className="group fixed bottom-5 right-5 z-40 inline-flex items-center gap-2.5 rounded-2xl bg-[#07265C]/95 hover:bg-[#0B3D91] text-white p-3 sm:pr-4 border border-white/15 hover:border-[#C9A94E]/60 shadow-[0_12px_30px_-8px_rgba(7,38,92,0.55)] hover:shadow-[0_18px_38px_-10px_rgba(11,61,145,0.65)] backdrop-blur-md transition-[transform,box-shadow,background-color,border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-safe:hover:scale-105 motion-safe:active:scale-95"
+        >
+          <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 border border-white/15 text-[#E8D49E] group-hover:bg-[#C9A94E]/20 transition-colors">
+            <LayoutGrid className="w-4 h-4" />
+            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 ring-2 ring-[#07265C]">
+              <ShieldCheck className="w-2 h-2 text-white" />
+            </span>
+          </span>
+          <span className="hidden sm:flex flex-col text-left leading-tight">
+            <span className="text-[11px] font-bold tracking-wide text-white">Aplikasi Inti</span>
+            <span className="text-[10px] font-medium text-sky-200/90">Portal Staf SIMK</span>
+          </span>
+        </a>
       </div>
     </MotionConfig>
   );

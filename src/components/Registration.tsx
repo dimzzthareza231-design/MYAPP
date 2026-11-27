@@ -193,12 +193,7 @@ export function Registration() {
     };
 
     // Save to HospitalContext (Master Visit)
-    try {
-      await addKunjunganHospital(newKunjunganData);
-    } catch (error) {
-      toast.error(`Kunjungan gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
-      return;
-    }
+    await addKunjunganHospital(newKunjunganData);
 
     // Save to PatientFlowContext
     addKunjunganFlow({
@@ -433,7 +428,7 @@ export function Registration() {
             }`}>
               👤
             </div>
-            <div className="min-w-0">
+            <div>
               <div className="text-xs uppercase tracking-wider text-blue-200/80 font-mono">Modul 1</div>
               <div className="text-sm font-bold truncate">MASTER PASIEN</div>
             </div>
@@ -453,7 +448,7 @@ export function Registration() {
             }`}>
               🏥
             </div>
-            <div className="min-w-0">
+            <div>
               <div className="text-xs uppercase tracking-wider text-teal-200/80 font-mono">Modul 2</div>
               <div className="text-sm font-bold truncate">REGISTRASI KUNJUNGAN</div>
             </div>
@@ -473,7 +468,7 @@ export function Registration() {
             }`}>
               🎫
             </div>
-            <div className="min-w-0">
+            <div>
               <div className="text-xs uppercase tracking-wider text-amber-200/80 font-mono">Modul 3</div>
               <div className="text-sm font-bold truncate">ANTRIAN & LOKET</div>
             </div>
@@ -493,7 +488,7 @@ export function Registration() {
             }`}>
               📜
             </div>
-            <div className="min-w-0">
+            <div>
               <div className="text-xs uppercase tracking-wider text-purple-200/80 font-mono">Modul 4</div>
               <div className="text-sm font-bold truncate">RIWAYAT PENDAFTARAN</div>
             </div>
@@ -1986,8 +1981,8 @@ export function Registration() {
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white text-slate-900 rounded-2xl w-full max-w-sm shadow-2xl p-6 flex flex-col gap-4 animate-in fade-in zoom-in duration-200">
             <div className="text-center border-b border-slate-200 pb-3">
-              <BrandLogo alt="MYITARU" className="w-10 h-10 rounded-xl object-cover mx-auto mb-1.5" />
-              <h3 className="font-black text-base text-slate-900">MYITARU</h3>
+              <BrandLogo alt="Klinik Tarumanagara" className="w-10 h-10 rounded-xl object-cover mx-auto mb-1.5" />
+              <h3 className="font-black text-base text-slate-900">KLINIK TARUMANAGARA</h3>
               <p className="text-[11px] text-slate-500">MYITARU SIMK · Jl. TB Simatupang & Cilandak KKO No.1, Jakarta Selatan</p>
             </div>
 

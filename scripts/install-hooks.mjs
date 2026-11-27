@@ -5,12 +5,17 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..');
-const hooksDir = join(root, '.git', 'hooks');
+const gitDir = join(root, '.git');
+const hooksDir = join(gitDir, 'hooks');
 const srcDir = join(root, 'scripts', 'hooks');
 
+if (!existsSync(gitDir)) {
+  console.log('[hooks:install] Direktori .git tidak ditemukan; pemasangan git hook dilewati.');
+  process.exit(0);
+}
+
 if (!existsSync(hooksDir)) {
-  console.error('[hooks:install] .git/hooks tidak ditemukan. Jalankan di dalam repo git.');
-  process.exit(1);
+  mkdirSync(hooksDir, { recursive: true });
 }
 
 for (const hook of ['pre-push']) {

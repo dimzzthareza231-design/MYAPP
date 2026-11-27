@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MODULE_REGISTRY } from '../data/moduleRegistry';
-import { isModuleAvailableInMode, type OperatingMode } from '../data/operatingModes';
+import { type OperatingMode } from '../data/operatingModes';
 import { useAuth } from '../contexts/AuthContext';
 import { useHospital } from '../contexts/HospitalContext';
 import { useToast } from '../contexts/ToastContext';
@@ -54,10 +54,10 @@ interface TopNavbarProps {
 export default function TopNavbar({ currentTime }: TopNavbarProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { hasAccess, isAdmin } = useAuth();
+  const { hasAccess, isAdmin, facilityMode, setFacilityMode } = useAuth();
   const { hospitalSettings, updateHospitalSettings } = useHospital();
   const toast = useToast();
-  const operatingMode: OperatingMode = hospitalSettings.operatingMode === 'SIMRS' ? 'SIMRS' : 'SIMK';
+  const operatingMode: OperatingMode = facilityMode === 'rumah_sakit' ? 'SIMRS' : 'SIMK';
 
   // State Management
   const [showMegaMenu, setShowMegaMenu] = useState(false);
@@ -76,18 +76,16 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
   const megaMenuRef = useRef<HTMLDivElement>(null);
   const aiSuiteRef = useRef<HTMLDivElement>(null);
 
-  // Filter modules based on user authorization
+  // Filter modules based on user authorization and facility mode
   const accessibleCategories = useMemo(() => {
     return MODULE_REGISTRY.map(cat => {
-      const allowedModules = cat.modules.filter(mod =>
-        hasAccess(mod.id) && isModuleAvailableInMode(mod.id, operatingMode)
-      );
+      const allowedModules = cat.modules.filter(mod => hasAccess(mod.id));
       return {
         ...cat,
         modules: allowedModules
       };
     }).filter(cat => cat.modules.length > 0);
-  }, [hasAccess, operatingMode]);
+  }, [hasAccess]);
 
   // Set default selected category tab if current is empty
   useEffect(() => {
@@ -133,13 +131,15 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
 
   const handleOperatingModeChange = async (mode: OperatingMode) => {
     if (!isAdmin || mode === operatingMode) return;
+    const nextFacilityMode = mode === 'SIMRS' ? 'rumah_sakit' : 'klinik';
+    setFacilityMode(nextFacilityMode);
     try {
       await updateHospitalSettings({ operatingMode: mode });
-      toast.success(`Mode ${mode} diaktifkan.`);
+      toast.success(`Mode ${nextFacilityMode === 'klinik' ? 'Modul Klinik' : 'Modul Rumah Sakit'} diaktifkan.`);
       if (location.pathname.startsWith('/modul/')) navigate('/dashboard');
     } catch (error) {
       console.error('Could not update hospital operating mode:', error);
-      toast.error('Mode operasional gagal disimpan.');
+      toast.error('Mode operasional gagal disimpan ke server, tetapi mode lokal diperbarui.');
     }
   };
 
@@ -666,7 +666,7 @@ export default function TopNavbar({ currentTime }: TopNavbarProps) {
           <nav className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-2xl border border-white/[0.07] backdrop-blur-md shrink-0">
             {quickDirectLinks.filter(link =>
               link.path === '/dashboard' ||
-              (isModuleAvailableInMode(link.path.replace('/modul/', ''), operatingMode) && hasAccess(link.path.replace('/modul/', '')))
+              hasAccess(link.path.replace('/modul/', ''))
             ).map(link => {
               const Icon = link.icon;
               const isActive = location.pathname === link.path;

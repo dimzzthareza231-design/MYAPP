@@ -6,7 +6,6 @@ import { PASIEN, MASTER_POLIKLINIK, SEMUA_DOKTER, SEMUA_PERAWAT } from "../data/
 import { Pasien, Kunjungan, MasterDokter, MasterPoli, MasterPenjamin, MasterPerawat, BantuanArtikel, User } from '../types';
 import { HospitalInfo, DEFAULT_HOSPITAL_INFO } from '../types/document';
 import { storage } from '../utils/storage';
-import { useAuth } from './AuthContext';
 import { 
   CloudStatus, 
   subscribeCloudStatus, 
@@ -21,19 +20,17 @@ import {
   savePerawatCloud,
   batchSeedPerawatCloud,
   saveHospitalSettingsCloud,
-  saveSystemDataCloud,
-  getSystemDataCloud,
-  usesServerPersistence
+  saveSystemDataCloud
 } from '../lib/firestoreService';
 
 interface HospitalContextType {
   activeUser: User;
   setActiveUser: (user: User) => void;
   pasien: Pasien[];
-  addPasien: (p: Pasien) => Promise<Pasien>;
+  addPasien: (p: Pasien) => Promise<void>;
   updatePasien: (id: string, p: Partial<Pasien>) => Promise<void>;
   kunjungan: Kunjungan[];
-  addKunjungan: (k: Kunjungan) => Promise<Kunjungan>;
+  addKunjungan: (k: Kunjungan) => Promise<void>;
   updateKunjunganStatus: (id: string, status: Kunjungan['status']) => Promise<void>;
   dokter: MasterDokter[];
   addDokter: (d: MasterDokter) => Promise<void>;
@@ -190,7 +187,6 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
     return {
       ...DEFAULT_HOSPITAL_INFO,
       ...raw,
-      operatingMode: raw.operatingMode === 'SIMRS' ? 'SIMRS' : 'SIMK',
       name: isLegacyName ? DEFAULT_HOSPITAL_INFO.name : rawName,
       subname: isLegacySubname ? DEFAULT_HOSPITAL_INFO.subname : rawSubname,
       hospitalType: isLegacyType ? DEFAULT_HOSPITAL_INFO.hospitalType : rawType
@@ -204,18 +200,16 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
 
   const updateHospitalSettings = async (settings: Partial<HospitalInfo & { logoUrl?: string }>) => {
     const updated = { ...hospitalSettings, ...settings };
-    if (usesServerPersistence) await saveHospitalSettingsCloud(updated);
     setHospitalSettings(updated);
     storage.set('hospital_settings', updated);
-    if (!usesServerPersistence) await saveHospitalSettingsCloud(updated);
+    await saveHospitalSettingsCloud(updated);
   };
 
   // 1. PASIEN STATE
   const [pasien, setPasien] = useState<Pasien[]>(() => {
-    if (usesServerPersistence) return [];
     const saved = storage.get('hospital_pasien', null);
     if (Array.isArray(saved) && saved.length > 0) return saved;
-    return import.meta.env.DEV ? (PASIEN as any) : [];
+    return PASIEN as any;
   });
 
   // 2. DOKTER STATE
@@ -233,14 +227,13 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
   });
 
   // 4. POLI STATE
-  const [poli, setPoli] = useState<MasterPoli[]>(MASTER_POLI_LIST);
+  const [poli] = useState<MasterPoli[]>(MASTER_POLI_LIST);
 
   // 5. PENJAMIN STATE
   const [penjamin] = useState<MasterPenjamin[]>(dummyPenjamin);
 
   // 6. KUNJUNGAN STATE
   const [kunjungan, setKunjungan] = useState<Kunjungan[]>(() => {
-    if (usesServerPersistence) return [];
     const saved = storage.get('hospital_kunjungan', null);
     if (Array.isArray(saved) && saved.length >= 24) return saved;
     return dummyKunjungan;
@@ -270,7 +263,6 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
   // Sync kunjungan & pasien when interline modules (e.g. Kasir payment or Registration) update storage
   useEffect(() => {
     const handleInterlineSync = (evt: Event) => {
-      if (usesServerPersistence) return;
       const action = (evt as CustomEvent)?.detail?.action;
       if (action === 'BILLING_PAID' || action === 'NEW_REGISTRATION' || action === 'SOAP_INTEGRATED') {
         const savedVisits = storage.get<Kunjungan[] | null>('hospital_kunjungan', null);
@@ -287,8 +279,6 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('simrs-interline-sync', handleInterlineSync);
   }, []);
 
-  // Data server hanya diambil setelah staf login; sebelum itu API pasti menjawab 401.
-  const sessionUserId = useAuth().currentUser?.id;
   // Track Firebase Auth UID so Firestore listeners only attach when authenticated
   const [firebaseUid, setFirebaseUid] = useState<string | null>(() => auth?.currentUser?.uid || null);
 
@@ -302,118 +292,6 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
 
   // Real-time Firestore listeners for core hospital collections (authenticated Firebase sessions only)
   useEffect(() => {
-    if (usesServerPersistence) {
-      if (!sessionUserId) return;
-      let active = true;
-      const refreshFromServer = async () => {
-        try {
-          const headers = { 'X-Storage-Mode': import.meta.env.VITE_STORAGE_MODE || 'firebase' };
-          const fetchAllPages = async (endpoint: string, limit: number) => {
-            const data: any[] = [];
-            let page = 1;
-            let totalPages = 1;
-            do {
-              const response = await fetch(`${endpoint}?page=${page}&limit=${limit}`, { credentials: 'same-origin', headers });
-              const payload = await response.json();
-              if (!response.ok || !payload.success) {
-                throw new Error(payload.error || payload.code || `${endpoint} data could not be loaded.`);
-              }
-              data.push(...(payload.data || []));
-              totalPages = Number(payload.totalPages) || 0;
-              page += 1;
-            } while (page <= totalPages);
-            return data;
-          };
-          const [patientRecords, appointmentRecords] = await Promise.all([
-            fetchAllPages('/api/v1/patients', 1000),
-            fetchAllPages('/api/v1/appointments', 500)
-          ]);
-          if (!active) return;
-
-          const patients: Pasien[] = patientRecords.map((item: any) => ({
-            id: item.id,
-            no_rm: item.no_rm || '',
-            nik: item.nik || '',
-            nama: item.nama || '',
-            tanggal_lahir: item.tanggal_lahir || '',
-            tgl_lahir: item.tanggal_lahir || '',
-            jenis_kelamin: item.jenis_kelamin || 'L',
-            alamat: item.alamat || '',
-            telepon: item.no_hp || '',
-            no_hp: item.no_hp || '',
-            golongan_darah: item.golongan_darah || '',
-            penjamin: item.penjamin || 'Umum',
-            status: item.status || 'Aktif',
-            alergi: item.alergi || [],
-            keluhan_utama: item.keluhan_utama || '',
-            diagnosa_primer: item.diagnosa_primer || ''
-          }));
-          const visits: Kunjungan[] = appointmentRecords.map((item: any) => ({
-            id: item.id,
-            pasien_id: item.pasien_id || '',
-            tanggal: item.tanggal || today,
-            poli_id: item.poli_id || item.poli || 'POL-01',
-            dokter_id: item.dokter_id || item.dokter || 'D-1',
-            penjamin_id: item.penjamin_id || 'PJ-01',
-            status: item.status === 'Dibatalkan' ? 'Batal' : (item.status || 'Menunggu'),
-            tipe: item.tipe || 'Rawat Jalan',
-            nomor_antrian: item.nomor_antrian || '',
-            keluhan_utama: item.keluhan_utama || ''
-          }));
-          setPasien(patients);
-          setKunjungan(visits);
-          storage.set('hospital_pasien', patients);
-          storage.set('hospital_kunjungan', visits);
-
-          const [serverDoctors, serverNurses, serverSettings, serverPoli] = await Promise.all([
-            getSystemDataCloud('hospital_dokter'),
-            getSystemDataCloud('hospital_perawat'),
-            getSystemDataCloud('hospital_settings'),
-            getSystemDataCloud('hospital_poli_master')
-          ]);
-          if (!active) return;
-          if (Array.isArray(serverDoctors)) {
-            const mergedDoctors = [
-              ...serverDoctors,
-              ...MASTER_DOKTER_LIST.filter((item) => !serverDoctors.some((saved: MasterDokter) => saved.id === item.id))
-            ];
-            setDokter(mergedDoctors);
-            storage.set('hospital_dokter', mergedDoctors);
-          }
-          if (Array.isArray(serverNurses)) {
-            const mergedNurses = [
-              ...serverNurses,
-              ...MASTER_PERAWAT_LIST.filter((item) => !serverNurses.some((saved: MasterPerawat) => saved.id === item.id))
-            ];
-            setPerawat(mergedNurses);
-            storage.set('hospital_perawat', mergedNurses);
-          }
-          if (serverSettings && typeof serverSettings === 'object') {
-            const settings = normalizeClinicSettings(serverSettings);
-            setHospitalSettings(settings);
-            storage.set('hospital_settings', settings);
-          }
-          if (Array.isArray(serverPoli)) {
-            setPoli(serverPoli);
-            storage.set('hospital_poli_master', serverPoli);
-          }
-        } catch (error) {
-          console.error('[Persistence] Hospital data refresh failed:', error);
-        }
-      };
-
-      void refreshFromServer();
-      // Tab tersembunyi tidak polling; saat kembali terlihat langsung disegarkan.
-      const timer = window.setInterval(() => { if (!document.hidden) void refreshFromServer(); }, 30_000);
-      const onVisible = () => { if (!document.hidden) void refreshFromServer(); };
-      document.addEventListener('visibilitychange', onVisible);
-      return () => {
-        active = false;
-        window.clearInterval(timer);
-        document.removeEventListener('visibilitychange', onVisible);
-      };
-    }
-
     if (!isFirebaseConfigured || !db || !firebaseUid) return;
     let seededPasien = false;
     let seededKunjungan = false;
@@ -447,7 +325,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
         });
         setPasien(list);
         storage.set('hospital_pasien', list);
-      } else if (!seededPasien && import.meta.env.DEV) {
+      } else if (!seededPasien) {
         // If Firestore is fresh/empty, automatically seed the 100+ master patients to Firestore
         seededPasien = true;
         batchSeedPasienCloud(PASIEN as any);
@@ -540,7 +418,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
       unsubPerawat();
       unsubSettings();
     };
-  }, [firebaseUid, sessionUserId]);
+  }, [firebaseUid]);
 
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 
@@ -548,37 +426,15 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
   const addPasien = async (p: Pasien) => {
     const docId = p.id || `P-${Date.now()}`;
     const newPasien = { ...p, id: docId };
-    if (usesServerPersistence) {
-      const saved = await savePasienCloud(newPasien);
-      if (!saved) throw new Error('Server tidak mengembalikan data pasien.');
-      setPasien(prev => {
-        const next = [saved, ...prev.filter(item => item.id !== saved.id)];
-        storage.set('hospital_pasien', next);
-        return next;
-      });
-      return saved;
-    }
     setPasien(prev => {
       const next = [newPasien, ...prev];
       storage.set('hospital_pasien', next);
       return next;
     });
     await savePasienCloud(newPasien);
-    return newPasien;
   };
 
   const updatePasien = async (id: string, updated: Partial<Pasien>) => {
-    if (usesServerPersistence) {
-      const saved = await updatePasienCloud(id, updated);
-      if (saved) {
-        setPasien(prev => {
-          const next = prev.map(p => p.id === id ? saved : p);
-          storage.set('hospital_pasien', next);
-          return next;
-        });
-      }
-      return;
-    }
     setPasien(prev => {
       const next = prev.map(p => p.id === id ? { ...p, ...updated } : p);
       storage.set('hospital_pasien', next);
@@ -588,57 +444,35 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
   };
 
   const addDokter = async (d: MasterDokter) => {
-    if (usesServerPersistence) await saveDokterCloud(d);
     setDokter(prev => {
       const next = [d, ...prev];
       storage.set('hospital_dokter', next);
       return next;
     });
-    if (!usesServerPersistence) await saveDokterCloud(d);
+    await saveDokterCloud(d);
   };
 
   const addPerawat = async (n: MasterPerawat) => {
-    if (usesServerPersistence) await savePerawatCloud(n);
     setPerawat(prev => {
       const next = [n, ...prev];
       storage.set('hospital_perawat', next);
       return next;
     });
-    if (!usesServerPersistence) await savePerawatCloud(n);
+    await savePerawatCloud(n);
   };
 
   const addKunjungan = async (k: Kunjungan) => {
     const docId = k.id || `K-${Date.now()}`;
     const newKunjungan = { ...k, id: docId };
-    if (usesServerPersistence) {
-      const saved = await saveKunjunganCloud(newKunjungan);
-      if (!saved) throw new Error('Server tidak mengembalikan data kunjungan.');
-      setKunjungan(prev => {
-        const next = [saved, ...prev.filter(item => item.id !== saved.id)];
-        storage.set('hospital_kunjungan', next);
-        return next;
-      });
-      return saved;
-    }
     setKunjungan(prev => {
       const next = [newKunjungan, ...prev];
       storage.set('hospital_kunjungan', next);
       return next;
     });
     await saveKunjunganCloud(newKunjungan);
-    return newKunjungan;
   };
 
   const updateKunjunganStatus = async (id: string, status: Kunjungan['status']) => {
-    if (usesServerPersistence) {
-      await updateKunjunganCloud(id, { status });
-      setKunjungan(prev => {
-        const next = prev.map(k => k.id === id ? { ...k, status } : k);
-        storage.set('hospital_kunjungan', next);
-        return next;
-      });
-      return;
-    }
     setKunjungan(prev => {
       const next = prev.map(k => k.id === id ? { ...k, status } : k);
       storage.set('hospital_kunjungan', next);
@@ -649,15 +483,6 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
 
   // Full manual cloud synchronization
   const syncAllData = async () => {
-    if (usesServerPersistence) {
-      await Promise.all([
-        batchSeedDokterCloud(dokter),
-        batchSeedPerawatCloud(perawat),
-        saveHospitalSettingsCloud(hospitalSettings),
-        saveSystemDataCloud('hospital_poli_master', poli)
-      ]);
-      return;
-    }
     await Promise.all([
       batchSeedPasienCloud(pasien),
       batchSeedKunjunganCloud(kunjungan),

@@ -1,7 +1,0 @@
-description = "Review UX (read-only) untuk membantu Claude sesuai jobdesk Gemini di AGENTS.md"
-prompt = """
-Ikuti AGENTS.md dan GEMINI.md. Lakukan review UI/UX read-only: aksesibilitas, konsistensi tampilan, istilah Klinik/SIMK/RME, teks antarmuka.
-Tolak tugas backend/berat. Laporkan temuan dengan path:baris; jangan klaim BERHASIL tanpa bukti.
-
-Konteks: {{args}}
-"""

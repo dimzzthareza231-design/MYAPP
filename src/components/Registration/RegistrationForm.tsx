@@ -16,7 +16,7 @@ import { useAntrian, DAFTAR_POLI } from "../../contexts/AntrianContext";
 import { integrateRegistration } from '../../utils/interlineIntegration';
 
 export function RegistrationForm({ initialData, onClose }: { initialData?: any, onClose?: () => void }) {
-  const { addPasien, addKunjungan: addKunjunganMaster, dokter } = useHospital();
+  const { addPasien, addKunjungan: addKunjunganMaster } = useHospital();
   const { addKunjungan } = usePatientFlow();
   const { daftarkanAntrian } = useAntrian();
   const [currentStep, setCurrentStep] = useState(1);
@@ -24,7 +24,6 @@ export function RegistrationForm({ initialData, onClose }: { initialData?: any, 
   const [draftDetected, setDraftDetected] = useState(false);
   const [draftTime, setDraftTime] = useState<string>('');
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
-  const [submitting, setSubmitting] = useState(false);
 
   // Function to create default form state
   const createDefaultState = (): RegistrationFormState => {
@@ -397,9 +396,8 @@ export function RegistrationForm({ initialData, onClose }: { initialData?: any, 
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting) return;
     
     // Validate all steps from 1 to 8
     for (let s = 1; s <= totalSteps; s++) {
@@ -454,66 +452,69 @@ export function RegistrationForm({ initialData, onClose }: { initialData?: any, 
       tanda_vital: formData.tandaVital
     };
     
-    setSubmitting(true);
-    try {
-      // Server memberi id dan No. RM final; semua langkah berikutnya memakai data itu.
-      const savedPatient = { ...newPatient, ...(await addPasien(newPatient as any)) };
+    // Save to HospitalContext (Master Data)
+    addPasien(newPatient as any);
 
-      const poliObject = DAFTAR_POLI.find(p => p.nama === formData.poliTujuan) || DAFTAR_POLI[0];
-      const hasilAntrian = daftarkanAntrian({
-        pasienId: savedPatient.id,
-        namaPasien: savedPatient.nama,
-        noRm: savedPatient.no_rm,
-        poliId: poliObject.id,
-        keluhan: formData.keluhanUtama,
-        penjamin: formData.jenisPenjamin
-      });
+    const poliObject = DAFTAR_POLI.find(p => p.nama === formData.poliTujuan) || DAFTAR_POLI[0];
+    const hasilAntrian = daftarkanAntrian({
+      pasienId: newPatient.id,
+      namaPasien: newPatient.nama,
+      noRm: newPatient.no_rm,
+      poliId: poliObject.id,
+      keluhan: formData.keluhanUtama,
+      penjamin: formData.jenisPenjamin
+    });
 
-      const visit = await addKunjunganMaster({
-        id: `K-${Date.now()}`,
-        pasien_id: savedPatient.id,
-        status: 'Menunggu',
-        tanggal: new Date().toISOString(),
-        poli_id: poliObject.id,
-        dokter_id: dokter.find(d => d.nama === formData.dokterPilihan)?.id || dokter[0]?.id || 'D1',
-        penjamin_id: formData.jenisPenjamin.toLowerCase().includes('bpjs') ? 'PJ-02' : 'PJ-01',
-        nomor_antrian: hasilAntrian?.nomorAntrian || '',
-        tipe: formData.jenisKunjungan || 'Rawat Jalan'
-      } as any);
+    const commonKunjunganData = {
+      tanggal: new Date().toISOString(),
+      poli_id: poliObject.id,
+      dokter_id: 'D1',
+      penjamin_id: formData.jenisPenjamin.toLowerCase().includes('bpjs') ? 'PJ-02' : 'PJ-01',
+      nomor_antrian: hasilAntrian ? hasilAntrian.nomorAntrian : `A-${Math.floor(Math.random() * 100).toString().padStart(3, '0')}`,
+      tipe: formData.jenisKunjungan || 'Rawat Jalan'
+    };
 
-      // Add Visit to Patient Flow Context
-      addKunjungan({
-        no_rm: savedPatient.no_rm,
-        nama_pasien: formData.namaLengkap,
-        jenis_kunjungan: formData.jenisKunjungan || 'Rawat Jalan',
-        poli: formData.poliTujuan || 'Poli Umum',
-        dokter: formData.dokterPilihan || 'dr. Jaga Poliklinik',
-        penjamin: formData.jenisPenjamin
-      });
+    // Add Visit to Hospital Context
+    addKunjunganMaster({
+      id: `K-${Math.floor(Math.random() * 10000)}`,
+      pasien_id: newPatient.id,
+      status: 'Menunggu',
+      ...commonKunjunganData
+    } as any);
 
-      // Integrated Hospital Pipeline (Billing, Bed, EMR, BPJS)
-      integrateRegistration({
-        patient: savedPatient,
-        visit,
-        isBPJS: formData.jenisPenjamin.toLowerCase().includes('bpjs'),
-        poliNama: formData.poliTujuan,
-        dokterNama: formData.dokterPilihan,
-        keluhan: formData.keluhanUtama
-      });
+    // Add Visit to Patient Flow Context
+    addKunjungan({
+      no_rm: formData.noRm,
+      nama_pasien: formData.namaLengkap,
+      jenis_kunjungan: formData.jenisKunjungan || 'Rawat Jalan',
+      poli: formData.poliTujuan || 'Poli Umum',
+      dokter: formData.dokterPilihan || 'dr. Jaga Poliklinik',
+      penjamin: formData.jenisPenjamin
+    });
 
-      // Clean up draft
-      localStorage.removeItem('simrs_registration_draft');
+    // Integrated Hospital Pipeline (Billing, Bed, EMR, BPJS)
+    const masterVisitObj: any = {
+      id: `K-${Math.floor(Math.random() * 10000)}`,
+      pasien_id: newPatient.id,
+      status: 'Menunggu',
+      ...commonKunjunganData
+    };
+    integrateRegistration({
+      patient: newPatient,
+      visit: masterVisitObj,
+      isBPJS: formData.jenisPenjamin.toLowerCase().includes('bpjs'),
+      poliNama: formData.poliTujuan,
+      dokterNama: formData.dokterPilihan,
+      keluhan: formData.keluhanUtama
+    });
+    
+    // Clean up draft
+    localStorage.removeItem('simrs_registration_draft');
 
-      toast.success(`🎉 Pasien ${savedPatient.nama} berhasil terdaftar! RM: ${savedPatient.no_rm}`, {
-        duration: 5000,
-        icon: '✅'
-      });
-    } catch (error) {
-      toast.error(`Pendaftaran gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
-      return;
-    } finally {
-      setSubmitting(false);
-    }
+    toast.success(`🎉 Pasien ${newPatient.nama} berhasil terdaftar! RM: ${newPatient.no_rm}`, {
+      duration: 5000,
+      icon: '✅'
+    });
 
     if (onClose) {
       setTimeout(onClose, 800);
@@ -567,14 +568,14 @@ export function RegistrationForm({ initialData, onClose }: { initialData?: any, 
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {import.meta.env.DEV && <button
+            <button 
               type="button"
-              onClick={populateDummyData}
+              onClick={populateDummyData} 
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 flex items-center gap-1 shadow-sm transition-all"
               title="Isi otomatis dengan data dummy untuk mempermudah testing"
             >
               <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> Auto-Fill Dummy
-            </button>}
+            </button>
             <button 
               type="button"
               onClick={saveDraft} 
@@ -672,11 +673,10 @@ export function RegistrationForm({ initialData, onClose }: { initialData?: any, 
           <button 
             form="registrationForm"
             type="submit"
-            disabled={submitting}
-            className="disabled:opacity-60 disabled:cursor-wait px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-950/40 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
+            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-950/40 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
           >
             <Printer className="w-4 h-4" />
-            <span>{submitting ? 'Menyimpan…' : 'Simpan Data & Daftarkan Kunjungan'}</span>
+            <span>Simpan Data & Daftarkan Kunjungan</span>
           </button>
         )}
       </div>

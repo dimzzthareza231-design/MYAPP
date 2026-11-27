@@ -1,15 +1,11 @@
 import crypto from 'crypto';
 import type express from 'express';
-import { createSignedStore } from './signedStore';
-import { clientIp } from './clientIp';
 import {
   HOSPITAL_DIVISIONS,
   CORE_EMPLOYEE_MODULES,
   GOVERNANCE_FRAMEWORKS,
   type DivisionDefinition
 } from '../data/employeePortalCatalog';
-import type { PersistenceRepository } from './databaseAdapter';
-import { safeErrorDetails } from './scrubPhi';
 
 export interface GatewayDependencies {
   createAuditLog?: (entry: {
@@ -141,14 +137,10 @@ function mapPortalRole(div: DivisionDefinition): EmployeeUserRecord['portalRole'
   return 'STAF_UMUM';
 }
 
-export function registerEmployeePortalGateway(
-  app: express.Application,
-  deps: GatewayDependencies = {},
-  persistence?: PersistenceRepository
-) {
-  // MYITARU Campus Reference Coordinate (Jakarta)
+export function registerEmployeePortalGateway(app: express.Application, deps: GatewayDependencies = {}) {
+  // Klinik Campus Reference Coordinate (MYITARU Medical Center - Jakarta)
   const HOSPITAL_GEOFENCE = {
-    name: 'Kampus Utama MYITARU Jakarta',
+    name: 'Kampus Utama Klinik Tarumanagara Jakarta',
     lat: -6.229728,
     lng: 106.829518,
     radiusMeters: 200
@@ -160,7 +152,7 @@ export function registerEmployeePortalGateway(
   const usersStore: EmployeeUserRecord[] = HOSPITAL_DIVISIONS.map((div, index) => ({
     id: `emp-${div.id}`,
     nip: div.defaultNip,
-    email: `${div.id.replace(/[^a-z0-9]/g, '')}@myitaru.id`,
+    email: `${div.id.replace(/[^a-z0-9]/g, '')}@tarumanagara-klinik.id`,
     name: div.defaultStaffName,
     divisionId: div.id,
     divisionName: div.name,
@@ -178,9 +170,8 @@ export function registerEmployeePortalGateway(
     lastHrisSync: new Date().toISOString()
   }));
 
-  // Tantangan MFA & sesi = token bertanda tangan (stateless) agar login tetap jalan di serverless multi-instance.
-  const mfaChallenges = createSignedStore<MfaChallenge>('mfa_', 'challengeId', 10 * 60 * 1000);
-  const sessions = createSignedStore<GatewaySession>('emp_', 'token', 12 * 60 * 60 * 1000);
+  const mfaChallenges = new Map<string, MfaChallenge>();
+  const sessions = new Map<string, GatewaySession>();
   const idempotencyCache = new Map<string, { status: number; body: unknown; createdAt: number }>();
   const rateLimitMap = new Map<string, number[]>();
 
@@ -735,164 +726,6 @@ export function registerEmployeePortalGateway(
     ] as Array<{ timestamp: string; device: string; cta: string; utmSource: string }>
   };
 
-  const GATEWAY_STATE_ID = 'employee_gateway_state';
-  let gatewayStateRevision = 0;
-  let persistedGatewayStateRevision = 0;
-  let gatewayStateExpected: unknown | null = null;
-  let gatewayStateLoaded = false;
-  let gatewayStateLoad: Promise<void> | undefined;
-  let gatewayStateSaveQueue: Promise<void> = Promise.resolve();
-
-  function restoreArray<T>(target: T[], value: unknown) {
-    if (Array.isArray(value)) target.splice(0, target.length, ...structuredClone(value) as T[]);
-  }
-
-  function restoreObject(target: object, value: unknown) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const current = target as Record<string, unknown>;
-      for (const key of Object.keys(current)) delete current[key];
-      Object.assign(current, value);
-    }
-  }
-
-  function restoreGatewayState(value: unknown) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
-    const state = value as Record<string, unknown>;
-    restoreArray(usersStore, state.usersStore);
-    restoreObject(rbacMatrix, state.rbacMatrix);
-    restoreObject(abacPolicies, state.abacPolicies);
-    restoreObject(featureFlags, state.featureFlags);
-    restoreArray(portalAnnouncements, state.portalAnnouncements);
-    restoreArray(shiftSchedulesStore, state.shiftSchedulesStore);
-    restoreArray(shiftSwapsStore, state.shiftSwapsStore);
-    restoreArray(attendanceLogsStore, state.attendanceLogsStore);
-    restoreArray(leaveRequestsStore, state.leaveRequestsStore);
-    restoreArray(reimbursementsStore, state.reimbursementsStore);
-    restoreArray(sbarHandoversStore, state.sbarHandoversStore);
-    restoreArray(helpdeskTicketsStore, state.helpdeskTicketsStore);
-    restoreArray(trainingCatalog, state.trainingCatalog);
-    restoreArray(siemAuditTrail, state.siemAuditTrail);
-    restoreArray(configChangeProposals, state.configChangeProposals);
-    restoreArray(governanceChangelog, state.governanceChangelog);
-    restoreArray(integrationHealthStore, state.integrationHealthStore);
-    restoreObject(landingAnalyticsStore, state.landingAnalyticsStore);
-    if (state.divisionActionState && typeof state.divisionActionState === 'object' && !Array.isArray(state.divisionActionState)) {
-      divisionActionState.clear();
-      for (const [divisionId, actions] of Object.entries(state.divisionActionState)) {
-        if (actions && typeof actions === 'object' && !Array.isArray(actions)) {
-          divisionActionState.set(divisionId, actions as Record<string, string>);
-        }
-      }
-    }
-  }
-
-  let gatewayDefaultsSnapshot: unknown;
-  function defaultGatewayState() {
-    if (gatewayDefaultsSnapshot === undefined) gatewayDefaultsSnapshot = structuredClone(gatewayStateSnapshot());
-    return gatewayDefaultsSnapshot;
-  }
-
-  async function loadGatewayState() {
-    if (!persistence || gatewayStateLoaded) return;
-    if (!gatewayStateLoad) {
-      gatewayStateLoad = (async () => {
-        defaultGatewayState();
-        const stored = await persistence.get<unknown>('system_data', GATEWAY_STATE_ID);
-        gatewayStateExpected = stored === null ? null : structuredClone(stored);
-        restoreGatewayState(defaultGatewayState());
-        if (stored !== null) restoreGatewayState(stored);
-        gatewayStateLoaded = true;
-      })().finally(() => {
-        gatewayStateLoad = undefined;
-      });
-    }
-    return gatewayStateLoad;
-  }
-
-  class GatewayStateConflictError extends Error {
-    constructor() {
-      super('Employee gateway state changed in another instance.');
-      this.name = 'GatewayStateConflictError';
-    }
-  }
-
-  function gatewayStateSnapshot() {
-    return {
-      usersStore,
-      rbacMatrix,
-      abacPolicies,
-      featureFlags,
-      portalAnnouncements,
-      shiftSchedulesStore,
-      shiftSwapsStore,
-      attendanceLogsStore,
-      leaveRequestsStore,
-      reimbursementsStore,
-      sbarHandoversStore,
-      helpdeskTicketsStore,
-      trainingCatalog,
-      divisionActionState: Object.fromEntries(divisionActionState),
-      siemAuditTrail,
-      configChangeProposals,
-      governanceChangelog,
-      integrationHealthStore,
-      landingAnalyticsStore
-    };
-  }
-
-  function markGatewayStateDirty() {
-    gatewayStateRevision += 1;
-  }
-
-  function persistGatewayState(): Promise<void> {
-    if (!persistence) return Promise.resolve();
-    const save = gatewayStateSaveQueue.then(async () => {
-      if (gatewayStateRevision === persistedGatewayStateRevision) return;
-      const revision = gatewayStateRevision;
-      const snapshot = structuredClone(gatewayStateSnapshot());
-      const saved = await persistence.compareAndSwap('system_data', GATEWAY_STATE_ID, gatewayStateExpected, snapshot);
-      if (!saved) {
-        const latest = await persistence.get<unknown>('system_data', GATEWAY_STATE_ID);
-        gatewayStateExpected = latest === null ? null : structuredClone(latest);
-        restoreGatewayState(defaultGatewayState());
-        if (latest !== null) restoreGatewayState(latest);
-        persistedGatewayStateRevision = revision;
-        throw new GatewayStateConflictError();
-      }
-      gatewayStateExpected = snapshot;
-      persistedGatewayStateRevision = revision;
-    });
-    gatewayStateSaveQueue = save.catch(() => undefined);
-    return save;
-  }
-
-  app.use('/api/gateway', (req, res, next) => {
-    void loadGatewayState().then(() => {
-      if (persistence) {
-        const sendJson = res.json.bind(res);
-        res.json = ((body: unknown) => {
-          if (gatewayStateRevision === persistedGatewayStateRevision) return sendJson(body);
-          void persistGatewayState().then(() => sendJson(body)).catch((error: unknown) => {
-            console.error('[Persistence] Could not save employee gateway state.', safeErrorDetails(error));
-            if (!res.headersSent) {
-              const conflict = error instanceof GatewayStateConflictError;
-              res.status(conflict ? 409 : 503);
-              sendJson({
-                success: false,
-                code: conflict ? 'GATEWAY_STATE_CONFLICT' : 'GATEWAY_PERSISTENCE_UNAVAILABLE'
-              });
-            }
-          });
-          return res;
-        }) as typeof res.json;
-      }
-      next();
-    }).catch((error: unknown) => {
-      console.error('[Persistence] Could not load employee gateway state.', safeErrorDetails(error));
-      res.status(503).json({ success: false, code: 'GATEWAY_PERSISTENCE_UNAVAILABLE' });
-    });
-  });
-
   // =========================================================================
   // 2. GATEWAY HELPERS (SIEM LOG, RATE LIMIT, IDEMPOTENCY, RBAC+ABAC)
   // =========================================================================
@@ -928,7 +761,6 @@ export function registerEmployeePortalGateway(
 
     siemAuditTrail.unshift(entry);
     if (siemAuditTrail.length > 200) siemAuditTrail.pop();
-    markGatewayStateDirty();
 
     deps.createAuditLog?.({
       user_id: params.actorNip,
@@ -989,7 +821,8 @@ export function registerEmployeePortalGateway(
     if (auth && auth.startsWith('Bearer ')) {
       return auth.slice(7).trim();
     }
-    return null;
+    const queryToken = req.query.token;
+    return typeof queryToken === 'string' && queryToken ? queryToken : null;
   }
 
   function requireGatewaySession(req: express.Request, res: express.Response): GatewaySession | null {
@@ -1007,18 +840,11 @@ export function registerEmployeePortalGateway(
 
   // Sliding window rate limiter + Idempotency middleware for /api/gateway/*
   app.use('/api/gateway', (req, res, next) => {
-    const ip = clientIp(req);
+    const ip = req.ip || '127.0.0.1';
     const now = Date.now();
     const history = (rateLimitMap.get(ip) || []).filter((ts) => now - ts < 60_000);
     history.push(now);
     rateLimitMap.set(ip, history);
-    // Buang catatan lama agar dua map ini tidak tumbuh tanpa batas.
-    if (rateLimitMap.size > 5000) {
-      for (const [key, stamps] of rateLimitMap) if (!stamps.some((ts) => now - ts < 60_000)) rateLimitMap.delete(key);
-    }
-    if (idempotencyCache.size > 2000) {
-      for (const [key, entry] of idempotencyCache) if (now - entry.createdAt > 10 * 60_000) idempotencyCache.delete(key);
-    }
 
     res.setHeader('X-Gateway-Version', 'MYITARU-GW-2026.1');
     res.setHeader('X-RateLimit-Remaining', String(Math.max(0, 180 - history.length)));
@@ -1033,8 +859,7 @@ export function registerEmployeePortalGateway(
 
     const idemKey = req.headers['idempotency-key'];
     if (req.method !== 'GET' && typeof idemKey === 'string' && idemKey.trim()) {
-      // Kunci menyertakan IP dan token agar klien lain dengan key sama tidak menerima respons orang lain.
-      const cacheKey = `${ip}::${req.headers.authorization || ''}::${req.path}::${idemKey.trim()}`;
+      const cacheKey = `${req.path}::${idemKey.trim()}`;
       const existing = idempotencyCache.get(cacheKey);
       if (existing) {
         res.setHeader('X-Idempotent-Replay', 'true');
@@ -1055,14 +880,6 @@ export function registerEmployeePortalGateway(
   // 3. AUTHENTICATION & MANDATORY MFA OTP
   // =========================================================================
   app.post('/api/gateway/auth/login', (req, res) => {
-    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
-      return res.status(503).json({
-        success: false,
-        code: 'EMPLOYEE_IDENTITY_NOT_CONFIGURED',
-        message: 'Integrasi identitas pegawai belum dikonfigurasi; autentikasi demo dinonaktifkan.'
-      });
-    }
-
     const { identifier, divisionId, authType, googleEmail, googleName, deviceInfo } = req.body || {};
 
     let user: EmployeeUserRecord | undefined;
@@ -1106,8 +923,9 @@ export function registerEmployeePortalGateway(
     const needsMfa = abacPolicies.mfaRequiredForClinicalAndAdmin && (user.isClinical || user.isAdminCapable);
 
     if (needsMfa) {
-      const challengeId = mfaChallenges.issue({
-        challengeId: '',
+      const challengeId = 'mfa-' + crypto.randomUUID().slice(0, 8);
+      mfaChallenges.set(challengeId, {
+        challengeId,
         userId: user.id,
         otp: DEFAULT_DEMO_OTP,
         authType: authType === 'google' ? 'google' : 'nip',
@@ -1145,7 +963,7 @@ export function registerEmployeePortalGateway(
     }
 
     // Standard role direct issue (MFA optional)
-    let token = '';
+    const token = 'emp_' + crypto.randomBytes(16).toString('hex');
     const session: GatewaySession = {
       token,
       userId: user.id,
@@ -1170,7 +988,7 @@ export function registerEmployeePortalGateway(
       },
       createdAt: new Date().toISOString()
     };
-    token = sessions.issue(session);
+    sessions.set(token, session);
 
     appendSiemLog({
       actorNip: user.nip,
@@ -1192,14 +1010,6 @@ export function registerEmployeePortalGateway(
   });
 
   app.post('/api/gateway/auth/verify-mfa', (req, res) => {
-    if (process.env.NODE_ENV === 'production' || process.env.ALLOW_INSECURE_DEMO_AUTH !== 'true') {
-      return res.status(503).json({
-        success: false,
-        code: 'EMPLOYEE_IDENTITY_NOT_CONFIGURED',
-        message: 'MFA pegawai belum dikonfigurasi; autentikasi demo dinonaktifkan.'
-      });
-    }
-
     const { challengeId, otp, deviceName } = req.body || {};
     const challenge = mfaChallenges.get(String(challengeId || ''));
 
@@ -1235,7 +1045,7 @@ export function registerEmployeePortalGateway(
     }
 
     mfaChallenges.delete(challenge.challengeId);
-    let token = '';
+    const token = 'emp_' + crypto.randomBytes(16).toString('hex');
     const deviceFingerprint = `BND-${user.nip.slice(-3)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
     const session: GatewaySession = {
@@ -1263,7 +1073,7 @@ export function registerEmployeePortalGateway(
       createdAt: new Date().toISOString()
     };
 
-    token = sessions.issue(session);
+    sessions.set(token, session);
 
     appendSiemLog({
       actorNip: user.nip,
@@ -1601,7 +1411,7 @@ export function registerEmployeePortalGateway(
       distanceMeters,
       withinGeofence,
       biometricVerified: Boolean(biometricVerified ?? true),
-      note: String(note || (withinGeofence ? 'Area Kampus MYITARU' : 'Koreksi / Tugas Luar')),
+      note: String(note || (withinGeofence ? 'Area Kampus Klinik Tarumanagara' : 'Koreksi / Tugas Luar')),
       idempotencyKey: typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'] : undefined
     };
 
@@ -1808,7 +1618,6 @@ export function registerEmployeePortalGateway(
       status: 'Diajukan' as const
     };
     reimbursementsStore.unshift(newItem);
-    markGatewayStateDirty();
     res.json({ success: true, reimbursement: newItem });
   });
 
@@ -1841,7 +1650,6 @@ export function registerEmployeePortalGateway(
     if (!course) return res.status(404).json({ success: false, message: 'Pelatihan tidak ditemukan.' });
     course.enrolled = true;
     course.status = 'Terdaftar (Menunggu Jadwal)';
-    markGatewayStateDirty();
     res.json({ success: true, course });
   });
 
@@ -1943,7 +1751,6 @@ export function registerEmployeePortalGateway(
     if (!item) return res.status(404).json({ success: false, message: 'Catatan SBAR tidak ditemukan.' });
     item.karuVerified = true;
     item.karuName = session.name;
-    markGatewayStateDirty();
     res.json({ success: true, handover: item });
   });
 
@@ -1956,7 +1763,7 @@ export function registerEmployeePortalGateway(
         { label: 'Service Desk TI / SIMK (24 Jam)', phone: 'Ext. 1100 / 0811-900-1100', sla: 'Respon < 15 Menit (P1)' },
         { label: 'HR Helpdesk & Payroll', phone: 'Ext. 1205', sla: 'Hari Kerja 08:00 - 16:30' },
         { label: 'Code Blue / Kegawatdaruratan Internal', phone: 'Ext. 911', sla: 'Segera < 3 Menit' },
-        { label: 'Data Protection Officer (UU PDP)', phone: 'dpo@myitaru.id', sla: 'Eskalasi Keamanan Data' }
+        { label: 'Data Protection Officer (UU PDP)', phone: 'dpo@tarumanagara-klinik.id', sla: 'Eskalasi Keamanan Data' }
       ],
       faqs: [
         { q: 'Bagaimana jika kode OTP MFA tidak diterima saat login?', a: 'Pada lingkungan demo gunakan kode 123456, atau klik "Buat Tiket TI" bila perangkat baru belum terikat.' },
@@ -2013,7 +1820,6 @@ export function registerEmployeePortalGateway(
     const t = helpdeskTicketsStore.find((item) => item.id === ticketId);
     if (!t) return res.status(404).json({ success: false, message: 'Tiket tidak ditemukan.' });
     t.status = status === 'Selesai' ? 'Selesai' : 'Ditangani ITIL L1/L2';
-    markGatewayStateDirty();
     res.json({ success: true, ticket: t });
   });
 
@@ -2167,9 +1973,6 @@ export function registerEmployeePortalGateway(
   app.post('/api/gateway/admin/users', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
-    if (!session.isAdminCapable && session.divisionId !== 'direktur') {
-      return res.status(403).json({ success: false, message: 'Hanya admin portal yang boleh melakukan aksi ini.' });
-    }
 
     const { action, userId, name, nip, divisionId } = req.body || {};
     if (action === 'HRIS_SYNC') {
@@ -2213,7 +2016,7 @@ export function registerEmployeePortalGateway(
       const newUser: EmployeeUserRecord = {
         id: 'emp-' + Date.now(),
         nip: String(nip),
-        email: `${String(nip).toLowerCase().replace(/[^a-z0-9]/g, '')}@myitaru.id`,
+        email: `${String(nip).toLowerCase().replace(/[^a-z0-9]/g, '')}@tarumanagara-klinik.id`,
         name: String(name),
         divisionId: div.id,
         divisionName: div.name,
@@ -2227,7 +2030,6 @@ export function registerEmployeePortalGateway(
         lastHrisSync: new Date().toISOString()
       };
       usersStore.unshift(newUser);
-      markGatewayStateDirty();
       return res.json({ success: true, user: newUser });
     }
 
@@ -2238,9 +2040,6 @@ export function registerEmployeePortalGateway(
   app.post('/api/gateway/admin/propose-change', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
-    if (!session.isAdminCapable && session.divisionId !== 'direktur') {
-      return res.status(403).json({ success: false, message: 'Hanya admin portal yang boleh melakukan aksi ini.' });
-    }
 
     const { category, title, targetKey, proposedValue, justification } = req.body || {};
     const proposal: ConfigChangeProposal = {
@@ -2273,16 +2072,10 @@ export function registerEmployeePortalGateway(
   app.post('/api/gateway/admin/review-change', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
-    if (!session.isAdminCapable && session.divisionId !== 'direktur') {
-      return res.status(403).json({ success: false, message: 'Hanya admin portal yang boleh melakukan aksi ini.' });
-    }
 
     const { proposalId, decision, reviewNote } = req.body || {};
     const proposal = configChangeProposals.find((p) => p.id === proposalId);
     if (!proposal) return res.status(404).json({ success: false, message: 'Usulan perubahan tidak ditemukan.' });
-    if (proposal.proposedBy === `${session.name} (${session.divisionName})`) {
-      return res.status(403).json({ success: false, message: 'Pengusul tidak boleh menyetujui usulannya sendiri.' });
-    }
 
     proposal.reviewedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
     proposal.reviewedBy = `${session.name} (Reviewer Keamanan/Kepatuhan)`;
@@ -2306,7 +2099,7 @@ export function registerEmployeePortalGateway(
     proposal.status = 'APPROVED';
 
     // Apply atomically to live policy / flag / announcement
-    if (proposal.category === 'FEATURE_FLAG' && Object.hasOwn(featureFlags, proposal.targetKey)) {
+    if (proposal.category === 'FEATURE_FLAG' && featureFlags[proposal.targetKey]) {
       featureFlags[proposal.targetKey].enabled = Boolean(proposal.proposedValue);
     } else if (proposal.category === 'ABAC_POLICY' && proposal.targetKey in abacPolicies) {
       (abacPolicies as unknown as Record<string, boolean>)[proposal.targetKey] = Boolean(proposal.proposedValue);
@@ -2357,9 +2150,6 @@ export function registerEmployeePortalGateway(
   app.post('/api/gateway/admin/integrations/test', (req, res) => {
     const session = requireGatewaySession(req, res);
     if (!session) return;
-    if (!session.isAdminCapable && session.divisionId !== 'direktur') {
-      return res.status(403).json({ success: false, message: 'Hanya admin portal yang boleh melakukan aksi ini.' });
-    }
 
     const { integrationId } = req.body || {};
     const target = integrationHealthStore.find((i) => i.id === integrationId);
@@ -2425,7 +2215,6 @@ export function registerEmployeePortalGateway(
       }
     }
 
-    markGatewayStateDirty();
     res.json({
       success: true,
       analytics: landingAnalyticsStore

@@ -1,12 +1,12 @@
 {
-  "projectId": "myitaru",
-  "appId": "1:190474681141:web:f77c9c8fb6cf17e64d6a7c",
-  "apiKey": "AIzaSyC-68geIlJmQVU_OiXY8VYJRlJzKqCN95U",
-  "authDomain": "myitaru.firebaseapp.com",
-  "storageBucket": "myitaru.firebasestorage.app",
-  "messagingSenderId": "190474681141",
-  "measurementId": "G-9CZ3HBKSQK",
-  "oAuthClientId": "190474681141-28smnee9b85pi3sc4dhe5piu26ki1ild.apps.googleusercontent.com",
-  "recaptchaSiteKey": "",
-  "firestoreDatabaseId": "(default)"
+  "projectId": "collective-district-db34d",
+  "appId": "1:845237460617:web:3226844561c0ba68e9f058",
+  "apiKey": "AIzaSyAqHLWmRPcIyN1NvyI9J8wslRwZUM7k8Io",
+  "authDomain": "collective-district-db34d.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-myitaru-13376d89-b09a-4198-9b0d-d306a2d512e0",
+  "storageBucket": "collective-district-db34d.firebasestorage.app",
+  "messagingSenderId": "845237460617",
+  "measurementId": "",
+  "oAuthClientId": "845237460617-ini9h7vv5git9v1joqhvfjtga0vuq5r6.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
 }

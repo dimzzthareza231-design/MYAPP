@@ -162,10 +162,10 @@ export function KwitansiTab({
               {/* Header Letterhead (Kop Surat Klinik) */}
               <div className="flex items-center justify-between pb-6 border-b-2 border-slate-800 dark:border-slate-600">
                 <div className="flex items-center gap-4">
-                  <BrandLogo alt="Logo MYITARU" className="w-14 h-14 rounded-xl object-cover shadow-md shrink-0" />
+                  <BrandLogo alt="Logo Klinik" className="w-14 h-14 rounded-xl object-cover shadow-md shrink-0" />
                   <div>
                     <h1 className="text-xl font-extrabold text-slate-900 dark:text-white uppercase tracking-wider">
-                      MYITARU
+                      KLINIK UMUM MYITARU
                     </h1>
                     <p className="text-xs text-slate-600 dark:text-slate-400">
                       Jl. Kesehatan Utama No. 88, Jakarta Selatan • Telp: (021) 7890-1234 • Email: info@myitaru.klinik.id
@@ -336,10 +336,10 @@ export function KwitansiTab({
                 <div className="bg-white text-slate-900 border border-slate-200 rounded-xl p-8 relative shadow-sm mx-auto w-full">
                   <div className="flex justify-between items-start pb-6 border-b-2 border-slate-800">
                     <div className="flex items-center gap-3">
-                      <BrandLogo alt="Logo MYITARU" className="w-12 h-12 rounded-xl object-cover shadow-sm shrink-0" />
+                      <BrandLogo alt="Logo Klinik" className="w-12 h-12 rounded-xl object-cover shadow-sm shrink-0" />
                       <div>
                         <h2 className="text-xl font-black text-slate-900 uppercase">Kwitansi Pembayaran</h2>
-                        <p className="text-xs text-slate-500">MYITARU SIMK</p>
+                        <p className="text-xs text-slate-500">Klinik Tarumanagara (MYITARU SIMK)</p>
                       </div>
                     </div>
                     <div className="text-right">

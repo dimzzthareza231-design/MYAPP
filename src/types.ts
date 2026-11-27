@@ -7,7 +7,6 @@ export interface User {
   role: Role;
   avatar?: string;
   spesialisasi?: string;
-  mustChangePassword?: boolean;
 }
 
 export interface Pasien {

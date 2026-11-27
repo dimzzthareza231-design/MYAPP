@@ -6,9 +6,9 @@ import {
   UserCheck, Activity, RefreshCw
 } from 'lucide-react';
 import { useHospital } from '../contexts/HospitalContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { storage } from '../utils/storage';
-import { usesServerPersistence } from '../lib/firestoreService';
 
 import { BillingRecord, MasterTarifItem, ShiftKasirRecord, PaymentMethod } from './Finance/types';
 import { INITIAL_BILLINGS, INITIAL_MASTER_TARIF, INITIAL_SHIFTS } from './Finance/mockFinanceData';
@@ -23,29 +23,34 @@ import { RekapShiftKasirTab } from './Finance/RekapShiftKasirTab';
 export function Billing() {
   const toast = useToast();
   const { kunjungan, pasien, penjamin, dokter } = useHospital();
+  const { facilityMode } = useAuth();
   
   // Outlet context from ModuleLayout or query param
   const outletCtx = useOutletContext<{ activeTab?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryTab = searchParams.get('tab');
 
+  const initialTab = queryTab || outletCtx?.activeTab || 'Billing Ralan';
   const [activeTab, setActiveTab] = useState<string>(
-    queryTab || outletCtx?.activeTab || 'Billing Ralan'
+    facilityMode === 'klinik' && initialTab.toLowerCase().includes('ranap') ? 'Billing Ralan' : initialTab
   );
 
   // Synchronize when URL or outlet context changes
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
-    if (tabFromUrl) {
-      setActiveTab(tabFromUrl);
-    } else if (outletCtx?.activeTab) {
-      setActiveTab(outletCtx.activeTab);
+    const resolved = tabFromUrl || outletCtx?.activeTab;
+    if (resolved) {
+      if (facilityMode === 'klinik' && resolved.toLowerCase().includes('ranap')) {
+        setActiveTab('Billing Ralan');
+      } else {
+        setActiveTab(resolved);
+      }
     }
-  }, [searchParams, outletCtx?.activeTab]);
+  }, [searchParams, outletCtx?.activeTab, facilityMode]);
 
   // Persistent States using storage wrapper
   const [billings, setBillings] = useState<BillingRecord[]>(() => {
-    return storage.getItem<BillingRecord[]>('hospital_finance_billings', usesServerPersistence ? [] : INITIAL_BILLINGS);
+    return storage.getItem<BillingRecord[]>('hospital_finance_billings', INITIAL_BILLINGS);
   });
 
   const [tarifs, setTarifs] = useState<MasterTarifItem[]>(() => {
@@ -132,8 +137,8 @@ export function Billing() {
       const subtotal = autoItems.reduce((acc, curr) => acc + curr.total, 0);
 
       newBillingsFromKunjungan.push({
-        id: `BIL-AUTOSYNC-${k.id}`,
-        noBilling: '',
+        id: `BIL-AUTOSYNC-${Date.now()}-${k.id}`,
+        noBilling: `BIL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`,
         kunjunganId: k.id,
         pasienId: String(p.id),
         namaPasien: p.nama,
@@ -144,8 +149,8 @@ export function Billing() {
         penjaminId: k.penjamin_id,
         namaPenjamin: pj?.nama || 'Umum Mandiri',
         tipePenjamin: isBPJS ? 'BPJS' : 'Umum',
-        noSep: undefined,
-        status: 'Belum Lunas',
+        noSep: isBPJS ? `SEP-${Date.now().toString().slice(-8)}` : undefined,
+        status: k.status === 'Selesai' ? 'Lunas' : 'Belum Lunas',
         tanggalMasuk: k.tanggal || new Date().toISOString().slice(0, 10),
         items: autoItems,
         subtotal: subtotal,
@@ -154,12 +159,12 @@ export function Billing() {
         biayaAdministrasi: 10000,
         totalTagihan: subtotal + 10000,
         uangMukaDeposit: 0,
-        sisaTagihan: subtotal + 10000,
-        jumlahDibayar: 0,
+        sisaTagihan: k.status === 'Selesai' ? 0 : subtotal + 10000,
+        jumlahDibayar: k.status === 'Selesai' ? subtotal + 10000 : 0,
         kembalian: 0,
-        kasirNama: '',
+        kasirNama: 'Siti Rahmawati, S.E.',
         jenisKelamin: p.jenis_kelamin || 'L',
-        metodePembayaran: 'Tunai' as PaymentMethod
+        metodePembayaran: k.status === 'Selesai' ? (isBPJS ? 'BPJS' : 'Tunai') : ('Tunai' as PaymentMethod)
       });
       addedCount++;
     });
@@ -203,7 +208,9 @@ export function Billing() {
 
   const tabOptions = [
     { id: 'Billing Ralan', label: 'Billing Rawat Jalan', icon: CreditCard },
-    { id: 'Billing Ranap', label: 'Billing Rawat Inap', icon: Layers },
+    ...(facilityMode === 'rumah_sakit'
+      ? [{ id: 'Billing Ranap', label: 'Billing Rawat Inap', icon: Layers }]
+      : []),
     { id: 'Pembayaran', label: 'Kasir Pembayaran', icon: Wallet },
     { id: 'Kwitansi', label: 'Kwitansi & Invoice', icon: FileText },
     { id: 'Master Tarif', label: 'Master Tarif Klinik', icon: Tag },
@@ -320,8 +327,8 @@ export function Billing() {
           />
         )}
 
-        {/* Tab 2: Billing Ranap */}
-        {(activeTab === 'Billing Ranap' || activeTab.toLowerCase().includes('ranap')) && (
+        {/* Tab 2: Billing Ranap (Rumah Sakit only) */}
+        {facilityMode === 'rumah_sakit' && (activeTab === 'Billing Ranap' || activeTab.toLowerCase().includes('ranap')) && (
           <BillingRanapTab
             billings={billings}
             onSelectForPayment={handleSelectForPayment}

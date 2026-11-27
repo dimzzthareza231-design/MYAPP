@@ -125,7 +125,7 @@ export function RujukanBPJS() {
                           unit_pelayanan: r.poliRujukan,
                           diagnosis_utama: r.diagnosa || 'Pemeriksaan Rujukan Spesialis',
                           penjamin: 'BPJS Kesehatan',
-                          edukasi_instruksi: `Surat Rujukan dari ${r.faskesPerujuk} ditujukan ke ${r.poliRujukan} MYITARU.`
+                          edukasi_instruksi: `Surat Rujukan dari ${r.faskesPerujuk} ditujukan ke ${r.poliRujukan} Klinik MYITARU.`
                         }}
                         docType="surat_rujukan"
                         filename={`Rujukan_${r.noRujukan}`}

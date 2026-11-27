@@ -49,9 +49,9 @@ export default function MultiBranchSystem() {
         {activeTab === 'maps' && (
           <div className="space-y-4">
             <GoogleMapsHealthLocator
-              initialQuery="Jaringan MYITARU dan Mitra Kesehatan Terdekat"
+              initialQuery="Jaringan Klinik Tarumanagara dan Mitra Kesehatan Terdekat"
               defaultCategory="hospital"
-              title="Peta Interaktif Jaringan MYITARU & Cabang"
+              title="Peta Interaktif Jaringan Klinik Tarumanagara & Cabang"
               subtitle="Pemetaan lokasi geografis seluruh cabang faskes, jarak antar-unit, dan rute transfer ambulans"
             />
           </div>
@@ -126,7 +126,7 @@ function DashboardTab() {
           <div className="p-4 space-y-4">
             <div>
               <div className="flex justify-between text-sm mb-1">
-                <span className="font-semibold text-gray-800">MYITARU Pusat Jakarta</span>
+                <span className="font-semibold text-gray-800">Klinik MyItaru Pusat Jakarta</span>
                 <span className="font-medium text-gray-600">8,000 pts/month</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -135,7 +135,7 @@ function DashboardTab() {
             </div>
             <div>
               <div className="flex justify-between text-sm mb-1">
-                <span className="font-semibold text-gray-800">MYITARU Cabang Bandung</span>
+                <span className="font-semibold text-gray-800">Klinik MyItaru Cabang Bandung</span>
                 <span className="font-medium text-gray-600">3,500 pts/month</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">

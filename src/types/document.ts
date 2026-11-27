@@ -13,19 +13,18 @@ export interface HospitalInfo {
   directorName?: string;
   directorNip?: string;
   hospitalType?: string;
-  operatingMode?: 'SIMK' | 'SIMRS';
   ownership?: string;
   emergencyHotline?: string;
   faxNumber?: string;
 }
 
 export const DEFAULT_HOSPITAL_INFO: HospitalInfo = {
-  name: 'MYITARU',
-  subname: 'MYITARU',
+  name: 'KLINIK TARUMANAGARA',
+  subname: 'MYITARU SIMK · KLINIK UTAMA PENDIDIKAN 24 JAM',
   address: 'Jl. TB Simatupang, & Jl. Raya Cilandak KKO No.1, RT.1/RW.5, Ragunan, Ps. Minggu, Kota Jakarta Selatan, Daerah Khusus Ibukota Jakarta 12550',
   city: 'Jakarta Selatan',
   phone: '(021) 56958723',
-  email: 'info@myitaru.id',
+  email: 'info@tarumanagara-klinik.id',
   website: 'itaru.ac.id',
   accreditation: 'TERAKREDITASI PARIPURNA (KARS KEMENKES RI)',
   licenseNumber: 'No. Izin Operasional: 445/1029/DINKES/2024',
@@ -34,8 +33,7 @@ export const DEFAULT_HOSPITAL_INFO: HospitalInfo = {
   directorName: 'dr. H. Hendra, MARS, Sp.PK',
   directorNip: '197508122002121001',
   hospitalType: 'Klinik Utama Pendidikan 24 Jam',
-  operatingMode: 'SIMK',
-  ownership: 'Yayasan MYITARU',
+  ownership: 'Yayasan Tarumanagara',
   emergencyHotline: '(021) 56958999 (IGD 24 Jam)',
   faxNumber: '(021) 56958724'
 };

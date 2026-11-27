@@ -474,7 +474,7 @@ export const MCU_PACKAGES: MCUPackage[] = [
 export const HOSPITAL_BRANCHES: HospitalBranch[] = [
   {
     id: 'MYI-JKT',
-    name: 'MYITARU Pusat (Flagship)',
+    name: 'Klinik Tarumanagara Pusat (Flagship)',
     city: 'Jakarta Pusat',
     address: 'Jl. Kesehatan Raya No. 88, Menteng, Jakarta Pusat 10310',
     emergencyPhone: '1-500-911',
@@ -486,7 +486,7 @@ export const HOSPITAL_BRANCHES: HospitalBranch[] = [
   },
   {
     id: 'MYI-TNG',
-    name: 'MYITARU Karawaci',
+    name: 'Klinik Tarumanagara Karawaci',
     city: 'Tangerang',
     address: 'Jl. Boulevard Medika Kav. 12, Lippo Village, Tangerang 15811',
     emergencyPhone: '1-500-911',
@@ -498,7 +498,7 @@ export const HOSPITAL_BRANCHES: HospitalBranch[] = [
   },
   {
     id: 'MYI-SBY',
-    name: 'MYITARU Surabaya',
+    name: 'Klinik Tarumanagara Surabaya',
     city: 'Surabaya',
     address: 'Jl. Mayjen Sungkono No. 105, Gubeng, Surabaya 60281',
     emergencyPhone: '1-500-911',
@@ -516,13 +516,13 @@ export const HEALTH_ARTICLES: HealthArticle[] = [
     category: 'Neurologi & Gawat Darurat',
     title: 'Kenali Tanda Dini Stroke dengan Metode SeGeRa Ke RS',
     readMinutes: 4,
-    author: 'Tim Dokter Spesialis Saraf MYITARU',
+    author: 'Tim Dokter Spesialis Saraf Klinik Tarumanagara',
     date: 'Update Medis 2026',
     summary: 'Penanganan stroke iskemik dalam 4,5 jam pertama menentukan kualitas pemulihan fungsi gerak dan bicara pasien.',
     body: [
       'Setiap menit saat pembuluh darah otak tersumbat, jutaan sel saraf kehilangan suplai oksigen. Karena itu, keluarga perlu mengenali gejala awal stroke secara cepat tanpa menunda.',
       'Ingat akronim SeGeRa Ke RS: Senyum tidak simetris, Gerak separuh anggota tubuh melemah tiba-tiba, bicaRa pelo atau sulit memahami kata, Kebas/baal separuh tubuh, Rabun mendadak, serta Sakit kepala hebat yang belum pernah dirasakan sebelumnya.',
-      'Unit Code Stroke MYITARU siaga 24 jam dengan CT-Scan cepat di dekat IGD sehingga pasien segera menerima terapi trombolisis bila memenuhi kriteria klinis.'
+      'Unit Code Stroke Klinik Tarumanagara siaga 24 jam dengan CT-Scan cepat di dekat IGD sehingga pasien segera menerima terapi trombolisis bila memenuhi kriteria klinis.'
     ]
   },
   {
@@ -530,7 +530,7 @@ export const HEALTH_ARTICLES: HealthArticle[] = [
     category: 'Kardiologi',
     title: 'Kapan Nyeri Dada Memerlukan Pemeriksaan EKG dan Troponin Segera?',
     readMinutes: 5,
-    author: 'Tim Heart & Vascular Center MYITARU',
+    author: 'Tim Heart & Vascular Center Klinik Tarumanagara',
     date: 'Update Medis 2026',
     summary: 'Membedakan nyeri dada akibat asam lambung dengan serangan jantung akut yang memerlukan pertolongan segera.',
     body: [
@@ -544,7 +544,7 @@ export const HEALTH_ARTICLES: HealthArticle[] = [
     category: 'Fisioterapi & Orthopedi',
     title: 'Pemulihan Cedera Lutut & Nyeri Punggung Melalui Fisioterapi Terstruktur',
     readMinutes: 4,
-    author: 'Tim Rehabilitasi Medik & Orthopedi MYITARU',
+    author: 'Tim Rehabilitasi Medik & Orthopedi Klinik Tarumanagara',
     date: 'Update Medis 2026',
     summary: 'Kapan nyeri lutut atau saraf kejepit dapat ditangani dengan program fisioterapi terukur dan latihan penguatan otot inti.',
     body: [
@@ -558,9 +558,9 @@ export const HEALTH_ARTICLES: HealthArticle[] = [
     category: 'Panduan Pasien',
     title: 'Cara Memantau Antrean Poli dan Hasil Lab dari Ponsel Tanpa Antre di Loket',
     readMinutes: 3,
-    author: 'Layanan Pasien Digital MYITARU',
+    author: 'Layanan Pasien Digital Klinik Tarumanagara',
     date: 'Panduan Praktis',
-    summary: 'Gunakan Aplikasi Mobile MYITARU SIMK dengan login Google atau Nomor Rekam Medis untuk memantau giliran panggilan poli secara langsung.',
+    summary: 'Gunakan Aplikasi Mobile Klinik Tarumanagara (MYITARU SIMK) dengan login Google atau Nomor Rekam Medis untuk memantau giliran panggilan poli secara langsung.',
     body: [
       'Pasien tidak perlu menunggu lama di ruang tunggu yang padat. Setelah mendaftar online atau di anjungan pendaftaran, buka halaman Aplikasi Pasien (/mobile) di ponsel Anda.',
       'Masuk cukup menggunakan Akun Google atau masukkan Nomor Rekam Medis (No. RM) beserta Tanggal Lahir untuk verifikasi identitas.',

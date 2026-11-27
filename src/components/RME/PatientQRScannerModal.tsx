@@ -10,30 +10,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useAuditTrail } from '../../contexts/AuditTrailContext';
 import { Pasien } from '../../types';
 
-interface VerifiedDocumentQr {
-  verificationCode: string;
-  documentType: string;
-  documentNumber: string;
-  title: string;
-  signer: string;
-  issuedAt: string;
-  facility: string;
-  status: 'valid';
-}
-
-function isVerifiedDocumentQr(value: unknown): value is VerifiedDocumentQr {
-  if (!value || typeof value !== 'object') return false;
-  const document = value as Record<string, unknown>;
-  return document.status === 'valid' &&
-    typeof document.verificationCode === 'string' &&
-    typeof document.documentType === 'string' &&
-    typeof document.documentNumber === 'string' &&
-    typeof document.title === 'string' &&
-    typeof document.signer === 'string' &&
-    typeof document.issuedAt === 'string' &&
-    typeof document.facility === 'string';
-}
-
 export interface PatientQRScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -58,8 +34,7 @@ export function PatientQRScannerModal({
   const [manualInput, setManualInput] = useState('');
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [detectedPatient, setDetectedPatient] = useState<Pasien | null>(null);
-  const [detectedDocument, setDetectedDocument] = useState<VerifiedDocumentQr | null>(null);
-  const [isResolving, setIsResolving] = useState(false);
+  const [scannedRawValue, setScannedRawValue] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -89,93 +64,95 @@ export function PatientQRScannerModal({
     }
   };
 
-  const selectAuthorizedPatient = (patient: Pasien, checkedIn = false) => {
-    if (!currentUser || !hasAccess('rekam-medis')) {
-      toast.error('Akses Ditolak: Akun Anda tidak memiliki hak akses ke modul Rekam Medis.');
-      return false;
+  // Helper to extract No. RM from various QR payload formats
+  const extractNoRm = (raw: string): string | null => {
+    if (!raw) return null;
+    const clean = raw.trim();
+
+    // 1. Try URL parameters (e.g. ?rm=RM-2024-001 or ?no_rm=RM-2024-001)
+    if (clean.includes('http://') || clean.includes('https://') || clean.includes('?')) {
+      try {
+        const urlObj = new URL(clean, window.location.origin);
+        const rmParam = urlObj.searchParams.get('rm') || urlObj.searchParams.get('no_rm') || urlObj.searchParams.get('id');
+        if (rmParam) return rmParam;
+      } catch {
+        // Continue to regex fallback
+      }
     }
 
-    playSuccessChime();
-    setDetectedDocument(null);
-    setDetectedPatient(patient);
-    toast.success(checkedIn
-      ? `Check-in ${patient.nama} (${patient.no_rm}) berhasil.`
-      : `QR Berkas Valid: ${patient.nama} (${patient.no_rm})`);
-    try {
-      logActivity(
-        currentUser.nama || currentUser.username || 'petugas',
-        'SCAN_QR_BERKAS',
-        'rekam-medis',
-        'pasien',
-        patient.id || patient.no_rm,
-        null,
-        { no_rm: patient.no_rm }
-      );
-    } catch (error) {
-      console.error('Patient QR access audit logging failed:', error);
+    // 2. Try JSON payload: {"no_rm":"RM-001"}
+    if (clean.startsWith('{') && clean.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(clean);
+        if (parsed.no_rm || parsed.noRm || parsed.id) {
+          return parsed.no_rm || parsed.noRm || parsed.id;
+        }
+      } catch {
+        // Not JSON
+      }
     }
-    return true;
+
+    // 3. Try custom scheme MYITARU:RM:XXX
+    if (clean.includes(':')) {
+      const parts = clean.split(':');
+      const lastPart = parts[parts.length - 1];
+      if (lastPart) return lastPart;
+    }
+
+    // 4. Return plain string
+    return clean;
   };
 
-  const handleScannedResult = async (rawCode: string) => {
-    if (isResolving) return;
-    const token = rawCode.trim();
-    if (!token.startsWith('MYITARU1.')) {
-      toast.error('QR tidak valid. Gunakan QR workflow resmi MYITARU.');
-      return;
-    }
-    if (!currentUser) {
-      toast.error('Login staf diperlukan untuk memverifikasi QR.');
+  // Process and match patient
+  const handleScannedResult = (rawCode: string) => {
+    setScannedRawValue(rawCode);
+    const extractedRm = extractNoRm(rawCode);
+    if (!extractedRm) {
+      toast.error('Format QR Code tidak valid.');
       return;
     }
 
-    setDetectedPatient(null);
-    setDetectedDocument(null);
-    setIsResolving(true);
-    try {
-      const response = await fetch('/api/v1/patient-qr/redeem', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token })
-      });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        toast.error(response.status === 401 || response.status === 403
-          ? 'Sesi atau izin workflow tidak memenuhi syarat.'
-          : 'QR tidak valid, kedaluwarsa, atau pasien tidak tersedia.');
-        return;
+    // Check staff authorization
+    const isAuthorized = !currentUser || hasAccess('rekam-medis');
+    if (!isAuthorized) {
+      toast.error('Akses Ditolak: Akun Anda tidak memiliki hak akses ke modul Rekam Medis.');
+      return;
+    }
+
+    // Match patient from hospital master list
+    const found = pasien.find((p: any) => {
+      const pRm = (p.no_rm || p.noRm || p.id || '').toLowerCase();
+      const pNik = (p.nik || '').toLowerCase();
+      const pNama = (p.nama || p.name || '').toLowerCase();
+      const searchTarget = extractedRm.toLowerCase();
+
+      return pRm === searchTarget || 
+             pRm.replace(/[^a-z0-9]/g, '') === searchTarget.replace(/[^a-z0-9]/g, '') ||
+             pNik === searchTarget ||
+             pNama === searchTarget;
+    });
+
+    if (found) {
+      playSuccessChime();
+      setDetectedPatient(found);
+      toast.success(`QR Berkas Valid: ${found.nama} (${found.no_rm})`);
+      
+      // Log access in audit trail for compliance
+      try {
+        logActivity(
+          currentUser?.nama || currentUser?.username || 'petugas',
+          'SCAN_QR_BERKAS',
+          'rekam-medis',
+          'pasien',
+          found.id || found.no_rm,
+          null,
+          { no_rm: found.no_rm, nama: found.nama }
+        );
+      } catch {
+        // Context might not be initialized
       }
-      if (result?.kind === 'document' && isVerifiedDocumentQr(result.document)) {
-        setDetectedPatient(null);
-        setDetectedDocument(result.document);
-        playSuccessChime();
-        toast.success(`Referensi dokumen valid: ${result.document.documentNumber}`);
-        try {
-          logActivity(
-            currentUser.nama || currentUser.username || 'petugas',
-            'VERIFY_DOCUMENT_QR',
-            'rekam-medis',
-            'dokumen',
-            result.document.verificationCode,
-            null,
-            { documentType: result.document.documentType, verificationCode: result.document.verificationCode }
-          );
-        } catch (error) {
-          console.error('Document QR audit logging failed:', error);
-        }
-        return;
-      }
-      if (!result?.patient) {
-        toast.error('QR tidak valid, kedaluwarsa, atau pasien tidak tersedia.');
-        return;
-      }
-      selectAuthorizedPatient(result.patient as Pasien, result.kind === 'reservation');
-    } catch (error) {
-      console.error('Patient QR resolution failed:', error);
-      toast.error('QR tidak dapat diverifikasi. Periksa koneksi lalu coba lagi.');
-    } finally {
-      setIsResolving(false);
+    } else {
+      toast.error(`Pasien dengan Nomor RM "${extractedRm}" tidak ditemukan di database.`);
     }
   };
 
@@ -184,7 +161,6 @@ export function PatientQRScannerModal({
     setCameraError(null);
     setIsScanning(true);
     setDetectedPatient(null);
-    setDetectedDocument(null);
 
     try {
       if (streamRef.current) {
@@ -250,7 +226,7 @@ export function PatientQRScannerModal({
           });
 
           if (code && code.data) {
-            void handleScannedResult(code.data);
+            handleScannedResult(code.data);
             stopCamera();
             return;
           }
@@ -300,7 +276,7 @@ export function PatientQRScannerModal({
           const imgData = ctx.getImageData(0, 0, img.width, img.height);
           const code = jsQR(imgData.data, imgData.width, imgData.height);
           if (code && code.data) {
-            void handleScannedResult(code.data);
+            handleScannedResult(code.data);
           } else {
             toast.error('Tidak ditemukan kode QR pada gambar yang diunggah.');
           }
@@ -333,9 +309,9 @@ export function PatientQRScannerModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Pindai QR Workflow MYITARU</h3>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Pindai QR Berkas Rekam Medis</h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300">
-                  Pasien · Reservasi · Dokumen
+                  Verifikasi EMR
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -366,7 +342,7 @@ export function PatientQRScannerModal({
         <div className="px-6 pt-4 flex gap-2">
           <button
             type="button"
-            onClick={() => { setScanMode('camera'); setDetectedPatient(null); setDetectedDocument(null); }}
+            onClick={() => { setScanMode('camera'); setDetectedPatient(null); }}
             className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
               scanMode === 'camera'
                 ? 'bg-emerald-600 text-white shadow-sm'
@@ -379,7 +355,7 @@ export function PatientQRScannerModal({
 
           <button
             type="button"
-            onClick={() => { setScanMode('gun'); setDetectedPatient(null); setDetectedDocument(null); stopCamera(); }}
+            onClick={() => { setScanMode('gun'); setDetectedPatient(null); stopCamera(); }}
             className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
               scanMode === 'gun'
                 ? 'bg-emerald-600 text-white shadow-sm'
@@ -392,7 +368,7 @@ export function PatientQRScannerModal({
 
           <button
             type="button"
-            onClick={() => { setScanMode('upload'); setDetectedPatient(null); setDetectedDocument(null); stopCamera(); }}
+            onClick={() => { setScanMode('upload'); setDetectedPatient(null); stopCamera(); }}
             className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
               scanMode === 'upload'
                 ? 'bg-emerald-600 text-white shadow-sm'
@@ -420,7 +396,7 @@ export function PatientQRScannerModal({
               <canvas ref={canvasRef} className="hidden" />
 
               {/* Viewfinder Reticle & Laser Scan Line */}
-              {isScanning && !detectedPatient && !detectedDocument && !cameraError && (
+              {isScanning && !detectedPatient && !cameraError && (
                 <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
                   <div className="w-56 h-56 border-2 border-emerald-400/80 rounded-2xl relative flex items-center justify-center shadow-[0_0_25px_rgba(16,185,129,0.3)]">
                     {/* Corners */}
@@ -433,7 +409,7 @@ export function PatientQRScannerModal({
                     <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-300 to-transparent shadow-[0_0_12px_#34d399] animate-pulse" />
                   </div>
                   <div className="mt-4 px-3 py-1 rounded-full bg-slate-900/80 backdrop-blur-md text-emerald-300 text-[11px] font-bold border border-emerald-500/30">
-                    Arahkan ke QR pasien, reservasi, atau dokumen
+                    Arahkan ke QR Code Stiker Rekam Medis
                   </div>
                 </div>
               )}
@@ -471,13 +447,13 @@ export function PatientQRScannerModal({
             <div className="space-y-4 py-4">
               <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-                  Token QR MYITARU / Scanner Gun
+                  Input No. Rekam Medis / Barcode Scanner Gun
                 </label>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
                     if (manualInput.trim()) {
-                      void handleScannedResult(manualInput.trim());
+                      handleScannedResult(manualInput.trim());
                     }
                   }}
                   className="flex gap-2"
@@ -485,7 +461,7 @@ export function PatientQRScannerModal({
                   <input
                     ref={manualInputRef}
                     type="text"
-                    placeholder="MYITARU1.<token terenkripsi>"
+                    placeholder="Contoh: RM-2024-001 atau NIK..."
                     value={manualInput}
                     onChange={(e) => setManualInput(e.target.value)}
                     className="flex-1 px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -494,11 +470,11 @@ export function PatientQRScannerModal({
                     type="submit"
                     className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors shrink-0"
                   >
-                    Verifikasi QR
+                    Cari & Buka EMR
                   </button>
                 </form>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  ⚡ <strong>Privasi:</strong> QR hanya berisi token terenkripsi. No. RM, NIK, nama, URL umum, dan teks biasa tidak diterima sebagai payload QR.
+                  ⚡ <strong>Tips:</strong> Sambungkan scanner barcode 2D USB ke PC/Laptop Anda, arahkan ke stiker berkas, dan sistem akan otomatis memproses data saat tombol scanner ditekan.
                 </p>
               </div>
 
@@ -506,7 +482,7 @@ export function PatientQRScannerModal({
               {pasien && pasien.length > 0 && (
                 <div>
                   <div className="text-[10px] uppercase font-bold text-slate-400 mb-2">
-                    Pilih Pasien Terdaftar (Akses Staf):
+                    Uji Coba Cepat (Pilih Pasien Terdaftar):
                   </div>
                   <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1">
                     {pasien.slice(0, 6).map((p: any) => (
@@ -514,9 +490,8 @@ export function PatientQRScannerModal({
                         key={p.id || p.no_rm}
                         type="button"
                         onClick={() => {
-                          setManualInput('');
-                          setDetectedDocument(null);
-                          selectAuthorizedPatient(p);
+                          setManualInput(p.no_rm);
+                          handleScannedResult(p.no_rm);
                         }}
                         className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-1.5 transition-colors"
                       >
@@ -596,36 +571,6 @@ export function PatientQRScannerModal({
                 <Sparkles className="w-4 h-4 text-emerald-200" />
                 <span>Buka Ringkasan Rekam Medis (Patient360)</span>
                 <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
-          {detectedDocument && (
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 p-4 rounded-2xl border-2 border-blue-500 shadow-md space-y-3">
-              <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                <span className="font-bold text-sm">Referensi dokumen valid di server</span>
-              </div>
-              <div className="bg-white/80 dark:bg-slate-900/80 p-3 rounded-xl border border-blue-200 dark:border-blue-800/60 space-y-1">
-                <div className="font-bold text-base text-slate-900 dark:text-white">{detectedDocument.title}</div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300 pt-1">
-                  <div>Nomor: <strong>{detectedDocument.documentNumber}</strong></div>
-                  <div>Jenis: <strong>{detectedDocument.documentType}</strong></div>
-                  <div>Penerbit: <strong>{detectedDocument.facility}</strong></div>
-                  <div>Penanggung jawab: <strong>{detectedDocument.signer}</strong></div>
-                  <div>Tanggal: <strong>{detectedDocument.issuedAt}</strong></div>
-                  <div>ID verifikasi: <strong className="font-mono">{detectedDocument.verificationCode}</strong></div>
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                Status ini memastikan referensi tercatat di MYITARU; bukan validasi tanda tangan elektronik tersertifikasi.
-              </p>
-              <button
-                type="button"
-                onClick={onClose}
-                className="w-full py-3 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-sm font-bold"
-              >
-                Tutup Verifikasi
               </button>
             </div>
           )}

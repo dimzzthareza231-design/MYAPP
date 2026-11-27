@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { getRoleById } from '../../data/roles';
+import { isModuleAllowedInFacilityMode } from '../../data/moduleRegistry';
 
 export interface AuthorizationOptions {
   moduleId?: string;
@@ -13,7 +14,7 @@ export interface AuthorizationOptions {
  * Custom Hook to evaluate authorization status for a module or role requirement.
  */
 export function useAuthorization(options: AuthorizationOptions = {}) {
-  const { currentUser, hasAccess, isAdmin } = useAuth();
+  const { currentUser, hasAccess, isAdmin, facilityMode } = useAuth();
   const { moduleId, allowedRoles, requireAdmin } = options;
 
   if (!currentUser) {
@@ -27,7 +28,16 @@ export function useAuthorization(options: AuthorizationOptions = {}) {
 
   const userRole = getRoleById(currentUser.roleId);
 
-  // Super admin has unrestricted authorization
+  if (moduleId && !isModuleAllowedInFacilityMode(moduleId, facilityMode)) {
+    return {
+      isAuthorized: false,
+      reason: `Modul "${moduleId}" merupakan modul khusus Rumah Sakit dan disembunyikan pada Mode Modul Klinik.`,
+      currentUser,
+      userRole,
+    };
+  }
+
+  // Super admin has unrestricted authorization within the selected facility mode
   if (currentUser.roleId === 'super_admin') {
     return { isAuthorized: true, currentUser, userRole };
   }

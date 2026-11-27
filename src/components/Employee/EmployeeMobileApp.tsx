@@ -307,7 +307,7 @@ export const EmployeeMobileApp: React.FC = () => {
             {!mfaChallenge ? (
               <>
                 <div className="space-y-1.5">
-                  <BrandLogo alt="MYITARU" className="w-12 h-12 rounded-xl object-cover shadow-sm mb-2" />
+                  <BrandLogo alt="Klinik Tarumanagara" className="w-12 h-12 rounded-xl object-cover shadow-sm mb-2" />
                   <p className="text-xs font-bold uppercase tracking-wider text-[#0B3D91] dark:text-sky-400">
                     ONBOARDING APLIKASI KARYAWAN
                   </p>

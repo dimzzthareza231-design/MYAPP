@@ -5,7 +5,6 @@ import { useHospital } from '../contexts/HospitalContext';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getRoleById } from '../data/roles';
-import { isModuleAvailableInMode } from '../data/operatingModes';
 import TopNavbar from './TopNavbar';
 import { storage } from '../utils/storage';
 import { DashboardWidgetAntrian } from './DashboardWidgetAntrian';
@@ -32,13 +31,12 @@ const HEALTH_QUOTES = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { activeUser, pasien, kunjungan, hospitalSettings } = useHospital();
+  const { activeUser, pasien, kunjungan } = useHospital();
   const { currentUser, hasAccess } = useAuth();
-  const operatingMode = hospitalSettings.operatingMode === 'SIMRS' ? 'SIMRS' : 'SIMK';
-  // Filter sama dengan Direktori Modul (TopNavbar): role + mode operasional
+  // Filter sama dengan Direktori Modul (TopNavbar): role + mode fasilitas (Klinik / Rumah Sakit)
   const canOpen = useCallback(
-    (moduleId: string) => hasAccess(moduleId) && isModuleAvailableInMode(moduleId, operatingMode),
-    [hasAccess, operatingMode]
+    (moduleId: string) => hasAccess(moduleId),
+    [hasAccess]
   );
   const currentRole = currentUser ? getRoleById(currentUser.roleId) : null;
   const toast = useToast();

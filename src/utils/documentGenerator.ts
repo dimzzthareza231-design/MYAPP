@@ -396,7 +396,7 @@ export function generateHospitalDocument(
     type: docType,
     nomorDokumen: docNumber,
     judulDokumen: title,
-    subJudul: data.subjudul || 'MYITARU — OFFICIAL RECORD',
+    subJudul: data.subjudul || 'MYITARU INTEGRATED KLINIK INFORMATION SYSTEM — OFFICIAL RECORD',
     hospitalInfo: DEFAULT_HOSPITAL_INFO,
     subject: {
       nama: subjectName,
@@ -436,7 +436,8 @@ export function generateHospitalDocument(
       jabatan: data.signer_jabatan || (docType === 'profil_sdm' ? 'Kepala Bagian SDM & Organisasi' : docType === 'kuitansi_billing' ? 'Petugas Kasir & Keuangan' : 'Dokter Penanggung Jawab Pelayanan (DPJP)'),
       sip_nip: doctorSip,
       kota: 'Jakarta Selatan',
-      tanggal: dateFormatted
+      tanggal: dateFormatted,
+      digitalValidationCode: `VERIF-MYITARU-${yearStr}-${Math.floor(10000 + Math.random() * 90000)}`
     },
     rawRecord: data
   };

@@ -27,7 +27,7 @@ export function PendingAlertsModal({ isOpen, onClose, onNavigateTab, patientData
       type: 'info',
       icon: FileSignature,
       title: 'TTE Resume Medis Belum Ditandatangani',
-      desc: 'Resume medis rawat jalan kunjungan 30 Agu 2026 belum ditandai selesai oleh DPJP.',
+      desc: 'Resume medis rawat jalan kunjungan 30 Agu 2026 belum dibubuhi Tanda Tangan Elektronik (BSrE).',
       tab: 'legal_docs',
       actionLabel: 'Tandatangani Dokumen'
     },

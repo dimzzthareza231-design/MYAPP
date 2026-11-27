@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useStorage } from '../utils/storage';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,7 +6,6 @@ import { ConfirmationModal } from './ConfirmationModal';
 import { UniversalDetailModal } from './Documents/UniversalDetailModal';
 import { DocumentPreviewModal } from './Documents/DocumentPreviewModal';
 import { generateHospitalDocument } from '../utils/documentGenerator';
-import { filterAndSortTableRows, paginateTableRows } from '../lib/tableData';
 import { 
   Printer, 
   Eye, 
@@ -45,15 +44,13 @@ interface SmartTableProps {
 export default function SmartTable({ storageKey, columns, title, extraActions, customActions }: SmartTableProps) {
   const toast = useToast();
   const { isReadOnly } = useAuth();
-  const [data, setData] = useStorage<any[]>(storageKey, import.meta.env.DEV ? makeDummy(columns) : []);
+  const [data, setData] = useStorage<any[]>(storageKey, makeDummy(columns));
   const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [page, setPage] = useState(1);
   const [sort, setSort] = useState<{ key: string | null, dir: 'asc' | 'desc' }>({ key: null, dir: 'asc' });
   const [modal, setModal] = useState<'add' | 'edit' | 'detail' | null>(null);
   const [selected, setSelected] = useState<any>(null);
   const [form, setForm] = useState<any>({});
-  const [deleteTargetRow, setDeleteTargetRow] = useState<any>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<number | string | null>(null);
   const [printPreviewRow, setPrintPreviewRow] = useState<any>(null);
 
   // Keyboard Escape listener for modal
@@ -61,36 +58,26 @@ export default function SmartTable({ storageKey, columns, title, extraActions, c
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (modal) setModal(null);
-        if (deleteTargetRow !== null) setDeleteTargetRow(null);
+        if (deleteTargetId !== null) setDeleteTargetId(null);
         if (printPreviewRow) setPrintPreviewRow(null);
       }
     };
-    if (modal || deleteTargetRow !== null || printPreviewRow) {
+    if (modal || deleteTargetId !== null || printPreviewRow) {
       document.addEventListener('keydown', handleEsc);
     }
     return () => {
       document.removeEventListener('keydown', handleEsc);
     };
-  }, [modal, deleteTargetRow, printPreviewRow]);
+  }, [modal, deleteTargetId, printPreviewRow]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search.trim().toLocaleLowerCase()), 200);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  const rows = useMemo(
-    () => filterAndSortTableRows(data, columns, debouncedSearch, sort),
-    [columns, data, debouncedSearch, sort]
-  );
-  const pageSize = 25;
-  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const visibleRows = paginateTableRows(rows, currentPage, pageSize);
-
-  useEffect(() => setPage(1), [debouncedSearch, sort.key, sort.dir]);
-  useEffect(() => {
-    if (page > pageCount) setPage(pageCount);
-  }, [page, pageCount]);
+  let rows = data.filter(r => JSON.stringify(r).toLowerCase().includes(search.toLowerCase()));
+  if (sort.key) {
+    const k = sort.key;
+    rows = [...rows].sort((a, b) =>
+      sort.dir === 'asc' ? String(a[k] ?? '').localeCompare(String(b[k] ?? ''))
+                         : String(b[k] ?? '').localeCompare(String(a[k] ?? ''))
+    );
+  }
 
   const save = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -121,17 +108,15 @@ export default function SmartTable({ storageKey, columns, title, extraActions, c
     }
   };
 
-  const del = (row: any) => {
-    setDeleteTargetRow(row);
+  const del = (id: number | string) => {
+    setDeleteTargetId(id);
   };
 
   const confirmDelete = () => {
-    if (deleteTargetRow !== null) {
-      setData(data.filter(d => deleteTargetRow.id !== undefined && deleteTargetRow.id !== null
-        ? d.id !== deleteTargetRow.id
-        : d !== deleteTargetRow));
+    if (deleteTargetId !== null) {
+      setData(data.filter(d => d.id !== deleteTargetId));
       toast.success('Data dihapus');
-      setDeleteTargetRow(null);
+      setDeleteTargetId(null);
     }
   };
 
@@ -167,7 +152,7 @@ export default function SmartTable({ storageKey, columns, title, extraActions, c
             <input 
               value={search} 
               onChange={e => setSearch(e.target.value)} 
-              placeholder="Cari di kolom yang tampil..."
+              placeholder="🔍 Cari data..."
               className="p-2 pl-3 rounded-xl bg-white dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none w-44 sm:w-56 placeholder:text-slate-400 dark:placeholder:text-slate-500" 
             />
           </div>
@@ -224,8 +209,8 @@ export default function SmartTable({ storageKey, columns, title, extraActions, c
                   )}
                 </td>
               </tr>
-            ) : visibleRows.map((r) => (
-              <tr key={r.id !== undefined && r.id !== null ? String(r.id) : `smart-row-${data.indexOf(r)}`} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group">
+            ) : rows.map((r, rIdx) => (
+              <tr key={r.id !== undefined && r.id !== null ? String(r.id) : `smart-row-${rIdx}-${r.no_rm || r.nama || r.nomor || ''}`} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group">
                 {columns.map((c, cIdx) => {
                   const keyLower = c.key.toLowerCase();
                   const isMono = /no_|kode|nik|rm|id|tarif|harga|biaya|tgl|tanggal|jam|waktu|qty|stok/.test(keyLower);
@@ -273,7 +258,7 @@ export default function SmartTable({ storageKey, columns, title, extraActions, c
 
                         {/* HAPUS DATA */}
                         <button 
-                          onClick={() => del(r)}
+                          onClick={() => del(r.id !== undefined && r.id !== null ? r.id : rIdx)} 
                           className="p-1.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors border border-rose-500/20 cursor-pointer" 
                           title="Hapus Data"
                         >
@@ -288,22 +273,6 @@ export default function SmartTable({ storageKey, columns, title, extraActions, c
           </tbody>
         </table>
       </div>
-      {rows.length > 0 && (
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-300">
-          <span>
-            Menampilkan {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, rows.length)} dari {rows.length} data
-          </span>
-          <div className="flex items-center gap-2">
-            <button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} className="rounded-lg border border-slate-300 px-3 py-1.5 font-semibold disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700">
-              Sebelumnya
-            </button>
-            <span aria-live="polite">{currentPage}/{pageCount}</span>
-            <button type="button" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="rounded-lg border border-slate-300 px-3 py-1.5 font-semibold disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700">
-              Berikutnya
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* MODAL FORM TAMBAH / EDIT YANG DIPERCANTIK SECARA MAKSIMAL */}
       {modal && modal !== 'detail' && (
@@ -511,13 +480,13 @@ export default function SmartTable({ storageKey, columns, title, extraActions, c
       )}
 
       <ConfirmationModal
-        isOpen={deleteTargetRow !== null}
+        isOpen={deleteTargetId !== null}
         title="Konfirmasi Hapus Data"
         message="Apakah Anda yakin ingin menghapus data ini dari sistem?"
         variant="danger"
         confirmLabel="Hapus Data"
         onConfirm={confirmDelete}
-        onCancel={() => setDeleteTargetRow(null)}
+        onCancel={() => setDeleteTargetId(null)}
       />
     </div>
   );

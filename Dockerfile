@@ -8,7 +8,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy dependency manifests
-COPY package*.json .npmrc ./
+COPY package*.json ./
 
 # Install all dependencies (including devDependencies for TypeScript & Vite build)
 RUN npm ci
@@ -25,18 +25,17 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PUBLIC_PORT=3000
-ENV CORE_PORT=3001
+ENV PORT=3000
 
 # Copy package manifests and install runtime dependencies
-COPY package*.json .npmrc ./
-RUN npm ci --omit=dev
+COPY package*.json ./
+RUN npm ci --only=production
 
 # Copy compiled dist folder from builder stage
 COPY --from=builder /app/dist ./dist
 
-# 3000 = web publik pasien, 3001 = aplikasi inti SIMK/RME (jangan diekspos publik tanpa proteksi)
-EXPOSE 3000 3001
+# Expose container port
+EXPOSE 3000
 
 # Run production server
 CMD ["node", "dist/server.cjs"]

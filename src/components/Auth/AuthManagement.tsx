@@ -9,7 +9,7 @@ import { ActivityLogsTab } from './ActivityLogsTab';
 import { UserManagement } from './UserManagement';
 import { useAuth } from '../../contexts/AuthContext';
 import { ROLES, getRoleById, COMMON_MODULES } from '../../data/roles';
-import { MODULE_REGISTRY } from '../../data/moduleRegistry';
+import { MODULE_REGISTRY, isModuleAllowedInFacilityMode } from '../../data/moduleRegistry';
 import { subscribeActivityLogs, ActivityLogEntry } from '../../lib/activityLogger';
 
 export function AuthManagement() {
@@ -148,6 +148,7 @@ function LoginSimulator() {
 }
 
 function RolesTab() {
+  const { facilityMode } = useAuth();
   const [selectedRoleId, setSelectedRoleId] = useState<string>('dokter');
   const [searchModule, setSearchModule] = useState('');
   const [permissions, setPermissions] = useState<Record<string, string[]>>(() => {
@@ -216,11 +217,13 @@ function RolesTab() {
     }
   };
 
-  // Kumpulkan modul dari registry
+  // Kumpulkan modul dari registry (hanya yang aktif sesuai facilityMode)
   const filteredCategories = MODULE_REGISTRY.map(cat => {
-    const filteredModules = cat.modules.filter(m => 
-      m.label.toLowerCase().includes(searchModule.toLowerCase()) ||
-      m.id.toLowerCase().includes(searchModule.toLowerCase())
+    const filteredModules = cat.modules.filter(m =>
+      isModuleAllowedInFacilityMode(m.id, facilityMode) && (
+        m.label.toLowerCase().includes(searchModule.toLowerCase()) ||
+        m.id.toLowerCase().includes(searchModule.toLowerCase())
+      )
     );
     return {
       ...cat,

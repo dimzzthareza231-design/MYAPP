@@ -4,34 +4,19 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export type AppTarget = 'core' | 'public';
-
-// Dua aplikasi dari satu codebase: 'public' (portal pasien, public.html) dan 'core' (SIMK/RME, index.html).
-export function makeConfig(target: AppTarget) {
-  const isPublic = target === 'public';
-  return defineConfig(({ mode }) => ({
-    define: {
-      'import.meta.env.VITE_APP_TARGET': JSON.stringify(target),
-    },
-    // Dua server Vite dev berjalan bersamaan; cache terpisah agar optimasi dependensi tidak saling membatalkan (504 Outdated Optimize Dep).
-    cacheDir: isPublic ? 'node_modules/.vite-public' : 'node_modules/.vite',
-    build: {
-      outDir: isPublic ? 'dist/public' : 'dist/core',
-      emptyOutDir: true,
-      rollupOptions: { input: path.resolve(__dirname, isPublic ? 'public.html' : 'index.html') },
-    },
+export default defineConfig(() => {
+  return {
     plugins: [
       react(),
       tailwindcss(),
-      // PWA hanya untuk aplikasi pasien.
-      isPublic && VitePWA({
+      VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'logo-myitaru.webp', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        includeAssets: ['favicon.ico', 'logo-myitaru.png', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
           id: '/',
-          name: 'MYITARU SIMK · App Pasien',
-          short_name: 'MYITARU',
-          description: 'Portal resmi layanan kesehatan MYITARU SIMK dan aplikasi mobile pasien untuk cek antrean, jadwal dokter, hasil lab, dan rekam medis.',
+          name: 'Klinik Tarumanagara (MYITARU SIMK) · App Pasien',
+          short_name: 'Klinik Tarumanagara',
+          description: 'Portal resmi layanan kesehatan Klinik Tarumanagara (MYITARU SIMK) dan aplikasi mobile pasien untuk cek antrean, jadwal dokter, hasil lab, dan rekam medis.',
           theme_color: '#0B3D91',
           background_color: '#ffffff',
           display: 'standalone',
@@ -60,10 +45,8 @@ export function makeConfig(target: AppTarget) {
           ],
         },
         workbox: {
-          navigateFallback: 'public.html',
-          navigateFallbackDenylist: [/^\/api\//],
-          maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
-          globPatterns: ['**/*.{js,css,html,ico,png,jpg,webp,svg,woff,woff2}'],
+          maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
+          globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -118,10 +101,6 @@ export function makeConfig(target: AppTarget) {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-        // Build Cloudflare inti memakai login lokal; SDK Firebase tidak pernah dipanggil.
-        ...(mode === 'cloudflare' && !isPublic ? Object.fromEntries(
-          ['firebase/app', 'firebase/auth', 'firebase/firestore'].map((id) => [id, path.resolve(__dirname, 'src/lib/firebaseStub.ts')])
-        ) : {}),
       },
     },
     server: {
@@ -131,7 +110,5 @@ export function makeConfig(target: AppTarget) {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
-  }));
-}
-
-export default makeConfig('core');
+  };
+});

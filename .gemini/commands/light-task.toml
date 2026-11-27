@@ -1,9 +1,0 @@
-description = "Tugas ringan UI/UX & frontend sesuai jobdesk Gemini di AGENTS.md"
-prompt = """
-Ikuti AGENTS.md dan GEMINI.md. Jobdesk Gemini hanya UI/UX & frontend ringan; tolak tugas backend/berat.
-- Gunakan terminologi Klinik/SIMK/RME.
-- Hanya ubah file yang ditugaskan; jangan commit/push.
-- Jangan tulis LULUS/BERHASIL tanpa bukti; bila belum dicek, tulis BELUM DIVERIFIKASI.
-
-Tugas: {{args}}
-"""

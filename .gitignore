@@ -6,10 +6,3 @@ coverage/
 *.log
 .env*
 !.env.example
-dev-dist
-!.env.cloudflare
-.wrangler/
-.dev.vars*
-.secrets.cloudflare.*.json
-.10x/
-.claude/worktrees/

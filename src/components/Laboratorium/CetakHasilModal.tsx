@@ -36,13 +36,13 @@ export function CetakHasilModal({ isOpen, onClose, order }: CetakHasilModalProps
                   </div>
                   <div>
                     <h1 className="text-xl font-extrabold tracking-tight text-slate-900 uppercase">
-                      MYITARU SIMK
+                      Klinik Tarumanagara (MYITARU SIMK)
                     </h1>
                     <p className="text-xs text-slate-600 font-medium">
                       Instalasi Laboratorium Patologi Klinik & Bank Darah (LIS)
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      Jl. TB Simatupang & Jl. Raya Cilandak KKO No.1, Jakarta Selatan • Telp: (021) 56958723 • Email: lab@myitaru.id
+                      Jl. TB Simatupang & Jl. Raya Cilandak KKO No.1, Jakarta Selatan • Telp: (021) 56958723 • Email: lab@tarumanagara-klinik.id
                     </p>
                   </div>
                 </div>
@@ -225,7 +225,7 @@ export function CetakHasilModal({ isOpen, onClose, order }: CetakHasilModalProps
                     <span className="font-mono block text-slate-700 font-bold">
                       {order.qr_verifikasi_code || `MYITARU-LAB-${order.id}`}
                     </span>
-                    <span>Divalidasi internal (belum TTE tersertifikasi)</span>
+                    <span>Tervalidasi secara elektronik (BSrE BSSN)</span>
                     <span className="block text-[9px] text-slate-400">Hasil ini sah tanpa tanda tangan basah</span>
                   </div>
                 </div>
@@ -256,7 +256,7 @@ export function CetakHasilModal({ isOpen, onClose, order }: CetakHasilModalProps
             
             {/* LEGAL DISCLAIMER */}
             <div className="text-[9px] text-slate-400 text-center pt-2 border-t border-slate-100">
-              Dokumen ini merupakan rekam medis elektronik resmi MYITARU SIMK yang dilindungi oleh undang-undang kerahasiaan medis.
+              Dokumen ini merupakan rekam medis elektronik resmi Klinik Tarumanagara (MYITARU SIMK) yang dilindungi oleh undang-undang kerahasiaan medis.
             </div>
         </div>
     );

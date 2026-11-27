@@ -8,7 +8,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useAuditTrail } from '../contexts/AuditTrailContext';
 import LogoutButton from './LogoutButton';
-import { isLocalAuthMode } from '../lib/firebase';
 
 export function Profile() {
   const { currentUser, updateUser } = useAuth();
@@ -520,43 +519,11 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
-  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!oldPass || !newPass || !confirmPass) {
       toast.error('Semua kolom wajib diisi');
-      return;
-    }
-    if (isLocalAuthMode) {
-      if (newPass !== confirmPass) {
-        toast.error('Konfirmasi password baru tidak cocok');
-        return;
-      }
-      // Sandi diverifikasi dan di-hash di server; browser tidak pernah tahu sandi lama.
-      setSaving(true);
-      try {
-        const response = await fetch('/api/auth/password', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ currentPassword: oldPass, newPassword: newPass })
-        });
-        const payload = await response.json().catch(() => null) as { message?: string } | null;
-        if (!response.ok) {
-          toast.error(payload?.message || 'Kata sandi gagal diganti.');
-          return;
-        }
-        if (currentUser?.id) {
-          void updateUser(currentUser.id, { mustChangePassword: false });
-        }
-        toast.success(payload?.message || 'Kata sandi berhasil diganti.');
-        onClose();
-      } catch {
-        toast.error('Server tidak dapat dijangkau. Coba lagi.');
-      } finally {
-        setSaving(false);
-      }
       return;
     }
     if (currentUser?.password && oldPass !== currentUser.password) {
@@ -595,13 +562,11 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
-            <label htmlFor="pwd-old" className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-2">
               Password Lama *
             </label>
             <input
               type="password"
-              id="pwd-old"
-              autoComplete="current-password"
               value={oldPass}
               onChange={e => setOldPass(e.target.value)}
               placeholder="Masukkan password lama"
@@ -610,28 +575,24 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
           </div>
 
           <div>
-            <label htmlFor="pwd-new" className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-2">
               Password Baru *
             </label>
             <input
               type="password"
-              id="pwd-new"
-              autoComplete="new-password"
               value={newPass}
               onChange={e => setNewPass(e.target.value)}
-              placeholder={isLocalAuthMode ? 'Minimal 8 karakter' : 'Minimal 6 karakter'}
+              placeholder="Minimal 6 karakter"
               className="w-full p-3 border border-slate-300 dark:border-slate-600 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
             />
           </div>
 
           <div>
-            <label htmlFor="pwd-confirm" className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-2">
               Konfirmasi Password Baru *
             </label>
             <input
               type="password"
-              id="pwd-confirm"
-              autoComplete="new-password"
               value={confirmPass}
               onChange={e => setConfirmPass(e.target.value)}
               placeholder="Ulangi password baru"
@@ -649,8 +610,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="submit"
-              disabled={saving}
-              className="disabled:opacity-60 flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm transition-colors shadow-sm"
+              className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm transition-colors shadow-sm"
             >
               Simpan Password
             </button>

@@ -20,6 +20,7 @@ import { auth, db, googleProvider, isFirebaseConfigured, isLocalAuthMode } from 
 import { stopModuleSync } from '../lib/moduleSync';
 import { logAuthAttempt } from '../lib/activityLogger';
 import { hasModuleAccess, getRoleById } from '../data/roles';
+import { type FacilityMode, isModuleAllowedInFacilityMode } from '../data/moduleRegistry';
 
 export interface User {
   id: string;
@@ -50,11 +51,24 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ success: boolean; message: string; isCancelled?: boolean }>;
   logout: () => Promise<void>;
   hasAccess: (moduleId: string) => boolean;
+  facilityMode: FacilityMode;
+  setFacilityMode: (mode: FacilityMode) => void;
   isAdmin: boolean;
   // User management
   addUser: (user: Omit<User, 'id' | 'dibuatPada' | 'password'> & { password: string }) => Promise<void>;
   updateUser: (id: string, data: Partial<User>) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
+}
+
+const FACILITY_MODE_STORAGE_KEY = 'myitaru_facility_mode';
+
+function readInitialFacilityMode(): FacilityMode {
+  try {
+    const saved = localStorage.getItem(FACILITY_MODE_STORAGE_KEY);
+    return saved === 'rumah_sakit' ? 'rumah_sakit' : 'klinik';
+  } catch {
+    return 'klinik';
+  }
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -160,7 +174,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
+  const [facilityMode, setFacilityModeState] = useState<FacilityMode>(readInitialFacilityMode);
   const [mfaFlow, setMfaFlow] = useState<MfaFlow | null>(null);
+
+  const setFacilityMode = useCallback((mode: FacilityMode) => {
+    setFacilityModeState(mode);
+    try {
+      localStorage.setItem(FACILITY_MODE_STORAGE_KEY, mode);
+    } catch { /* storage tidak tersedia */ }
+  }, []);
   const pendingMfaResolver = useRef<MultiFactorResolver | null>(null);
   const pendingTotpSecret = useRef<TotpSecret | null>(null);
   const suppressAuthRestore = useRef(false);
@@ -783,8 +805,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hasAccess = useCallback((moduleId: string): boolean => {
     if (!currentUser) return false;
+    if (!isModuleAllowedInFacilityMode(moduleId, facilityMode)) return false;
     return hasModuleAccess(currentUser.roleId, moduleId);
-  }, [currentUser]);
+  }, [currentUser, facilityMode]);
 
   const addUser = async (userData: Omit<User, 'id' | 'dibuatPada' | 'password'> & { password: string }) => {
     if (isLocalAuthMode) {
@@ -913,6 +936,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       logout,
       hasAccess,
+      facilityMode,
+      setFacilityMode,
       isAdmin,
       addUser,
       updateUser,

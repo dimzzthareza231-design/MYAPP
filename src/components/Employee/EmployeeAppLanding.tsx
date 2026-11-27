@@ -200,9 +200,9 @@ export const EmployeeAppLanding: React.FC = () => {
               onClick={() => navigate('/portal-karyawan')}
               className="flex items-center gap-2.5 whitespace-nowrap cursor-pointer"
             >
-              <BrandLogo alt="MYITARU" className="w-8 h-8 rounded-lg object-cover" />
+              <BrandLogo alt="Klinik Tarumanagara" className="w-8 h-8 rounded-lg object-cover" />
               <span className="font-extrabold text-base tracking-tight text-[#0B3D91] dark:text-sky-400">
-                MYITARU <span className="font-semibold text-slate-600 dark:text-slate-300">· App Karyawan</span>
+                Klinik Tarumanagara <span className="font-semibold text-slate-600 dark:text-slate-300">· App Karyawan</span>
               </span>
             </button>
           </div>
@@ -237,13 +237,13 @@ export const EmployeeAppLanding: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
           <div className="lg:col-span-7 space-y-6">
             <div className="inline-flex flex-wrap items-center gap-2 bg-white/10 border border-white/15 px-3 py-1.5 rounded-lg text-xs font-medium text-sky-100">
-              <span>Ekosistem Digital Staf MYITARU SIMK</span>
+              <span>Ekosistem Digital Staf Klinik Tarumanagara (MYITARU SIMK)</span>
               <span>·</span>
               <span className="font-mono text-sky-300">Deteksi Perangkat: {detectedDevice}</span>
             </div>
 
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold leading-tight tracking-tight text-balance">
-              Satu Aplikasi Operasional 24 Jam untuk Seluruh Divisi MYITARU
+              Satu Aplikasi Operasional 24 Jam untuk Seluruh Divisi Klinik Tarumanagara
             </h1>
 
             <p className="text-blue-100 text-sm sm:text-base leading-relaxed max-w-2xl">
@@ -411,7 +411,7 @@ export const EmployeeAppLanding: React.FC = () => {
             {
               icon: MapPin,
               title: 'Absensi Geofence & Offline',
-              desc: 'Validasi radius GPS kampus MYITARU + simulasi biometrik. Tetap berfungsi di area blankspot dengan antrean Idempotency-Key.'
+              desc: 'Validasi radius GPS kampus Klinik Tarumanagara + simulasi biometrik. Tetap berfungsi di area blankspot dengan antrean Idempotency-Key.'
             },
             {
               icon: CalendarClock,
@@ -466,8 +466,8 @@ export const EmployeeAppLanding: React.FC = () => {
                 },
                 {
                   step: '02',
-                  title: 'Login NIP / Email Staf',
-                  body: 'Masuk menggunakan NIP kepegawaian HRIS atau email staf yang sudah terdaftar di unit kerja Anda.'
+                  title: 'Login NIP / Email Staf atau Google',
+                  body: 'Masuk menggunakan NIP kepegawaian HRIS atau akun Google institusi yang sudah terdaftar di unit kerja Anda.'
                 },
                 {
                   step: '03',
@@ -585,7 +585,7 @@ export const EmployeeAppLanding: React.FC = () => {
                 <Mail className="w-5 h-5 text-[#0B3D91] dark:text-sky-400 shrink-0" />
                 <div>
                   <p className="text-xs text-slate-500">Email Resmi IT Support &amp; DPO</p>
-                  <p className="font-mono font-bold text-sm">servicedesk@myitaru.id</p>
+                  <p className="font-mono font-bold text-sm">servicedesk@tarumanagara-klinik.id</p>
                 </div>
               </div>
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3.5">

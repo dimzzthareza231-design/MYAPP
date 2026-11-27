@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useOutletContext, useParams } from 'react-router-dom';
-import { findModule, COLS } from '../data/moduleRegistry';
+import { findModule, COLS, isSubmenuAllowedInFacilityMode } from '../data/moduleRegistry';
 import SmartTable from './SmartTable';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
+import { ProtectedRoute } from './Auth/ProtectedRoute';
 
 function SpecialAction({ moduleId, activeTab }: { moduleId?: string, activeTab: string }) {
   const [result, setResult] = useState<any>(null);
@@ -34,7 +36,7 @@ function SpecialAction({ moduleId, activeTab }: { moduleId?: string, activeTab: 
             onChange={(e) => setInput(e.target.value)}
             className="flex-1 p-2.5 rounded-lg bg-white dark:bg-slate-900/80 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm focus:border-amber-500 focus:outline-none" />
           <button onClick={() => {
-            setResult({ nama: 'BUDI SANTOSO', status: 'AKTIF', kelas: '2', faskes: 'MYITARU' });
+            setResult({ nama: 'BUDI SANTOSO', status: 'AKTIF', kelas: '2', faskes: 'Klinik Tarumanagara' });
             toast.success('✅ Cek Eligibilitas Berhasil');
           }} className="bg-amber-600 text-white px-5 py-2.5 rounded-lg text-sm hover:bg-amber-500 font-bold shadow-lg shadow-amber-900/20 transition-colors">
             🔍 Cek Sekarang
@@ -224,28 +226,40 @@ function getCustomActions(moduleId?: string, activeTab?: string) {
 export function GenericModuleContent() {
   const { activeTab } = useOutletContext<{ activeTab: string }>();
   const { moduleId } = useParams();
+  const { facilityMode } = useAuth();
 
-  const found = findModule(moduleId || '');
-  const mod = found?.module || { label: moduleId, icon: '📦', submenus: [] };
+  const normalizedModuleId = (moduleId || '').trim().toLowerCase();
+  const found = findModule(normalizedModuleId);
+  const mod = found?.module || { label: normalizedModuleId, icon: '📦', submenus: [] };
+  const allowedSubmenus = (mod.submenus || []).filter((s: any) => {
+    const label = typeof s === 'string' ? s : s.label;
+    return isSubmenuAllowedInFacilityMode(normalizedModuleId, label, facilityMode);
+  });
 
-  const activeConfig = mod.submenus.find((s: any) => (typeof s === 'string' ? s : s.label) === activeTab);
+  const safeActiveTab = isSubmenuAllowedInFacilityMode(normalizedModuleId, activeTab, facilityMode)
+    ? activeTab
+    : (allowedSubmenus[0] ? (typeof allowedSubmenus[0] === 'string' ? allowedSubmenus[0] : allowedSubmenus[0].label) : 'Data');
+
+  const activeConfig = allowedSubmenus.find((s: any) => (typeof s === 'string' ? s : s.label) === safeActiveTab);
   const colsKey = (typeof activeConfig === 'object' && activeConfig.cols) ? activeConfig.cols : 'dokumen';
   const cols = COLS[colsKey] || COLS.dokumen;
 
   const sourceKey = (typeof activeConfig === 'object' && activeConfig && 'source' in activeConfig) ? (activeConfig as any).source : null;
-  const storageKey = sourceKey || `${moduleId}_${activeTab}`.replace(/\s/g, '_');
+  const storageKey = sourceKey || `${normalizedModuleId}_${safeActiveTab}`.replace(/\s/g, '_');
 
-  const customActions = getCustomActions(moduleId, activeTab);
+  const customActions = getCustomActions(normalizedModuleId, safeActiveTab);
 
   return (
-    <div className="h-full flex flex-col p-6">
-      <SpecialAction moduleId={moduleId} activeTab={activeTab} />
-      <SmartTable
-        storageKey={storageKey}
-        columns={cols}
-        title={`${mod.label} - ${activeTab}`}
-        customActions={customActions}
-      />
-    </div>
+    <ProtectedRoute moduleId={normalizedModuleId}>
+      <div className="h-full flex flex-col p-6">
+        <SpecialAction moduleId={normalizedModuleId} activeTab={safeActiveTab} />
+        <SmartTable
+          storageKey={storageKey}
+          columns={cols}
+          title={`${mod.label} - ${safeActiveTab}`}
+          customActions={customActions}
+        />
+      </div>
+    </ProtectedRoute>
   );
 }

@@ -100,7 +100,9 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
     mfaFlow,
     completeMfa,
     completeMfaEnrollment,
-    cancelMfa
+    cancelMfa,
+    facilityMode,
+    setFacilityMode
   } = useAuth();
   const { hospitalSettings } = useHospital();
   const [username, setUsername] = useState('');
@@ -245,6 +247,60 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
           <ShieldCheck className="w-4 h-4" /> MYITARU SIMK · Aplikasi Inti &amp; RME Klinis
         </p>
       </div>
+
+      {/* 2 Pilihan Mode Fasilitas Sebelum Masuk Aplikasi Inti */}
+      {!mfaFlow && (
+        <div className="mb-5">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+            Pilih Mode Modul Fasilitas
+          </p>
+          <div className="grid grid-cols-2 gap-2.5" role="radiogroup" aria-label="Pilih mode modul fasilitas">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={facilityMode === 'klinik'}
+              onClick={() => setFacilityMode('klinik')}
+              className={`rounded-xl border p-3 text-left transition-all cursor-pointer ${
+                facilityMode === 'klinik'
+                  ? 'border-[#0B3D91] bg-blue-50/90 ring-2 ring-[#0B3D91]/20 dark:border-sky-400 dark:bg-sky-950/50'
+                  : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800/50'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`p-1.5 rounded-lg ${facilityMode === 'klinik' ? 'bg-[#0B3D91] text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
+                  <Stethoscope className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-xs font-bold text-slate-900 dark:text-white">Modul Klinik</span>
+              </div>
+              <p className="mt-1.5 text-[10px] leading-snug text-slate-500 dark:text-slate-400">
+                Rawat jalan, RME, lab, farmasi ralan &amp; kasir. Modul RS disembunyikan.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={facilityMode === 'rumah_sakit'}
+              onClick={() => setFacilityMode('rumah_sakit')}
+              className={`rounded-xl border p-3 text-left transition-all cursor-pointer ${
+                facilityMode === 'rumah_sakit'
+                  ? 'border-[#0B3D91] bg-blue-50/90 ring-2 ring-[#0B3D91]/20 dark:border-sky-400 dark:bg-sky-950/50'
+                  : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800/50'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`p-1.5 rounded-lg ${facilityMode === 'rumah_sakit' ? 'bg-[#0B3D91] text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
+                  <Building2 className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-xs font-bold text-slate-900 dark:text-white">Modul Rumah Sakit</span>
+              </div>
+              <p className="mt-1.5 text-[10px] leading-snug text-slate-500 dark:text-slate-400">
+                Semua modul lengkap: Ranap, OK, ICU, Radiologi, Farmasi Ranap &amp; BPJS.
+              </p>
+            </button>
+          </div>
+        </div>
+      )}
 
       {errorMessage && !mfaFlow && (
         <div

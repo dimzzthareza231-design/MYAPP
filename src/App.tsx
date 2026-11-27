@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
-import { ShieldAlert } from 'lucide-react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import { HospitalProvider, useHospital } from './contexts/HospitalContext';
 import { AuditTrailProvider } from './contexts/AuditTrailContext';
@@ -10,99 +9,80 @@ import { PatientFlowProvider } from './contexts/PatientFlowContext';
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-const UserManagement = lazyNamed(() => import('./components/Auth/UserManagement'), 'UserManagement');
+import { UserManagement } from './components/Auth/UserManagement';
 import { ProtectedRoute, withAuthorization } from './components/Auth/ProtectedRoute';
 import Dashboard from './components/Dashboard';
 import ModuleLayout from './layouts/ModuleLayout';
 import { GenericModuleContent } from './components/GenericModuleContent';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Login } from './components/Login';
-const EmployeeAppLanding = lazyNamed(() => import('./components/Employee/EmployeeAppLanding'), 'EmployeeAppLanding');
-const EmployeePortal = lazyNamed(() => import('./components/Employee/EmployeePortal'), 'EmployeePortal');
-const EmployeeMobileApp = lazyNamed(() => import('./components/Employee/EmployeeMobileApp'), 'EmployeeMobileApp');
+import { PublicHospitalPortal } from './components/Portal/PublicHospitalPortal';
+import { PatientMobileApp } from './components/Mobile/PatientMobileApp';
+import { EmployeeAppLanding } from './components/Employee/EmployeeAppLanding';
+import { EmployeePortal } from './components/Employee/EmployeePortal';
+import { EmployeeMobileApp } from './components/Employee/EmployeeMobileApp';
 import { OfflineIndicator } from './components/PWA/OfflineIndicator';
-import { startModuleSync, stopModuleSync } from './lib/moduleSync';
-import { usesServerPersistence } from './lib/firestoreService';
 
 // Existing Modules
-// Tiap modul dimuat saat dibuka; sebelumnya semua modul (~6 MB) diunduh sebelum halaman login bisa dipakai.
-function lazyNamed<M, K extends keyof M>(load: () => Promise<M>, name: K) {
-  return React.lazy(async () => ({ default: (await load())[name] as React.ComponentType<any> }));
-}
-
-const Registration = lazyNamed(() => import('./components/Registration'), 'Registration');
-const Emergency = lazyNamed(() => import('./components/Emergency'), 'Emergency');
-const Outpatient = lazyNamed(() => import('./components/Outpatient'), 'Outpatient');
-const BedManagement = lazyNamed(() => import('./components/BedManagement'), 'BedManagement');
-const KamarOperasi = lazyNamed(() => import('./components/KamarOperasi'), 'KamarOperasi');
-const Laboratorium = lazyNamed(() => import('./components/Laboratorium'), 'Laboratorium');
-const RadiologiDashboard = lazyNamed(() => import('./components/Radiologi/RadiologiDashboard'), 'RadiologiDashboard');
-const MedicalRecords = lazyNamed(() => import('./components/MedicalRecords'), 'MedicalRecords');
-const ManajemenSDM = lazyNamed(() => import('./components/ManajemenSDM'), 'ManajemenSDM');
-const InventoryManagement = lazyNamed(() => import('./components/InventoryManagement'), 'InventoryManagement');
-const PatientFlowDashboard = React.lazy(() => import('./components/PatientFlowDashboard'));
-const PatientSafety = lazyNamed(() => import('./components/Safety/PatientSafety'), 'PatientSafety');
-const Pharmacy = lazyNamed(() => import('./components/Pharmacy'), 'Pharmacy');
-const Billing = lazyNamed(() => import('./components/Billing'), 'Billing');
-const BPJSModule = lazyNamed(() => import('./components/BPJS/BPJSModule'), 'BPJSModule');
-const AnalyticsDashboard = React.lazy(() => import('./components/AnalyticsDashboard'));
-const SatuSehatIntegration = lazyNamed(() => import('./components/SatuSehatIntegration'), 'SatuSehatIntegration');
-const ApiManagementSystem = lazyNamed(() => import('./components/ApiManagement/ApiManagementSystem'), 'ApiManagementSystem');
-const PanduanModule = lazyNamed(() => import('./components/Panduan/PanduanModule'), 'PanduanModule');
-const NotificationPreferences = React.lazy(() => import('./components/NotificationPreferences'));
-const Profile = lazyNamed(() => import('./components/Profile'), 'Profile');
-const AuthManagement = lazyNamed(() => import('./components/Auth/AuthManagement'), 'AuthManagement');
-const AuditTrail = React.lazy(() => import('./components/AuditTrail'));
-const BackupManagement = lazyNamed(() => import('./components/Backup/BackupManagement'), 'BackupManagement');
-const MonitoringSystem = lazyNamed(() => import('./components/Monitoring/MonitoringSystem'), 'MonitoringSystem');
-const ModulTriase = React.lazy(() => import('./components/ModulTriase'));
-const PengaturanRS = lazyNamed(() => import('./components/Settings/PengaturanRS'), 'PengaturanRS');
-const JKNMobile = lazyNamed(() => import('./components/JKNMobile/JKNMobile'), 'JKNMobile');
+import { Registration } from './components/Registration';
+import { Emergency } from './components/Emergency';
+import { Outpatient } from './components/Outpatient';
+import { BedManagement } from './components/BedManagement';
+import { KamarOperasi } from './components/KamarOperasi';
+import { Laboratorium } from './components/Laboratorium';
+import { RadiologiDashboard } from './components/Radiologi/RadiologiDashboard';
+import { MedicalRecords } from './components/MedicalRecords';
+import { ManajemenSDM } from './components/ManajemenSDM';
+import { InventoryManagement } from './components/InventoryManagement';
+import PatientFlowDashboard from './components/PatientFlowDashboard';
+import { PatientSafety } from './components/Safety/PatientSafety';
+import { Pharmacy } from './components/Pharmacy';
+import { Billing } from './components/Billing';
+import { BPJSModule } from './components/BPJS/BPJSModule';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
+import { SatuSehatIntegration } from './components/SatuSehatIntegration';
+import { ApiManagementSystem } from './components/ApiManagement/ApiManagementSystem';
+import { PanduanModule } from './components/Panduan/PanduanModule';
+import NotificationPreferences from './components/NotificationPreferences';
+import { Profile } from './components/Profile';
+import { AuthManagement } from './components/Auth/AuthManagement';
+import AuditTrail from './components/AuditTrail';
+import { BackupManagement } from './components/Backup/BackupManagement';
+import { MonitoringSystem } from './components/Monitoring/MonitoringSystem';
+import ModulTriase from './components/ModulTriase';
+import { PengaturanRS } from './components/Settings/PengaturanRS';
+import { JKNMobile } from './components/JKNMobile/JKNMobile';
 import { AntrianProvider } from "./contexts/AntrianContext";
-const PoliPelayanan = lazyNamed(() => import('./components/Poli/PoliPelayanan'), 'PoliPelayanan');
-const DisplayAntrianPoli = lazyNamed(() => import('./components/Poli/DisplayAntrianPoli'), 'DisplayAntrianPoli');
+import { PoliPelayanan } from "./components/Poli/PoliPelayanan";
+import { DisplayAntrianPoli } from "./components/Poli/DisplayAntrianPoli";
 import CommandPalette from './components/CommandPalette';
-const ICUMonitoring = lazyNamed(() => import('./components/ICU/ICUMonitoring'), 'ICUMonitoring');
-const RehabMedik = lazyNamed(() => import('./components/Rehab/RehabMedik'), 'RehabMedik');
-const GiziDiet = lazyNamed(() => import('./components/Gizi/GiziDiet'), 'GiziDiet');
-const Telemedicine = lazyNamed(() => import('./components/Telemed/Telemedicine'), 'Telemedicine');
-const PatientPortal = lazyNamed(() => import('./components/Portal/PatientPortal'), 'PatientPortal');
-const MultiBranchSystem = React.lazy(() => import('./components/MultiBranch/MultiBranchSystem'));
-const CRMManagement = lazyNamed(() => import('./components/CRM/CRMManagement'), 'CRMManagement');
-const BlueprintSystemView = lazyNamed(() => import('./components/Blueprint/BlueprintSystemView'), 'BlueprintSystemView');
+import { ICUMonitoring } from './components/ICU/ICUMonitoring';
+import { RehabMedik } from './components/Rehab/RehabMedik';
+import { GiziDiet } from './components/Gizi/GiziDiet';
+import { Telemedicine } from './components/Telemed/Telemedicine';
+import { PatientPortal } from './components/Portal/PatientPortal';
+import MultiBranchSystem from './components/MultiBranch/MultiBranchSystem';
+import { CRMManagement } from './components/CRM/CRMManagement';
+import { BlueprintSystemView } from './components/Blueprint/BlueprintSystemView';
 
 // Bridging Modules
-const BridgingHub = lazyNamed(() => import('./components/Bridging/BridgingHub'), 'BridgingHub');
-const VClaimBridging = lazyNamed(() => import('./components/Bridging/VClaimBridging'), 'VClaimBridging');
-const SatuSehatBridging = lazyNamed(() => import('./components/Bridging/SatuSehatBridging'), 'SatuSehatBridging');
-const WAGatewayBridging = lazyNamed(() => import('./components/Bridging/WAGatewayBridging'), 'WAGatewayBridging');
-const AnjunganBridging = lazyNamed(() => import('./components/Bridging/AnjunganBridging'), 'AnjunganBridging');
-const HFISBridging = lazyNamed(() => import('./components/Bridging/HFISBridging'), 'HFISBridging');
-const VedikaBridging = lazyNamed(() => import('./components/Bridging/VedikaBridging'), 'VedikaBridging');
-const VeronisaBridging = lazyNamed(() => import('./components/Bridging/VeronisaBridging'), 'VeronisaBridging');
-const BPJSEMRBridging = lazyNamed(() => import('./components/Bridging/BPJSEMRBridging'), 'BPJSEMRBridging');
-const SertisignBridging = lazyNamed(() => import('./components/Bridging/SertisignBridging'), 'SertisignBridging');
-const OrthancBridging = lazyNamed(() => import('./components/Bridging/OrthancBridging'), 'OrthancBridging');
-const ApiGatewayBridging = lazyNamed(() => import('./components/Bridging/ApiGatewayBridging'), 'ApiGatewayBridging');
-const CloudflareBridging = lazyNamed(() => import('./components/Bridging/CloudflareBridging'), 'CloudflareBridging');
+import { BridgingHub } from './components/Bridging/BridgingHub';
+import { VClaimBridging } from './components/Bridging/VClaimBridging';
+import { SatuSehatBridging } from './components/Bridging/SatuSehatBridging';
+import { WAGatewayBridging } from './components/Bridging/WAGatewayBridging';
+import { AnjunganBridging } from './components/Bridging/AnjunganBridging';
+import { HFISBridging } from './components/Bridging/HFISBridging';
+import { VedikaBridging } from './components/Bridging/VedikaBridging';
+import { VeronisaBridging } from './components/Bridging/VeronisaBridging';
+import { BPJSEMRBridging } from './components/Bridging/BPJSEMRBridging';
+import { SertisignBridging } from './components/Bridging/SertisignBridging';
+import { OrthancBridging } from './components/Bridging/OrthancBridging';
+import { ApiGatewayBridging } from './components/Bridging/ApiGatewayBridging';
+import { CloudflareBridging } from './components/Bridging/CloudflareBridging';
 
 function AppContent() {
-  const { currentUser, logout, loading: authLoading } = useAuth();
+  const { currentUser, logout, loading } = useAuth();
   const { isDarkMode } = useHospital();
-  const [moduleSyncUser, setModuleSyncUser] = useState<string | null>(null);
-
-  // Data modul dari server dimuat ke localStorage sebelum modul tampil (komponen membacanya saat mount).
-  useEffect(() => {
-    if (!currentUser?.id || !usesServerPersistence) return;
-    let cancelled = false;
-    const timeout = new Promise((resolve) => setTimeout(resolve, 10_000));
-    void Promise.race([startModuleSync(), timeout]).finally(() => { if (!cancelled) setModuleSyncUser(currentUser.id); });
-    return () => {
-      cancelled = true;
-      void stopModuleSync(true);
-    };
-  }, [currentUser?.id]);
-  const loading = authLoading || Boolean(currentUser && usesServerPersistence && moduleSyncUser !== currentUser.id);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -118,33 +98,8 @@ function AppContent() {
         id: 'viewer-block-toast',
       });
     };
-    const handleModuleSyncConflict = (event: Event) => {
-      const { key, draftKey, draftPreserved } = (event as CustomEvent<{
-        key?: string;
-        draftKey?: string;
-        draftPreserved?: boolean;
-      }>).detail || {};
-      const draftMessage = draftPreserved && draftKey ? ` Draf lokal tersimpan di ${draftKey}. Muat ulang halaman untuk memakai data server terbaru.` : '';
-      toast.error(`Data modul${key ? ` ${key}` : ''} berubah di perangkat lain. Penyimpanan diblokir agar perubahan server tidak tertimpa.${draftMessage}`, {
-        id: `module-sync-conflict-${key || 'unknown'}`,
-        duration: 12000,
-      });
-    };
-    const handleModuleSyncError = (event: Event) => {
-      const { key, message } = (event as CustomEvent<{ key?: string; message?: string }>).detail || {};
-      toast.error(`${key ? `${key}: ` : ''}${message || 'Data modul gagal disinkronkan.'}`, {
-        id: `module-sync-error-${key || 'unknown'}`,
-        duration: 10000,
-      });
-    };
     window.addEventListener('viewer-mode-block', handleViewerBlock);
-    window.addEventListener('module-data-conflict', handleModuleSyncConflict);
-    window.addEventListener('module-data-sync-error', handleModuleSyncError);
-    return () => {
-      window.removeEventListener('viewer-mode-block', handleViewerBlock);
-      window.removeEventListener('module-data-conflict', handleModuleSyncConflict);
-      window.removeEventListener('module-data-sync-error', handleModuleSyncError);
-    };
+    return () => window.removeEventListener('viewer-mode-block', handleViewerBlock);
   }, []);
 
   return (
@@ -152,30 +107,14 @@ function AppContent() {
       <Toaster position="top-right" />
       <OfflineIndicator />
       {currentUser && <CommandPalette />}
-      {currentUser?.mustChangePassword && (
-        <div
-          role="alert"
-          className="no-print bg-amber-50 dark:bg-amber-950/60 border-b border-amber-200 dark:border-amber-800 px-4 py-2 text-xs text-amber-900 dark:text-amber-100 flex flex-wrap items-center justify-between gap-2"
-        >
-          <div className="flex items-center gap-2 font-medium">
-            <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            <span>Akun ini masih memakai kata sandi bawaan. Segera ganti kata sandi demi keamanan data pasien.</span>
-          </div>
-          <Link
-            to="/modul/profile?tab=security"
-            className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold transition-colors shrink-0"
-          >
-            Ganti Kata Sandi
-          </Link>
-        </div>
-      )}
 
       <main className="flex-1 flex flex-col min-w-0 relative w-full scroll-smooth">
         <ErrorBoundary>
-          <React.Suspense fallback={<div className="flex-1 flex items-center justify-center p-10"><div className="w-10 h-10 border-4 border-sky-500 border-t-transparent rounded-full animate-spin" role="status" aria-label="Memuat modul" /></div>}>
           <Routes>
-            {/* 1. Portal Publik Pasien & App Mobile Pasien dipisah ke aplikasi web publik (PublicApp.tsx / public.html) */}
-            <Route path="/" element={<Navigate to={currentUser ? '/dashboard' : '/staff/login'} replace />} />
+            {/* 1. Portal Publik Pasien (Khusus Pendaftaran Online & Cek Nomor Antrean) + App Mobile Pasien */}
+            <Route path="/" element={<ErrorBoundary><PublicHospitalPortal /></ErrorBoundary>} />
+            <Route path="/portal" element={<ErrorBoundary><PublicHospitalPortal /></ErrorBoundary>} />
+            <Route path="/mobile/*" element={<ErrorBoundary><PatientMobileApp /></ErrorBoundary>} />
 
             {/* 2. Aplikasi Karyawan (HRIS & 34 Divisi, App Download Landing & Mobile Karyawan) */}
             <Route path="/portal-karyawan" element={<ErrorBoundary><EmployeePortal /></ErrorBoundary>} />
@@ -185,7 +124,7 @@ function AppContent() {
             <Route path="/app" element={<ErrorBoundary><EmployeeAppLanding /></ErrorBoundary>} />
             <Route path="/karyawan/mobile/*" element={<ErrorBoundary><EmployeeMobileApp /></ErrorBoundary>} />
 
-            {/* 3. Aplikasi Inti / Staf (MYITARU SIMK & RME Klinis) */}
+            {/* 3. Aplikasi Inti Klinik / Staf (MYITARU SIMK & RME Klinis) */}
             <Route
               path="/staff/login"
               element={
@@ -226,27 +165,11 @@ function AppContent() {
                 )
               }
             />
-            <Route
-              path="/modul"
-              element={
-                // Tunggu sesi selesai dimuat; tanpa ini refresh/tautan langsung ke modul terlempar ke login lalu dasbor.
-                loading ? (
-                  <div className="min-h-screen bg-[#07265C] flex flex-col items-center justify-center p-4">
-                    <div className="w-12 h-12 border-4 border-sky-400 border-t-transparent rounded-full animate-spin mb-4" />
-                    <p className="text-white font-semibold text-sm">Memuat Modul SIMK...</p>
-                  </div>
-                ) : currentUser ? (
-                  <ModuleLayout />
-                ) : (
-                  <Navigate to="/staff/login" replace />
-                )
-              }
-            >
+            <Route path="/modul" element={currentUser ? <ModuleLayout /> : <Navigate to="/staff/login" replace />}>
               <Route path="pendaftaran" element={<ErrorBoundary><ProtectedRoute moduleId="pendaftaran"><Registration /></ProtectedRoute></ErrorBoundary>} />
               <Route path="rekam-medis" element={<ErrorBoundary><ProtectedRoute moduleId="rekam-medis"><MedicalRecords /></ProtectedRoute></ErrorBoundary>} />
               <Route path="igd" element={<ErrorBoundary><ProtectedRoute moduleId="igd"><Emergency /></ProtectedRoute></ErrorBoundary>} />
               <Route path="rawat-jalan" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-jalan"><Outpatient /></ProtectedRoute></ErrorBoundary>} />
-              <Route path="patient-flow" element={<ErrorBoundary><ProtectedRoute moduleId="patient-flow"><PatientFlowDashboard /></ProtectedRoute></ErrorBoundary>} />
               <Route path="rawat-inap" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-inap"><BedManagement /></ProtectedRoute></ErrorBoundary>} />
               <Route path="operasi" element={<ErrorBoundary><ProtectedRoute moduleId="operasi"><KamarOperasi /></ProtectedRoute></ErrorBoundary>} />
               <Route path="laboratorium" element={<ErrorBoundary><ProtectedRoute moduleId="laboratorium"><Laboratorium /></ProtectedRoute></ErrorBoundary>} />
@@ -279,7 +202,7 @@ function AppContent() {
               <Route path="bpjs" element={<ErrorBoundary><ProtectedRoute moduleId="vclaim"><BPJSModule /></ProtectedRoute></ErrorBoundary>} />
               <Route path="kemenkes" element={<ErrorBoundary><ProtectedRoute moduleId="satu-sehat"><SatuSehatIntegration /></ProtectedRoute></ErrorBoundary>} />
               <Route path="integrasi" element={<ErrorBoundary><ProtectedRoute moduleId="api"><ApiManagementSystem /></ProtectedRoute></ErrorBoundary>} />
-              <Route path="blueprint" element={<ErrorBoundary><BlueprintSystemView /></ErrorBoundary>} />
+              <Route path="blueprint" element={<ErrorBoundary><ProtectedRoute moduleId="blueprint"><BlueprintSystemView /></ProtectedRoute></ErrorBoundary>} />
               <Route path="panduan" element={<ErrorBoundary><ProtectedRoute moduleId="panduan"><PanduanModule /></ProtectedRoute></ErrorBoundary>} />
               <Route path="pengaturan-klinik" element={<ErrorBoundary><ProtectedRoute moduleId="pengaturan-klinik"><PengaturanRS /></ProtectedRoute></ErrorBoundary>} />
               <Route path="notifikasi" element={<ErrorBoundary><ProtectedRoute moduleId="notifikasi"><NotificationPreferences /></ProtectedRoute></ErrorBoundary>} />
@@ -298,19 +221,18 @@ function AppContent() {
               <Route path="display-antrian" element={<ErrorBoundary><ProtectedRoute moduleId="pendaftaran"><DisplayAntrianPoli /></ProtectedRoute></ErrorBoundary>} />
               
               {/* Clinical & Patient Engagement Modules */}
-              <Route path="icu" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-inap"><ICUMonitoring /></ProtectedRoute></ErrorBoundary>} />
+              <Route path="icu" element={<ErrorBoundary><ProtectedRoute moduleId="icu"><ICUMonitoring /></ProtectedRoute></ErrorBoundary>} />
               <Route path="rehab" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-jalan"><RehabMedik /></ProtectedRoute></ErrorBoundary>} />
-              <Route path="gizi" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-inap"><GiziDiet /></ProtectedRoute></ErrorBoundary>} />
+              <Route path="gizi" element={<ErrorBoundary><ProtectedRoute moduleId="gizi"><GiziDiet /></ProtectedRoute></ErrorBoundary>} />
               <Route path="telemedicine" element={<ErrorBoundary><ProtectedRoute moduleId="rawat-jalan"><Telemedicine /></ProtectedRoute></ErrorBoundary>} />
               <Route path="patient-portal" element={<ErrorBoundary><ProtectedRoute moduleId="pendaftaran"><PatientPortal /></ProtectedRoute></ErrorBoundary>} />
-              <Route path="multi-branch" element={<ErrorBoundary><ProtectedRoute moduleId="pengaturan-klinik"><MultiBranchSystem /></ProtectedRoute></ErrorBoundary>} />
+              <Route path="multi-branch" element={<ErrorBoundary><ProtectedRoute moduleId="multi-branch"><MultiBranchSystem /></ProtectedRoute></ErrorBoundary>} />
               <Route path="crm" element={<ErrorBoundary><ProtectedRoute moduleId="pendaftaran"><CRMManagement /></ProtectedRoute></ErrorBoundary>} />
 
               <Route path=":moduleId" element={<ErrorBoundary><GenericModuleContent /></ErrorBoundary>} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-          </React.Suspense>
         </ErrorBoundary>
       </main>
     </div>

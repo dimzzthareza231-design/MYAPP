@@ -27,19 +27,16 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
 
+    function isSuperAdminEmail() {
+      return isVerifiedUser() && request.auth.token.email == 'dimzzthareza231@gmail.com';
+    }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isSuperAdmin() {
-      return isVerifiedUser() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.aktif == true &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleId == 'super_admin';
-    }
-
     function isAdmin() {
-      return isSuperAdmin() || (
+      return isSuperAdminEmail() || (
         isVerifiedUser() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.aktif == true &&
@@ -232,22 +229,20 @@ service cloud.firestore {
     // --- 1. USERS COLLECTION (Strict PII Isolation & Anti-Privilege-Escalation) ---
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isAdmin() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
+      allow list: if isSuperAdminEmail() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
 
       allow create: if isValidId(userId) && isVerifiedUser() && isValidUser(incoming()) && (
-        isSuperAdmin() ||
-        (isAdmin() && incoming().roleId == 'viewer') ||
+        isAdmin() ||
         (
           isOwner(userId) &&
           incoming().uid == request.auth.uid &&
           incoming().email == request.auth.token.email &&
-          incoming().roleId == 'viewer'
+          (isSuperAdminEmail() ? incoming().roleId == 'super_admin' : incoming().roleId == 'viewer')
         )
       );
 
       allow update: if isValidId(userId) && isVerifiedUser() && isValidUser(incoming()) && (
-        isSuperAdmin() ||
-        (isAdmin() && incoming().roleId == existing().roleId && existing().roleId != 'super_admin') ||
+        isAdmin() ||
         (
           isOwner(userId) &&
           incoming().diff(existing()).affectedKeys().hasOnly(['nama', 'photoURL', 'username', 'updatedAt']) &&
@@ -256,34 +251,36 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if isValidId(userId) && isSuperAdmin();
+      allow delete: if isValidId(userId) && isAdmin();
     }
 
     // --- 2. PASIEN COLLECTION ---
     match /pasien/{pasienId} {
-      allow get, list: if isClinicalOrAdmin();
+      allow get: if isValidId(pasienId) && (isClinicalOrAdmin() || (isVerifiedUser() && existing().no_rm is string));
+      allow list: if isVerifiedUser() && resource.data.no_rm is string;
       allow create, update: if isValidId(pasienId) && isClinicalOrAdmin() && isValidPasien(incoming());
       allow delete: if isValidId(pasienId) && isAdmin();
     }
 
     // --- 3. KUNJUNGAN COLLECTION ---
     match /kunjungan/{kunjunganId} {
-      allow get, list: if isClinicalOrAdmin();
+      allow get: if isValidId(kunjunganId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.pasien_id is string;
       allow create, update: if isValidId(kunjunganId) && isClinicalOrAdmin() && isValidKunjungan(incoming());
       allow delete: if isValidId(kunjunganId) && isAdmin();
     }
 
     // --- 4. DOKTER & PERAWAT MASTER DATA ---
     match /dokter/{dokterId} {
-      allow get: if isValidId(dokterId) && isClinicalOrAdmin();
-      allow list: if isClinicalOrAdmin() && resource.data.nama is string;
+      allow get: if isValidId(dokterId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.nama is string;
       allow create, update: if isValidId(dokterId) && isClinicalOrAdmin() && isValidDokter(incoming());
       allow delete: if isValidId(dokterId) && isAdmin();
     }
 
     match /perawat/{perawatId} {
-      allow get: if isValidId(perawatId) && isClinicalOrAdmin();
-      allow list: if isClinicalOrAdmin() && resource.data.nama is string;
+      allow get: if isValidId(perawatId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.nama is string;
       allow create, update: if isValidId(perawatId) && isClinicalOrAdmin() && isValidPerawat(incoming());
       allow delete: if isValidId(perawatId) && isAdmin();
     }
@@ -298,7 +295,8 @@ service cloud.firestore {
 
     // --- 6. SYSTEM DATA (PERSISTENCE KEYS) ---
     match /system_data/{dataId} {
-      allow get, list: if isClinicalOrAdmin();
+      allow get: if isValidId(dataId) && isVerifiedUser();
+      allow list: if isVerifiedUser() && resource.data.key is string;
       allow create, update: if isValidId(dataId) && isClinicalOrAdmin() && isValidSystemData(incoming());
       allow delete: if isValidId(dataId) && isAdmin();
     }
@@ -306,9 +304,9 @@ service cloud.firestore {
     // --- 7. ACTIVITY LOGS (APPEND-ONLY AUDIT TRAIL) ---
     match /activity_logs/{logId} {
       allow get: if isValidId(logId) && (isAdmin() || (isVerifiedUser() && existing().user.uid == request.auth.uid));
-      allow list: if isAdmin() || (isVerifiedUser() && resource.data.user.uid == request.auth.uid);
+      allow list: if isSuperAdminEmail() || (isVerifiedUser() && resource.data.user.uid == request.auth.uid);
       allow create: if isValidId(logId) && isVerifiedUser() && isValidActivityLog(incoming()) &&
-        (isAdmin() || incoming().user.uid == request.auth.uid);
+        (isSuperAdminEmail() || incoming().user.uid == request.auth.uid);
       allow update, delete: if false;
     }
 

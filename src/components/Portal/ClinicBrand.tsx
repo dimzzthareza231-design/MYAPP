@@ -19,7 +19,7 @@ export const ClinicLogoMark: React.FC<ClinicLogoMarkProps> = ({
   const content = (
     <span className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0">
       <BrandLogo
-        alt="MYITARU"
+        alt="Klinik Tarumanagara"
         className={`${compact ? 'w-8 h-8' : 'w-9 h-9'} rounded-xl shadow-xs object-cover border border-slate-200 dark:border-slate-700`}
       />
       <span className="flex flex-col leading-none">
@@ -28,7 +28,8 @@ export const ClinicLogoMark: React.FC<ClinicLogoMarkProps> = ({
             compact ? 'text-base' : 'text-lg sm:text-xl'
           } font-extrabold tracking-tight text-[#0B3D91] dark:text-sky-400`}
         >
-          MYITARU
+          Klinik{' '}
+          <span className="font-semibold text-slate-700 dark:text-slate-200">Tarumanagara</span>
         </span>
         {subtitle && (
           <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">
@@ -73,7 +74,7 @@ export const PublicUtilityBar: React.FC<PublicUtilityBarProps> = ({
             <span className="font-mono tabular-nums font-bold">1-500-911</span>
           </a>
           <span className="hidden sm:inline text-blue-200">
-            MYITARU SIMK · Terintegrasi BPJS VClaim &amp; Kemenkes SatuSehat
+            Klinik Tarumanagara (MYITARU SIMK) · Terintegrasi BPJS VClaim &amp; Kemenkes SatuSehat
           </span>
         </div>
 

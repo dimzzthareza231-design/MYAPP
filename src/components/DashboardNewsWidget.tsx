@@ -1,7 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  HeartPulse, Activity, Syringe, TrendingUp, TrendingDown, RefreshCw, 
-  ShieldCheck, AlertTriangle, Info, BookOpen, ExternalLink, Sparkles, CheckCircle2, X
+import {
+  HeartPulse,
+  Activity,
+  Syringe,
+  TrendingUp,
+  TrendingDown,
+  RefreshCw,
+  ShieldCheck,
+  AlertTriangle,
+  Info,
+  BookOpen,
+  ExternalLink,
+  CheckCircle2,
+  X
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 
@@ -194,7 +205,6 @@ export function DashboardNewsWidget() {
     }
   });
 
-  // Fetch real-time synchronized data from server
   const fetchHealthUpdates = async (showFeedback = false) => {
     setIsSyncing(true);
     try {
@@ -217,7 +227,7 @@ export function DashboardNewsWidget() {
           setCurrentDate(data.lastUpdated);
         }
         if (showFeedback) {
-          toast.success('Data Update Kesehatan 2026 berhasil disinkronkan dengan Kemenkes RI & WHO!');
+          toast.success('Data Update Kesehatan 2026 berhasil disinkronkan dengan Kemenkes RI & WHO.');
         }
       } else {
         throw new Error('Gagal memuat data dari server');
@@ -225,9 +235,17 @@ export function DashboardNewsWidget() {
     } catch (err) {
       console.warn('Using offline cached health metrics 2026:', err);
       const today = new Date();
-      setCurrentDate(today.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + `, ${today.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`);
+      setCurrentDate(
+        today.toLocaleDateString('id-ID', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        }) +
+          `, ${today.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
+      );
       if (showFeedback) {
-        toast.info('Data telah disegarkan dengan basis data epidemiologi 2026 terbaru.');
+        toast.info('Data disegarkan dengan basis data epidemiologi 2026 terbaru.');
       }
     } finally {
       setIsSyncing(false);
@@ -240,116 +258,97 @@ export function DashboardNewsWidget() {
 
   return (
     <>
-      <div className="bg-white/95 dark:bg-[#0B1E36]/90 backdrop-blur-xl rounded-2xl border border-slate-200 dark:border-[#C9A94E]/30 shadow-lg dark:shadow-[0_10px_35px_rgba(11,30,54,0.6)] relative overflow-hidden group hover:border-amber-400 dark:hover:border-[#C9A94E]/60 transition-all duration-300 h-full flex flex-col p-4 sm:p-5">
-        {/* Aksen Garis Emas Atas */}
-        <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-[#0F3B5E] via-[#E5CA78] to-[#C9A94E]"></div>
-        
-        {/* Background Soft Glow */}
-        <div className="absolute -top-12 -right-12 w-32 h-32 bg-[#C9A94E]/10 rounded-full blur-2xl pointer-events-none"></div>
-
+      <div className="bg-white dark:bg-[#111927] rounded-2xl border border-slate-200 dark:border-slate-800 h-full flex flex-col p-5 transition-colors">
         {/* Header Widget */}
-        <div className="flex justify-between items-center mb-3 mt-0.5 relative z-10">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-[#C9A94E]/20 flex items-center justify-center border border-amber-300 dark:border-[#C9A94E]/40">
-              <Activity className="w-4 h-4 text-amber-700 dark:text-[#E5CA78] drop-shadow-sm" /> 
+        <div className="flex justify-between items-start gap-2 pb-3.5 mb-3.5 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#0B3D91] dark:text-sky-400">
+              <Activity className="w-3.5 h-3.5" />
+              <span>Kemenkes RI · BPS · WHO</span>
             </div>
-            <div>
-              <h2 className="text-xs md:text-sm font-black text-slate-900 dark:text-transparent dark:bg-clip-text dark:bg-gradient-to-r dark:from-white dark:to-[#E5CA78] leading-tight">
-                Update Kesehatan 2026
-              </h2>
-              <span className="text-[9px] text-cyan-700 dark:text-cyan-200 font-medium">Kemenkes RI • BPS • WHO</span>
-            </div>
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white mt-0.5 leading-snug">
+              Update Kesehatan 2026
+            </h2>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => fetchHealthUpdates(true)}
-              disabled={isSyncing}
-              title="Sinkronkan data terkini"
-              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-amber-700 dark:text-[#E5CA78] border border-slate-200 dark:border-[#C9A94E]/30 transition-all active:scale-95 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            </button>
-            <span className="inline-flex items-center gap-1 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400"></span>
-              Live Sync
-            </span>
-          </div>
+          <button
+            type="button"
+            onClick={() => fetchHealthUpdates(true)}
+            disabled={isSyncing}
+            title="Sinkronkan data terkini"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 text-[11px] font-semibold transition-colors disabled:opacity-50 shrink-0 cursor-pointer"
+          >
+            <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin text-[#0B3D91] dark:text-sky-400' : ''}`} />
+            <span>Sync</span>
+          </button>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-black/25 rounded-xl border border-slate-200 dark:border-white/5 mb-3 relative z-10">
-          <button
-            onClick={() => setActiveTab('indikator')}
-            className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-bold transition-all text-center ${
-              activeTab === 'indikator'
-                ? 'bg-[#C9A94E] text-[#0B1E36] shadow-sm'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/70 dark:hover:bg-white/5'
-            }`}
-          >
-            Indikator Utama
-          </button>
-          <button
-            onClick={() => setActiveTab('surveilans')}
-            className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-bold transition-all text-center ${
-              activeTab === 'surveilans'
-                ? 'bg-[#C9A94E] text-[#0B1E36] shadow-sm'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/70 dark:hover:bg-white/5'
-            }`}
-          >
-            Surveilans
-          </button>
-          <button
-            onClick={() => setActiveTab('kebijakan')}
-            className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-bold transition-all text-center ${
-              activeTab === 'kebijakan'
-                ? 'bg-[#C9A94E] text-[#0B1E36] shadow-sm'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/70 dark:hover:bg-white/5'
-            }`}
-          >
-            Kebijakan &apos;26
-          </button>
+        {/* Segmented Tab Switcher */}
+        <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 mb-3.5">
+          {[
+            { id: 'indikator', label: 'Indikator' },
+            { id: 'surveilans', label: 'Surveilans' },
+            { id: 'kebijakan', label: "Regulasi '26" }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold transition-colors text-center cursor-pointer whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'bg-white dark:bg-[#111927] text-[#0B3D91] dark:text-sky-400 shadow-xs border border-slate-200/70 dark:border-slate-700'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {/* Content View Based on Active Tab */}
-        <div className="flex flex-col gap-2 flex-1 justify-center relative z-10">
-          
-          {/* TAB 1: INDIKATOR UTAMA KESEHATAN 2026 */}
+        <div className="flex-1 flex flex-col justify-center">
           {activeTab === 'indikator' && (
-            <div className="space-y-2">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/80 border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/40 dark:bg-slate-900/30">
               {metrics.slice(0, 3).map((item) => (
-                <div 
+                <div
                   key={item.id}
-                  className="flex items-center justify-between bg-slate-50 dark:bg-[#08182B]/60 backdrop-blur-md p-2.5 rounded-xl border border-slate-200 dark:border-[#C9A94E]/20 shadow-xs dark:shadow-[0_2px_10px_rgba(0,0,0,0.2)] transition-all hover:bg-amber-50/40 dark:hover:bg-white/[0.08] hover:border-amber-300 dark:hover:border-[#C9A94E]/40"
+                  className="flex items-center justify-between px-3 py-2.5 bg-white dark:bg-transparent hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors gap-2"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-lg bg-cyan-50 dark:bg-cyan-500/15 flex items-center justify-center text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/30 shrink-0">
-                      {item.id === 'ahh' && <HeartPulse className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400" />}
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0">
+                      {item.id === 'ahh' && <HeartPulse className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />}
                       {item.id === 'uhc' && <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
+                      {item.id === 'stunting' && <Activity className="w-3.5 h-3.5 text-[#0B3D91] dark:text-sky-400" />}
                       {item.id === 'dbd' && <Activity className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
-                      {item.id === 'imunisasi' && <Syringe className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />}
+                      {item.id === 'imunisasi' && <Syringe className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />}
+                      {item.id === 'ckg' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
                     </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 leading-tight">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 truncate leading-tight">
                         {item.title}
-                      </span>
+                      </p>
                       <div className="flex items-baseline gap-1 mt-0.5">
-                        <span className="text-xs md:text-sm font-black text-slate-900 dark:text-white leading-tight">
+                        <span className="text-sm font-extrabold text-slate-900 dark:text-white font-mono tabular-nums">
                           {item.value}
                         </span>
-                        {item.unit && <span className="text-[9px] text-slate-500 dark:text-slate-400 font-medium">{item.unit}</span>}
-                        {item.subtext && <span className="text-[8px] text-cyan-700 dark:text-cyan-300/80">({item.subtext})</span>}
+                        {item.unit && (
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400">{item.unit}</span>
+                        )}
                       </div>
                     </div>
                   </div>
-                  <span className={`text-[9px] font-black flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border ${
-                    item.trend === 'up' && item.id !== 'dbd'
-                      ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30'
-                      : item.id === 'dbd' && item.trend === 'down'
-                        ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30'
-                        : 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30'
-                  }`}>
-                    {item.trend === 'up' ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                  <span
+                    className={`text-[10px] font-bold font-mono tabular-nums inline-flex items-center gap-0.5 shrink-0 ${
+                      item.trend === 'up' || item.id === 'stunting' || item.id === 'dbd'
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-amber-700 dark:text-amber-400'
+                    }`}
+                  >
+                    {item.trend === 'up' ? (
+                      <TrendingUp className="w-3 h-3" />
+                    ) : (
+                      <TrendingDown className="w-3 h-3" />
+                    )}
                     {item.change}
                   </span>
                 </div>
@@ -357,30 +356,21 @@ export function DashboardNewsWidget() {
             </div>
           )}
 
-          {/* TAB 2: SURVEILANS EPIDEMIOLOGI */}
           {activeTab === 'surveilans' && (
-            <div className="space-y-1.5">
-              {alerts.map((alt, idx) => (
-                <div 
-                  key={idx}
-                  className="bg-slate-50 dark:bg-[#08182B]/60 p-2 rounded-xl border border-slate-200 dark:border-[#C9A94E]/20"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-900 dark:text-white flex items-center gap-1">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/80 border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/40 dark:bg-slate-900/30">
+              {alerts.slice(0, 3).map((alt, idx) => (
+                <div key={idx} className="p-2.5 bg-white dark:bg-transparent">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-900 dark:text-white inline-flex items-center gap-1.5 truncate">
                       {alt.level === 'Warning' ? (
-                        <AlertTriangle className="w-3 h-3 text-amber-500 dark:text-amber-400" />
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                       ) : (
-                        <Info className="w-3 h-3 text-cyan-600 dark:text-cyan-400" />
+                        <Info className="w-3.5 h-3.5 text-[#0B3D91] dark:text-sky-400 shrink-0" />
                       )}
-                      {alt.disease}
-                    </span>
-                    <span className={`text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ${
-                      alt.level === 'Warning' ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300' : 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300'
-                    }`}>
-                      {alt.status}
+                      <span className="truncate">{alt.disease}</span>
                     </span>
                   </div>
-                  <p className="text-[9px] text-slate-600 dark:text-slate-300 mt-1 line-clamp-1">
+                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 line-clamp-1">
                     {alt.action}
                   </p>
                 </div>
@@ -388,113 +378,115 @@ export function DashboardNewsWidget() {
             </div>
           )}
 
-          {/* TAB 3: KEBIJAKAN & REGULASI 2026 */}
           {activeTab === 'kebijakan' && (
-            <div className="space-y-1.5">
-              {policies.map((pol, idx) => (
-                <div 
-                  key={idx}
-                  className="bg-slate-50 dark:bg-[#08182B]/60 p-2 rounded-xl border border-slate-200 dark:border-[#C9A94E]/20"
-                >
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 dark:text-[#E5CA78]">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/80 border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/40 dark:bg-slate-900/30">
+              {policies.slice(0, 3).map((pol, idx) => (
+                <div key={idx} className="p-2.5 bg-white dark:bg-transparent">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-900 dark:text-white">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     <span className="line-clamp-1">{pol.title}</span>
                   </div>
-                  <p className="text-[9px] text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-1">
+                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5 line-clamp-1 pl-5">
                     {pol.desc}
                   </p>
                 </div>
               ))}
             </div>
           )}
-
         </div>
 
-        {/* Footer & Action Button */}
-        <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-white/10 flex items-center justify-between relative z-10 text-[9px] text-slate-500 dark:text-slate-400">
-          <span className="truncate pr-2">
-            Diperbarui: {currentDate}
-          </span>
+        {/* Footer */}
+        <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+          <span className="truncate pr-2 font-mono">{currentDate}</span>
           <button
+            type="button"
             onClick={() => setShowDetailModal(true)}
-            className="text-amber-700 dark:text-[#E5CA78] hover:text-amber-900 dark:hover:text-white font-bold inline-flex items-center gap-0.5 shrink-0 transition-colors"
+            className="text-[#0B3D91] dark:text-sky-400 hover:underline font-bold inline-flex items-center gap-1 shrink-0 cursor-pointer"
           >
-            Lengkap <ExternalLink className="w-2.5 h-2.5" />
+            <span>Laporan</span>
+            <ExternalLink className="w-3 h-3" />
           </button>
         </div>
       </div>
 
-      {/* DETAIL MODAL: LAPORAN KESEHATAN 2026 */}
+      {/* Detail Modal */}
       {showDetailModal && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white dark:bg-[#0B1E36] border border-slate-200 dark:border-[#C9A94E]/40 rounded-3xl p-6 max-w-2xl w-full text-slate-900 dark:text-white shadow-2xl relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            {/* Top decorative line */}
-            <div className="absolute top-0 left-0 w-full h-[4px] bg-gradient-to-r from-cyan-500 via-[#E5CA78] to-[#C9A94E]"></div>
-
-            <div className="flex justify-between items-start mb-4">
+        <div
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+          onClick={() => setShowDetailModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-[#111927] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-2xl w-full text-slate-900 dark:text-white shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar"
+          >
+            <div className="flex justify-between items-start gap-4 pb-4 mb-5 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-[#C9A94E]/20 flex items-center justify-center border border-amber-300 dark:border-[#C9A94E]/40 text-amber-700 dark:text-[#E5CA78]">
-                  <Activity className="w-6 h-6" />
+                <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-sky-950/60 border border-blue-200 dark:border-sky-800 flex items-center justify-center text-[#0B3D91] dark:text-sky-400">
+                  <Activity className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    Laporan Resmi Indikator Kesehatan Indonesia 2026
-                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-100 dark:bg-[#C9A94E]/20 text-amber-800 dark:text-[#E5CA78] border border-amber-300 dark:border-[#C9A94E]/30 uppercase">
-                      Tersinkronisasi
-                    </span>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Laporan Indikator Kesehatan Indonesia 2026
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Sumber Data Terpadu: Kementerian Kesehatan RI, Badan Pusat Statistik (BPS), &amp; BPJS Kesehatan
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Kementerian Kesehatan RI, BPS, &amp; BPJS Kesehatan
                   </p>
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={() => setShowDetailModal(false)}
-                className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-slate-600 dark:text-slate-300 transition-colors"
+                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Metrics Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
               {metrics.map((m) => (
-                <div key={m.id} className="bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-[#C9A94E]/20 rounded-2xl p-4">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs text-slate-600 dark:text-slate-300 font-semibold">{m.title}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-md font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30">
+                <div
+                  key={m.id}
+                  className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4"
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <span className="text-xs text-slate-600 dark:text-slate-300 font-semibold">
+                      {m.title}
+                    </span>
+                    <span className="text-[11px] font-mono font-bold text-emerald-700 dark:text-emerald-400">
                       {m.change}
                     </span>
                   </div>
-                  <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-                    {m.value} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">{m.unit}</span>
+                  <div className="text-2xl font-extrabold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
+                    {m.value}{' '}
+                    <span className="text-xs font-sans font-normal text-slate-500 dark:text-slate-400">
+                      {m.unit}
+                    </span>
                   </div>
-                  <div className="text-[10px] text-cyan-700 dark:text-cyan-300 font-medium mt-1">
-                    Status: {m.status}
+                  <div className="text-[11px] text-[#0B3D91] dark:text-sky-400 font-medium mt-1">
+                    {m.status}
                   </div>
-                  <div className="text-[9px] text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-white/5">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800">
                     Sumber: {m.source}
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* Surveillance & Policies */}
             <div className="space-y-4 mb-5">
-              <div className="bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-4">
-                <h4 className="text-xs font-bold text-amber-700 dark:text-[#E5CA78] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 dark:text-amber-400" />
-                  Surveilans Epidemiologi Prioritas 2026
+              <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <span>Surveilans Epidemiologi Prioritas 2026</span>
                 </h4>
-                <div className="space-y-2 text-xs">
+                <div className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                   {alerts.map((a, i) => (
-                    <div key={i} className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/5 last:border-0">
+                    <div key={i} className="flex justify-between items-center py-2 gap-3">
                       <div>
                         <span className="font-semibold text-slate-900 dark:text-white">{a.disease}:</span>{' '}
                         <span className="text-slate-600 dark:text-slate-300">{a.action}</span>
                       </div>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 font-bold shrink-0 ml-2">
+                      <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 shrink-0">
                         {a.status}
                       </span>
                     </div>
@@ -502,38 +494,39 @@ export function DashboardNewsWidget() {
                 </div>
               </div>
 
-              <div className="bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-4">
-                <h4 className="text-xs font-bold text-amber-700 dark:text-[#E5CA78] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <BookOpen className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                  Regulasi &amp; Transformasi Digital Faskes 2026
+              <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-[#0B3D91] dark:text-sky-400" />
+                  <span>Regulasi &amp; Transformasi Digital Faskes 2026</span>
                 </h4>
-                <div className="space-y-2 text-xs">
+                <div className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                   {policies.map((p, i) => (
-                    <div key={i} className="py-1 border-b border-slate-200 dark:border-white/5 last:border-0">
+                    <div key={i} className="py-2">
                       <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                        {p.title}
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span>{p.title}</span>
                       </div>
-                      <p className="text-slate-600 dark:text-slate-300 text-[11px] ml-5">{p.desc}</p>
+                      <p className="text-slate-600 dark:text-slate-300 text-[11px] pl-5 mt-0.5">{p.desc}</p>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* Footer modal */}
-            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t border-slate-200 dark:border-white/10">
-              <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                Pembaruan Sistem: {currentDate} • Terkoneksi API SIMK MYITARU
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+              <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                Pembaruan Sistem: {currentDate}
               </span>
               <button
+                type="button"
                 onClick={() => {
                   fetchHealthUpdates(true);
                   setShowDetailModal(false);
                 }}
-                className="px-4 py-2 bg-gradient-to-r from-[#C9A94E] to-[#E5CA78] text-[#0B1E36] font-black text-xs rounded-xl hover:opacity-90 transition-opacity flex items-center gap-1.5"
+                className="px-4 py-2 bg-[#0B3D91] hover:bg-[#082D6E] dark:bg-sky-500 dark:hover:bg-sky-400 text-white dark:text-slate-950 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Sinkronkan Ulang Sekarang
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Sinkronkan Ulang</span>
               </button>
             </div>
           </div>

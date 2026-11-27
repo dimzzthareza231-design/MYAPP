@@ -53,8 +53,6 @@ export const MODULE_REGISTRY = [
         { label: 'Dokter Rawat Jalan', cols: 'pegawai', source: 'db_dokter' },
         { label: 'Patient Flow', cols: 'antrian' }
       ] },
-    { id: 'patient-flow', label: 'Alur Pasien', icon: '🔄', color: 'from-cyan-500 to-blue-600', SPECIAL: true,
-      submenus: [] },
     { id: 'rawat-inap', label: 'Rawat Inap', icon: '🛏️', color: 'from-indigo-500 to-indigo-600', SPECIAL: true,
       submenus: [{ label: 'Admisi', cols: 'pasien' }, { label: 'Ketersediaan Bed', cols: 'bed' }, { label: 'Visite', cols: 'pasien' }, { label: 'Asuhan Keperawatan', cols: 'dokumen' }, { label: 'Discharge Planning', cols: 'dokumen' }, { label: 'Dokter Ranap', cols: 'pegawai' }] },
     { id: 'operasi', label: 'Operasi', icon: '⚡', color: 'from-rose-500 to-rose-600', SPECIAL: true,
@@ -172,6 +170,73 @@ export const MODULE_REGISTRY = [
     { id: 'monitoring', label: 'Monitoring', icon: '📡', color: 'from-cyan-500 to-cyan-600', submenus: [{ label: 'Logs', cols: 'dokumen' }] }
   ]}
 ];
+
+export type FacilityMode = 'klinik' | 'rumah_sakit';
+
+export const HOSPITAL_ONLY_MODULES = new Set<string>([
+  'rawat-inap',
+  'ranap',
+  'rawatinap',
+  'bangsal',
+  'bed',
+  'operasi',
+  'kamar-operasi',
+  'ok',
+  'radiologi',
+  'rad',
+  'pacs',
+  'orthanc',
+  'dicom',
+  'orthanc-pacs',
+  'icu',
+  'gizi',
+  'cssd',
+  'multi-branch',
+  'apotek-ranap',
+  'farmasi-ranap',
+  'bpjs-klaim',
+  'bpjs',
+  'klaim',
+  'inacbg',
+  'ina-cbg',
+  'vclaim',
+  'v-claim',
+  'vedika',
+  'bpjs-emr',
+  'hfis',
+  'veronisa'
+]);
+
+const HOSPITAL_ONLY_SUBMENUS: Record<string, string[]> = {
+  kasir: ['billing ranap'],
+  mutu: ['cssd'],
+  laboratorium: ['bank darah'],
+  laporan: ['laporan bpjs'],
+  'bridging-hub': ['bpjs kesehatan']
+};
+
+export const isModuleAllowedInFacilityMode = (
+  moduleId: string,
+  mode: FacilityMode
+): boolean => {
+  if (mode === 'rumah_sakit') return true;
+  const normalized = (moduleId || '').trim().toLowerCase().replace(/^\/+|\/+$/g, '');
+  if (!normalized) return true;
+  return !HOSPITAL_ONLY_MODULES.has(normalized);
+};
+
+export const isSubmenuAllowedInFacilityMode = (
+  moduleId: string,
+  submenuLabel: string,
+  mode: FacilityMode
+): boolean => {
+  if (mode === 'rumah_sakit') return true;
+  const modKey = (moduleId || '').trim().toLowerCase();
+  const blockedKeywords = HOSPITAL_ONLY_SUBMENUS[modKey];
+  if (!blockedKeywords) return true;
+  const normalizedLabel = (submenuLabel || '').trim().toLowerCase();
+  return !blockedKeywords.some((kw) => normalizedLabel.includes(kw));
+};
 
 export const findModule = (id: string) => {
   for (const cat of MODULE_REGISTRY) {

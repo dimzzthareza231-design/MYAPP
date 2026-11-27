@@ -341,7 +341,7 @@ export function logAIAttempt(params: {
   return logActivity({
     category: 'ai',
     action: params.action,
-    target: `gemini-2.5-flash/${params.module}`,
+    target: `gemini-4-hydrogen/${params.module}`,
     status: params.status,
     user: {
       uid: auth?.currentUser?.uid,

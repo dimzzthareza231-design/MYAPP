@@ -221,7 +221,7 @@ export function RekapShiftKasirTab({
             <div className="bg-white/5 backdrop-blur-sm p-4 rounded-xl border border-white/10">
               <span className="text-xs text-slate-400 block">Penerimaan Non-Tunai (EDC/QRIS):</span>
               <strong className="text-lg font-bold text-blue-300 block mt-1">
-                Rp {(activeShift.statusShift === 'Aktif' ? liveNonTunai : (activeShift.totalPenerimaanNonTunai ?? (activeShift.totalQRIS + activeShift.totalEDC + activeShift.totalTransfer))).toLocaleString('id-ID')}
+                Rp {(activeShift.statusShift === 'Aktif' ? liveNonTunai : (activeShift.totalPenerimaanNonTunai ?? (activeShift.totalQRIS + activeShift.totalEDC + activeShift.totalTransfer) ?? 0)).toLocaleString('id-ID')}
               </strong>
             </div>
 
@@ -300,7 +300,7 @@ export function RekapShiftKasirTab({
                     Rp {(s.totalPenerimaanTunai ?? s.totalTunai ?? 0).toLocaleString('id-ID')}
                   </td>
                   <td className="p-3.5 text-right text-blue-600 dark:text-blue-400">
-                    Rp {(s.totalPenerimaanNonTunai ?? (s.totalQRIS + s.totalEDC + s.totalTransfer)).toLocaleString('id-ID')}
+                    Rp {(s.totalPenerimaanNonTunai ?? (s.totalQRIS + s.totalEDC + s.totalTransfer) ?? 0).toLocaleString('id-ID')}
                   </td>
                   <td className="p-3.5 text-right font-bold text-slate-900 dark:text-white">
                     Rp {(s.totalPenerimaanKeseluruhan ?? s.totalPenerimaan ?? 0).toLocaleString('id-ID')}

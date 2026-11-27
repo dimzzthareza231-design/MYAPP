@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { Users, Plus, Edit2, Trash2, Shield, Eye, EyeOff, X, Save, UserCheck, KeyRound } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
-import { ROLES, getRoleById } from '../../data/roles';
-import { isLocalAuthMode } from '../../lib/firebase';
+import { ROLES, getRoleById, getCustomPermissions } from '../../data/roles';
 
 export function UserManagement() {
   const { users, currentUser, addUser, updateUser, deleteUser } = useAuth();
@@ -22,13 +21,13 @@ export function UserManagement() {
 
   const openEditModal = (user: any) => {
     setEditingUser(user);
-    setFormData({ nama: user.nama, username: user.username, password: '', email: user.email, roleId: user.roleId, aktif: user.aktif });
+    setFormData({ nama: user.nama, username: user.username, password: user.password, email: user.email, roleId: user.roleId, aktif: user.aktif });
     setShowModal(true);
   };
 
-  const handleSave = async () => {
-    if (!formData.nama.trim() || !formData.username.trim() || !formData.email.trim() || (!editingUser && !formData.password)) {
-      toast.error('Nama, username, email, dan password akun baru wajib diisi');
+  const handleSave = () => {
+    if (!formData.nama || !formData.username || !formData.password) {
+      toast.error('Nama, username, dan password wajib diisi');
       return;
     }
 
@@ -39,50 +38,32 @@ export function UserManagement() {
       return;
     }
 
-    try {
-      if (editingUser) {
-        await updateUser(editingUser.id, {
-          nama: formData.nama,
-          email: formData.email,
-          roleId: formData.roleId,
-          aktif: formData.aktif,
-          password: formData.password || undefined
-        });
-        toast.success('User berhasil diupdate');
-      } else {
-        await addUser(formData);
-        toast.success('User baru berhasil ditambahkan');
-      }
-      setShowModal(false);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Perubahan pengguna gagal disimpan.');
+    if (editingUser) {
+      updateUser(editingUser.id, formData);
+      toast.success('User berhasil diupdate');
+    } else {
+      addUser(formData);
+      toast.success('User baru berhasil ditambahkan');
     }
+    setShowModal(false);
   };
 
-  const handleDelete = async (user: any) => {
+  const handleDelete = (user: any) => {
     if (user.id === currentUser?.id) {
       toast.error('Tidak bisa menghapus akun sendiri');
       return;
     }
-    try {
-      await deleteUser(user.id);
-      toast.success(`User ${user.nama} berhasil dihapus`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Pengguna gagal dihapus.');
-    }
+    deleteUser(user.id);
+    toast.success(`User ${user.nama} berhasil dihapus`);
   };
 
-  const toggleAktif = async (user: any) => {
+  const toggleAktif = (user: any) => {
     if (user.id === currentUser?.id) {
       toast.error('Tidak bisa menonaktifkan akun sendiri');
       return;
     }
-    try {
-      await updateUser(user.id, { aktif: !user.aktif });
-      toast.success(user.aktif ? 'User dinonaktifkan' : 'User diaktifkan');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Status pengguna gagal diubah.');
-    }
+    updateUser(user.id, { aktif: !user.aktif });
+    toast.success(user.aktif ? 'User dinonaktifkan' : 'User diaktifkan');
   };
 
   return (
@@ -131,7 +112,7 @@ export function UserManagement() {
                   <td className="p-4 text-slate-600 dark:text-slate-400">{user.email}</td>
                   <td className="p-4">
                     <button
-                      onClick={() => void toggleAktif(user)}
+                      onClick={() => toggleAktif(user)}
                       className={`px-2 py-1 rounded-full text-xs font-bold transition-colors ${
                         user.aktif
                           ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
@@ -146,7 +127,7 @@ export function UserManagement() {
                       <button onClick={() => openEditModal(user)} className="p-1.5 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => void handleDelete(user)} className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded">
+                      <button onClick={() => handleDelete(user)} className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -172,7 +153,7 @@ export function UserManagement() {
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{role.deskripsi}</p>
               <div className="text-xs text-blue-600 dark:text-blue-400 font-bold">
-                {role.id === 'super_admin' ? 'Seluruh Modul (Akses Penuh)' : `${role.moduleAccess.length} modul diakses`}
+                {role.id === 'super_admin' ? 'Seluruh Modul (Akses Penuh)' : `${(getCustomPermissions()[role.id] || role.moduleAccess).length} modul diakses`}
               </div>
             </div>
           ))}
@@ -249,7 +230,6 @@ export function UserManagement() {
                     type="text" 
                     value={formData.username} 
                     onChange={(e) => setFormData({...formData, username: e.target.value})}
-                    disabled={isLocalAuthMode && Boolean(editingUser)}
                     placeholder="dr_budi"
                     className="w-full p-2.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs sm:text-sm bg-slate-50 dark:bg-slate-950/70 text-slate-900 dark:text-white font-mono focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" 
                   />
@@ -257,14 +237,14 @@ export function UserManagement() {
 
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
-                    Password {editingUser ? '(opsional)' : <span className="text-rose-500">*</span>}
+                    Password <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <input 
                       type={showPassword ? 'text' : 'password'} 
                       value={formData.password} 
                       onChange={(e) => setFormData({...formData, password: e.target.value})}
-                      placeholder={editingUser ? 'Kosongkan jika tidak diganti' : 'Min. 12 karakter, huruf besar/kecil, angka, simbol'}
+                      placeholder="••••••••"
                       className="w-full p-2.5 pr-9 border border-slate-300 dark:border-slate-700 rounded-xl text-xs sm:text-sm bg-slate-50 dark:bg-slate-950/70 text-slate-900 dark:text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" 
                     />
                     <button 

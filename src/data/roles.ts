@@ -11,30 +11,11 @@ export interface Role {
 // Modul yang bisa diakses SEMUA role (Self-service & Bantuan)
 export const COMMON_MODULES = ['profile', 'notifikasi', 'panduan', 'dashboard', 'blueprint'];
 
-// Semua modul aplikasi inti (dipakai super_admin, admin, dan viewer read-only)
-export const ALL_MODULES = [
-  'rekam-medis', 'pendaftaran', 'igd', 'rawat-jalan', 'rawat-inap', 'operasi', 'laboratorium', 'radiologi',
-  'triase', 'icu', 'cssd', 'rehab', 'telemedicine', 'gizi',
-  'sdm', 'inventory', 'mutu', 'patient-flow',
-  'apotek-ralan', 'apotek-ranap', 'stok-obat',
-  'kasir', 'bpjs-klaim', 'laporan',
-  'bridging-hub', 'wa-gateway', 'anjungan', 'api', 'jkn-mobile', 'vclaim', 'vedika', 'orthanc', 'bpjs-emr', 'hfis', 'veronisa', 'satu-sehat', 'sertisign', 'cloudflare',
-  'pengaturan-klinik', 'security', 'audit', 'backup', 'monitoring',
-  ...COMMON_MODULES
-];
-
-// Scope server 'data-pasien' (baca daftar pasien & janji temu) diberikan ke role yang memegang salah satu modul layanan pasien ini.
-export const PATIENT_DATA_MODULES = [
-  'pendaftaran', 'rekam-medis', 'igd', 'rawat-jalan', 'rawat-inap', 'operasi', 'triase', 'icu',
-  'laboratorium', 'radiologi', 'apotek-ralan', 'apotek-ranap', 'kasir', 'bpjs-klaim', 'gizi', 'rehab', 'telemedicine', 'patient-flow'
-];
-
 // Alias mapping agar backward compatibility dengan route lama / nama alternatif tetap bekerja sempurna
 export const MODULE_ALIASES: Record<string, string[]> = {
   'rekam-medis': ['master-data', 'rme', 'rekammedis'],
-  'pendaftaran': ['registrasi', 'admisi', 'pasien-baru', 'crm', 'patient-portal', 'display-antrian'],
+  'pendaftaran': ['registrasi', 'admisi', 'pasien-baru'],
   'rawat-jalan': ['poli', 'poliklinik', 'rawatjalan'],
-  'patient-flow': ['rawat-jalan', 'poli'],
   'rawat-inap': ['bangsal', 'ranap', 'rawatinap', 'bed'],
   'laboratorium': ['lab', 'lis'],
   'radiologi': ['rad', 'pacs'],
@@ -48,7 +29,7 @@ export const MODULE_ALIASES: Record<string, string[]> = {
   'sdm': ['pegawai', 'hrd', 'staff'],
   'inventory': ['gudang', 'logistik'],
   'mutu': ['patient-safety', 'safety', 'komite-mutu'],
-  'pengaturan-klinik': ['settings', 'pengaturan', 'multi-branch'],
+  'pengaturan-klinik': ['settings', 'pengaturan'],
   'apotek-ralan': ['farmasi-ralan'],
   'apotek-ranap': ['farmasi-ranap'],
   'stok-obat': ['farmasi-stok', 'obat'],
@@ -63,7 +44,16 @@ export const ROLES: Role[] = [
     warna: 'from-gray-400 to-gray-500',
     deskripsi: 'Akses read-only ke seluruh modul operasional dan medis (hanya melihat, tidak dapat mengubah data).',
     kategori: 'Sistem',
-    moduleAccess: ALL_MODULES
+    moduleAccess: [
+      'rekam-medis', 'pendaftaran', 'igd', 'rawat-jalan', 'rawat-inap', 'operasi', 'laboratorium', 'radiologi',
+      'triase', 'icu', 'cssd', 'rehab', 'telemedicine', 'gizi',
+      'sdm', 'inventory', 'mutu', 'patient-flow',
+      'apotek-ralan', 'apotek-ranap', 'stok-obat',
+      'kasir', 'bpjs-klaim', 'laporan',
+      'bridging-hub', 'wa-gateway', 'anjungan', 'api', 'jkn-mobile', 'vclaim', 'vedika', 'orthanc', 'bpjs-emr', 'hfis', 'veronisa', 'satu-sehat', 'sertisign', 'cloudflare',
+      'pengaturan-klinik', 'security', 'audit', 'backup', 'monitoring',
+      ...COMMON_MODULES
+    ]
   },
   {
     id: 'super_admin',
@@ -72,16 +62,31 @@ export const ROLES: Role[] = [
     warna: 'from-purple-500 to-pink-600',
     deskripsi: 'Akses penuh ke semua modul klinis, bridging, keuangan, keamanan, dan infrastruktur sistem tanpa batas.',
     kategori: 'Sistem',
-    moduleAccess: ALL_MODULES
+    moduleAccess: [
+      'rekam-medis', 'pendaftaran', 'igd', 'rawat-jalan', 'rawat-inap', 'operasi', 'laboratorium', 'radiologi',
+      'triase', 'icu', 'cssd', 'rehab', 'telemedicine', 'gizi', 'multi-branch',
+      'sdm', 'inventory', 'mutu', 'patient-flow',
+      'apotek-ralan', 'apotek-ranap', 'stok-obat',
+      'kasir', 'bpjs-klaim', 'laporan',
+      'bridging-hub', 'wa-gateway', 'anjungan', 'api', 'jkn-mobile', 'vclaim', 'vedika', 'orthanc', 'bpjs-emr', 'hfis', 'veronisa', 'satu-sehat', 'sertisign', 'cloudflare',
+      'pengaturan-klinik', 'security', 'audit', 'backup', 'monitoring',
+      ...COMMON_MODULES
+    ]
   },
   {
     id: 'admin',
     nama: 'Administrator SIMK',
     icon: '🔧',
     warna: 'from-slate-500 to-slate-700',
-    deskripsi: 'Akses ke seluruh modul aplikasi inti: klinis, penunjang, farmasi, keuangan, bridging, SDM, keamanan, dan infrastruktur.',
+    deskripsi: 'Pengelolaan manajerial tingkat lanjut untuk master data, SDM, inventori, laporan dan bridging sistem.',
     kategori: 'Sistem',
-    moduleAccess: ALL_MODULES
+    moduleAccess: [
+      'rekam-medis', 'pendaftaran', 'sdm', 'inventory', 'mutu', 'laporan', 'patient-flow', 'multi-branch',
+      'apotek-ralan', 'apotek-ranap', 'stok-obat', 'kasir', 'bpjs-klaim',
+      'bridging-hub', 'wa-gateway', 'anjungan', 'api', 'jkn-mobile', 'vclaim', 'vedika', 'orthanc', 'bpjs-emr', 'hfis', 'veronisa', 'satu-sehat', 'sertisign',
+      'pengaturan-klinik', 'security', 'audit', 'backup', 'monitoring',
+      ...COMMON_MODULES
+    ]
   },
   {
     id: 'direksi',
@@ -91,7 +96,7 @@ export const ROLES: Role[] = [
     deskripsi: 'Akses executive dashboard tingkat tinggi untuk analitik operasional, KPI, dan laporan mutu layanan.',
     kategori: 'Manajemen',
     moduleAccess: [
-      'laporan', 'mutu', 'sdm', 'inventory', 'kasir', 'bpjs-klaim', 'patient-flow', 'monitoring', 'audit',
+      'laporan', 'mutu', 'sdm', 'inventory', 'kasir', 'bpjs-klaim', 'patient-flow', 'monitoring', 'audit', 'multi-branch',
       'rekam-medis', 'rawat-jalan', 'rawat-inap', 'igd', 'bridging-hub', 'hfis',
       ...COMMON_MODULES
     ]
@@ -101,11 +106,14 @@ export const ROLES: Role[] = [
     nama: 'Dokter / DPJP',
     icon: '👨‍⚕️',
     warna: 'from-blue-500 to-cyan-600',
-    deskripsi: 'Layanan medis: rekam medis/EMR, rawat jalan, rawat inap, IGD, ICU, operasi, triase, order dan hasil lab/radiologi, telemedicine.',
+    deskripsi: 'Kewenangan klinis penuh untuk penulisan EMR, diagnosis ICD, asuhan medis, e-resep, dan validasi medis.',
     kategori: 'Medis',
     moduleAccess: [
-      'rekam-medis', 'rawat-jalan', 'rawat-inap', 'igd', 'icu', 'operasi', 'triase',
-      'laboratorium', 'radiologi', 'orthanc', 'telemedicine', 'rehab', 'gizi', 'patient-flow',
+      'rekam-medis', 'rawat-jalan', 'igd', 'rawat-inap', 'operasi', 'triase',
+      'laboratorium', 'radiologi', 'orthanc', 'cssd',
+      'apotek-ralan', 'stok-obat',
+      'vclaim', 'bpjs-emr', 'satu-sehat', 'telemedicine', 'rehab', 'gizi', 'icu',
+      'patient-flow', 'mutu', 'laporan',
       ...COMMON_MODULES
     ]
   },
@@ -114,10 +122,12 @@ export const ROLES: Role[] = [
     nama: 'Perawat',
     icon: '👩‍⚕️',
     warna: 'from-emerald-500 to-teal-600',
-    deskripsi: 'Asuhan keperawatan: triase, IGD, rawat jalan, rawat inap, ICU, kamar operasi, CSSD, gizi pasien, dan dokumentasi askep di rekam medis.',
+    deskripsi: 'Fokus pada asuhan keperawatan, triase gawat darurat, observasi vital sign, dan manajemen antrian pasien.',
     kategori: 'Medis',
     moduleAccess: [
-      'triase', 'igd', 'rawat-jalan', 'rawat-inap', 'icu', 'operasi', 'cssd', 'gizi', 'rekam-medis', 'patient-flow',
+      'igd', 'rawat-inap', 'rawat-jalan', 'triase', 'rekam-medis', 'icu', 'cssd', 'operasi',
+      'apotek-ranap', 'stok-obat',
+      'pendaftaran', 'patient-flow', 'gizi', 'sdm', 'satu-sehat',
       ...COMMON_MODULES
     ]
   },
@@ -138,10 +148,10 @@ export const ROLES: Role[] = [
     nama: 'Apoteker & Farmasi',
     icon: '💊',
     warna: 'from-purple-500 to-pink-600',
-    deskripsi: 'Farmasi: resep dan dispensing rawat jalan/rawat inap, stok obat multi-depo, dan gudang logistik obat.',
+    deskripsi: 'Manajemen peresepan elektronik (e-prescription), dispensing obat, stok multi-depo, dan logistik obat.',
     kategori: 'Penunjang',
     moduleAccess: [
-      'apotek-ralan', 'apotek-ranap', 'stok-obat', 'inventory',
+      'apotek-ralan', 'apotek-ranap', 'stok-obat', 'inventory', 'satu-sehat',
       ...COMMON_MODULES
     ]
   },
@@ -150,10 +160,10 @@ export const ROLES: Role[] = [
     nama: 'Kasir & Keuangan',
     icon: '💰',
     warna: 'from-amber-500 to-orange-600',
-    deskripsi: 'Keuangan: billing, pembayaran, kuitansi, klaim BPJS/INA-CBGs, dan verifikasi klaim (Vedika, Veronisa).',
+    deskripsi: 'Sentralisasi sistem tagihan (billing), pembayaran non-tunai, kwitansi, dan klaim asuransi/BPJS (INA-CBGs).',
     kategori: 'Administrasi',
     moduleAccess: [
-      'kasir', 'bpjs-klaim', 'vedika', 'veronisa',
+      'kasir', 'bpjs-klaim', 'vclaim', 'vedika', 'veronisa', 'laporan', 'api',
       ...COMMON_MODULES
     ]
   },
@@ -174,10 +184,12 @@ export const ROLES: Role[] = [
     nama: 'Petugas RMIK',
     icon: '🗂️',
     warna: 'from-blue-600 to-indigo-700',
-    deskripsi: 'Rekam medis: registrasi dan master pasien, berkas EMR, koding ICD, e-klaim BPJS, SatuSehat, tanda tangan elektronik, dan pelaporan RL.',
+    deskripsi: 'Pengelolaan berkas EMR (Rekam Medis Elektronik), koding ICD, audit RL Kemenkes, dan pengiriman SatuSehat.',
     kategori: 'Administrasi',
     moduleAccess: [
-      'rekam-medis', 'pendaftaran', 'patient-flow', 'bpjs-emr', 'satu-sehat', 'sertisign', 'vedika', 'laporan',
+      'rekam-medis', 'pendaftaran', 'igd', 'rawat-jalan', 'rawat-inap', 'operasi',
+      'laboratorium', 'radiologi', 'orthanc', 'bpjs-klaim', 'vclaim', 'vedika', 'bpjs-emr',
+      'satu-sehat', 'sertisign', 'mutu', 'laporan', 'patient-flow', 'hfis', 'veronisa',
       ...COMMON_MODULES
     ]
   },
@@ -186,10 +198,10 @@ export const ROLES: Role[] = [
     nama: 'Analis Laboratorium',
     icon: '🔬',
     warna: 'from-red-500 to-rose-600',
-    deskripsi: 'Laboratorium: order dan pemeriksaan spesimen (LIS), nilai kritis, quality control, dan hasil lab.',
+    deskripsi: 'Pemeriksaan spesimen Lab (LIS), pemrosesan nilai kritis, quality control, dan bridging LOINC.',
     kategori: 'Penunjang',
     moduleAccess: [
-      'laboratorium',
+      'laboratorium', 'satu-sehat', 'bridging-hub', 'rekam-medis',
       ...COMMON_MODULES
     ]
   },
@@ -260,22 +272,48 @@ export const getRoleById = (roleId: string): Role | undefined => {
   return ROLES.find(r => r.id === roleId);
 };
 
+// Helper: dapatkan custom permission override dari localStorage jika ada
+export const getCustomPermissions = (): Record<string, string[]> => {
+  try {
+    const saved = localStorage.getItem('simrs_role_custom_permissions');
+    return saved ? JSON.parse(saved) : {};
+  } catch (e) {
+    console.warn('Error reading custom role permissions:', e);
+    return {};
+  }
+};
+
+// Helper: simpan custom permission override ke localStorage
+export const saveCustomPermissions = (permissions: Record<string, string[]>) => {
+  try {
+    localStorage.setItem('simrs_role_custom_permissions', JSON.stringify(permissions));
+  } catch (e) {
+    console.warn('Error saving custom role permissions:', e);
+  }
+};
+
 // Helper: cek apakah role memiliki akses ke modul tertentu
 export const hasModuleAccess = (roleId: string, moduleId: string): boolean => {
   if (roleId === 'super_admin') return true;
   if (COMMON_MODULES.includes(moduleId)) return true;
 
-  // Akses hanya dari ROLES (sama dengan server); override localStorage bisa dipalsukan pengguna.
+  const custom = getCustomPermissions();
+  if (custom[roleId] && Array.isArray(custom[roleId])) {
+    const list = custom[roleId];
+    if (list.includes(moduleId)) return true;
+    for (const [canonical, aliases] of Object.entries(MODULE_ALIASES)) {
+      if (canonical === moduleId && aliases.some(a => list.includes(a))) return true;
+      if (aliases.includes(moduleId) && (list.includes(canonical) || aliases.some(a => list.includes(a)))) return true;
+    }
+  }
+
   const role = getRoleById(roleId);
   if (!role) return false;
   if (role.moduleAccess.includes(moduleId)) return true;
 
-  // Arah balik (alias -> modul induk) hanya untuk nama URL yang bukan modul sungguhan, mis. user-management -> security.
-  // Tanpa syarat ini 'patient-flow' memberi akses 'rawat-jalan', padahal server (hasScope) menolak API-nya.
-  const isRealModule = ROLES.some((item) => item.moduleAccess.includes(moduleId));
   for (const [canonical, aliases] of Object.entries(MODULE_ALIASES)) {
     if (canonical === moduleId && aliases.some(a => role.moduleAccess.includes(a))) return true;
-    if (!isRealModule && aliases.includes(moduleId) && (role.moduleAccess.includes(canonical) || aliases.some(a => role.moduleAccess.includes(a)))) return true;
+    if (aliases.includes(moduleId) && (role.moduleAccess.includes(canonical) || aliases.some(a => role.moduleAccess.includes(a)))) return true;
   }
 
   return false;

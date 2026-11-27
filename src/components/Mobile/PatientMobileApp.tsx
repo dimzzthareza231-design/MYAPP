@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
-import { signOut } from 'firebase/auth';
 import {
   Home,
   CalendarPlus,
@@ -32,8 +31,6 @@ import {
   Sparkles
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { CloudflareTurnstile } from '../Common/CloudflareTurnstile';
-import { jakartaDate } from '../../utils/jakartaDate';
 import { useAuth } from '../../contexts/AuthContext';
 import { auth } from '../../lib/firebase';
 import {
@@ -85,19 +82,43 @@ const fadeSlideTransition = {
   ease: [0.22, 1, 0.36, 1] as const
 };
 
+interface DemoSample {
+  label: string;
+  no_rm: string;
+  tanggal_lahir: string;
+}
+
+const DEFAULT_DEMO_SAMPLES: DemoSample[] = [
+  { label: 'Ny. Siti Rahmawati (Poli Dalam)', no_rm: 'RM-260101-0001', tanggal_lahir: '1985-04-23' },
+  { label: 'Tn. Budi Santoso (Kardiologi)', no_rm: 'RM-260102-0002', tanggal_lahir: '1978-08-15' }
+];
+
 const PATIENT_TOKEN_KEY = 'myitaru_patient_token';
-const COOKIE_SESSION_TOKEN = 'cookie-session';
+const PATIENT_CACHE_KEY = 'myitaru_patient_cached_dossier';
 
 export const PatientMobileApp: React.FC = () => {
   const navigate = useNavigate();
-  const { signInWithGoogle, loading: authLoading } = useAuth();
+  const { signInWithGoogle, logout: authLogout, loading: authLoading } = useAuth();
 
   const poliklinikList = useMemo(() => getPublicPoliklinik(), []);
   const fallbackDoctors = useMemo(() => getPublicDoctors(), []);
 
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem(PATIENT_TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  });
 
-  const [dossier, setDossier] = useState<PatientDossierPayload | null>(null);
+  const [dossier, setDossier] = useState<PatientDossierPayload | null>(() => {
+    try {
+      const cached = localStorage.getItem(PATIENT_CACHE_KEY);
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const [authMode, setAuthMode] = useState<'rm_dob' | 'google'>('rm_dob');
   const [noRmInput, setNoRmInput] = useState('');
@@ -111,6 +132,7 @@ export const PatientMobileApp: React.FC = () => {
     displayName: string;
   } | null>(null);
 
+  const [demoSamples, setDemoSamples] = useState<DemoSample[]>(DEFAULT_DEMO_SAMPLES);
   const [doctors, setDoctors] = useState(fallbackDoctors);
 
   const [activeTab, setActiveTab] = useState<MobileTab>(() => {
@@ -179,11 +201,9 @@ export const PatientMobileApp: React.FC = () => {
   const [docQuery, setDocQuery] = useState('');
   const [selectedPoliId, setSelectedPoliId] = useState('ALL');
   const [bookingDoc, setBookingDoc] = useState<(typeof fallbackDoctors)[number] | null>(null);
-  const [bookingDate, setBookingDate] = useState(jakartaDate());
+  const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
   const [bookingPenjamin, setBookingPenjamin] = useState('Umum / Mandiri');
   const [bookingKeluhan, setBookingKeluhan] = useState('');
-  const [bookingTurnstileToken, setBookingTurnstileToken] = useState('');
-  const [bookingTurnstileGeneration, setBookingTurnstileGeneration] = useState(0);
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
 
   const unreadCount = useMemo(
@@ -191,18 +211,13 @@ export const PatientMobileApp: React.FC = () => {
     [notifications]
   );
 
-  // Fetch the public service catalog; patient credentials are never published.
+  // Fetch public catalog (doctors + quick demo patients)
   useEffect(() => {
-    try {
-      sessionStorage.removeItem(PATIENT_TOKEN_KEY);
-      localStorage.removeItem('myitaru_patient_cached_dossier');
-    } catch (error) {
-      console.warn('Could not clear legacy patient session data:', error);
-    }
     fetch('/api/public/hospital-catalog')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.doctors && Array.isArray(data.doctors)) setDoctors(data.doctors);
+        if (data?.demoPatients && Array.isArray(data.demoPatients)) setDemoSamples(data.demoPatients);
       })
       .catch(() => {});
   }, []);
@@ -211,20 +226,27 @@ export const PatientMobileApp: React.FC = () => {
     setToken(newToken);
     setDossier(newDossier);
     setPendingGoogleUser(null);
+    try {
+      sessionStorage.setItem(PATIENT_TOKEN_KEY, newToken);
+      localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify(newDossier));
+    } catch {
+      // Ignore storage quota exceptions
+    }
   }, []);
 
   const fetchDossierSilent = useCallback(async () => {
-    if (!navigator.onLine) return;
+    if (!token || !navigator.onLine) return;
     try {
       const res = await fetch('/api/patient/dossier', {
-        credentials: 'same-origin',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+        headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
         if (data?.dossier) {
           setDossier(data.dossier);
-          if (!token) setToken(COOKIE_SESSION_TOKEN);
+          try {
+            localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify(data.dossier));
+          } catch {}
         }
       }
     } catch {
@@ -243,6 +265,7 @@ export const PatientMobileApp: React.FC = () => {
         const data = await res.json();
         if (data?.dossier) {
           setDossier(data.dossier);
+          localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify(data.dossier));
           toast.success('Data antrean & medis diperbarui.');
         }
       } else if (res.status === 401 && navigator.onLine) {
@@ -250,6 +273,7 @@ export const PatientMobileApp: React.FC = () => {
         toast.error('Sesi verifikasi berakhir. Silakan verifikasi ulang.');
         setToken(null);
         setDossier(null);
+        sessionStorage.removeItem(PATIENT_TOKEN_KEY);
       }
     } catch {
       toast('Menampilkan data tersimpan terakhir (offline).', { icon: 'ℹ️' });
@@ -258,9 +282,11 @@ export const PatientMobileApp: React.FC = () => {
     }
   }, [token]);
 
-  // Restore the HttpOnly-cookie session on startup; no patient token is kept in browser storage.
+  // Refresh silently on mount when token exists & online
   useEffect(() => {
-    if (navigator.onLine) fetchDossierSilent();
+    if (token && navigator.onLine) {
+      fetchDossierSilent();
+    }
   }, [token, fetchDossierSilent]);
 
   const handleIncomingRealtimeAlert = useCallback(
@@ -347,7 +373,7 @@ export const PatientMobileApp: React.FC = () => {
       unsubscribeForeground = await subscribeForegroundFcm((payload) => {
         const data = (payload.data || {}) as Record<string, string>;
         const title =
-          payload.notification?.title || data.title || 'Notifikasi MYITARU';
+          payload.notification?.title || data.title || 'Notifikasi Klinik Tarumanagara';
         const body =
           payload.notification?.body || data.body || 'Pembaruan antrean atau hasil lab tersedia.';
         const notifType =
@@ -393,7 +419,7 @@ export const PatientMobileApp: React.FC = () => {
 
     // Open live SSE push stream
     if (typeof EventSource !== 'undefined') {
-      eventSource = new EventSource('/api/patient/notifications/stream');
+      eventSource = new EventSource(`/api/patient/notifications/stream?token=${encodeURIComponent(token)}`);
       eventSource.onopen = () => {
         if (!cancelled) setSseConnected(true);
       };
@@ -624,9 +650,9 @@ export const PatientMobileApp: React.FC = () => {
     }
   };
 
-  const handleBindGoogleToRm = async () => {
+  const handleBindGoogleToRm = async (useDemo = false) => {
     if (!pendingGoogleUser) return;
-    if (!noRmInput.trim() || !dobInput.trim()) {
+    if (!useDemo && (!noRmInput.trim() || !dobInput.trim())) {
       toast.error('Masukkan No. RM dan Tanggal Lahir untuk menautkan akun Google.');
       return;
     }
@@ -639,8 +665,9 @@ export const PatientMobileApp: React.FC = () => {
         body: JSON.stringify({
           email: pendingGoogleUser.email,
           displayName: pendingGoogleUser.displayName,
-          linkNoRm: noRmInput.trim(),
-          linkTanggalLahir: dobInput.trim()
+          useDemoSample: useDemo,
+          linkNoRm: useDemo ? undefined : noRmInput.trim(),
+          linkTanggalLahir: useDemo ? undefined : dobInput.trim()
         })
       });
       const data = await res.json();
@@ -658,20 +685,7 @@ export const PatientMobileApp: React.FC = () => {
   };
 
   const handlePatientLogout = async () => {
-    try {
-      const response = await fetch('/api/patient/session', {
-        method: 'DELETE',
-        credentials: 'same-origin',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      if (!response.ok) throw new Error('Sesi pasien tidak dapat diakhiri di server.');
-      await unregisterFcmForPatient(token, dossier?.patient?.no_rm);
-      if (auth?.currentUser) await signOut(auth);
-    } catch {
-      toast.error('Sesi pasien tidak dapat diakhiri. Periksa koneksi dan coba kembali.');
-      return;
-    }
-
+    await unregisterFcmForPatient(token, dossier?.patient?.no_rm);
     setToken(null);
     setDossier(null);
     setPendingGoogleUser(null);
@@ -679,16 +693,17 @@ export const PatientMobileApp: React.FC = () => {
     setLiveBannerAlert(null);
     setFcmMode('inactive');
     seenNotifIdsRef.current.clear();
+    try {
+      sessionStorage.removeItem(PATIENT_TOKEN_KEY);
+      localStorage.removeItem(PATIENT_CACHE_KEY);
+      await authLogout();
+    } catch {}
     toast.success('Anda telah keluar dari sesi pasien.');
   };
 
   const handleMobileBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookingDoc || !dossier) return;
-    if (!bookingTurnstileToken) {
-      toast.error('Selesaikan verifikasi keamanan sebelum membuat booking.');
-      return;
-    }
     setIsBookingSubmitting(true);
     try {
       const res = await fetch('/api/patient/appointments', {
@@ -699,7 +714,6 @@ export const PatientMobileApp: React.FC = () => {
           nama: dossier.patient.nama,
           tanggal_lahir: dossier.patient.tanggal_lahir,
           no_hp: dossier.patient.no_hp,
-          turnstileToken: bookingTurnstileToken,
           poli_id: bookingDoc.poli_id,
           poli_nama: bookingDoc.poli,
           dokter_id: bookingDoc.id,
@@ -723,13 +737,11 @@ export const PatientMobileApp: React.FC = () => {
       setBookingDoc(null);
       setBookingKeluhan('');
       switchTab('beranda');
-      toast.success(`Booking ${data.booking.kode_booking} berhasil dibuat. Antrean dikonfirmasi saat check-in.`);
+      toast.success(`Antrean baru ${data.booking.nomor_antrian} diterbitkan!`);
     } catch {
       toast.error('Koneksi bermasalah saat membuat janji temu.');
     } finally {
       setIsBookingSubmitting(false);
-      setBookingTurnstileToken('');
-      setBookingTurnstileGeneration((generation) => generation + 1);
     }
   };
 
@@ -771,8 +783,8 @@ export const PatientMobileApp: React.FC = () => {
           </button>
 
           <div className="flex items-center gap-2">
-            <BrandLogo alt="MYITARU" className="w-7 h-7 rounded-lg object-cover" />
-            <span className="font-extrabold text-[#0B3D91] text-sm">MYITARU Mobile</span>
+            <BrandLogo alt="Klinik Tarumanagara" className="w-7 h-7 rounded-lg object-cover" />
+            <span className="font-extrabold text-[#0B3D91] text-sm">Klinik Tarumanagara Mobile</span>
           </div>
 
           <PWAInstallButton variant="subtle" label="Pasang App" showAlwaysGuide />
@@ -781,20 +793,16 @@ export const PatientMobileApp: React.FC = () => {
         <main className="flex-1 flex items-center justify-center p-4 sm:p-6">
           <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-200 p-6 sm:p-8 space-y-6">
             <div className="text-center space-y-2">
-              <BrandLogo alt="MYITARU" className="w-14 h-14 rounded-2xl mx-auto shadow-md object-cover" />
+              <BrandLogo alt="Klinik Tarumanagara" className="w-14 h-14 rounded-2xl mx-auto shadow-md object-cover" />
               <h1 className="text-2xl font-extrabold text-slate-900">
-                Aplikasi Pasien MYITARU
+                Aplikasi Pasien Klinik Tarumanagara
               </h1>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
                 Cek nomor antrean poli, jadwal dokter, hasil laboratorium &amp; radiologi, serta tagihan langsung dari ponsel.
               </p>
             </div>
 
-            {import.meta.env.PROD ? (
-              <div role="status" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-                Login pasien belum tersedia. Verifikasi identitas pasien untuk produksi belum dikonfigurasi; data dan sesi yang sudah valid tetap dapat diakses.
-              </div>
-            ) : pendingGoogleUser ? (
+            {pendingGoogleUser ? (
               <div className="space-y-4">
                 <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 text-xs space-y-1">
                   <p className="font-bold text-[#0B3D91] flex items-center gap-1.5">
@@ -834,10 +842,18 @@ export const PatientMobileApp: React.FC = () => {
                   <button
                     type="button"
                     disabled={isVerifying}
-                    onClick={handleBindGoogleToRm}
+                    onClick={() => handleBindGoogleToRm(false)}
                     className="w-full py-3.5 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm cursor-pointer min-h-[48px]"
                   >
                     {isVerifying ? 'Menghubungkan...' : 'Hubungkan No. RM Saya'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isVerifying}
+                    onClick={() => handleBindGoogleToRm(true)}
+                    className="w-full py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs cursor-pointer"
+                  >
+                    Atau Tautkan ke Profil Sampel Uji Coba (RM-260101-0001)
                   </button>
                 </div>
               </div>
@@ -906,11 +922,38 @@ export const PatientMobileApp: React.FC = () => {
                       {isVerifying ? 'Memverifikasi Identitas...' : 'Verifikasi & Masuk'}
                     </button>
 
+                    {/* Quick Demo Fill */}
+                    <div className="pt-4 border-t border-slate-200 space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Isi Cepat Pasien Uji Coba:
+                      </p>
+                      <div className="space-y-1.5">
+                        {demoSamples.map((sample) => (
+                          <button
+                            key={sample.no_rm}
+                            type="button"
+                            onClick={() => {
+                              setNoRmInput(sample.no_rm);
+                              setDobInput(sample.tanggal_lahir);
+                            }}
+                            className="w-full text-left px-3.5 py-2.5 rounded-xl border border-slate-200 hover:border-[#0B3D91] hover:bg-blue-50/60 transition flex items-center justify-between gap-2 cursor-pointer"
+                          >
+                            <div>
+                              <p className="text-xs font-bold text-slate-800">{sample.label}</p>
+                              <p className="text-[11px] font-mono text-slate-500">
+                                {sample.no_rm} · {sample.tanggal_lahir}
+                              </p>
+                            </div>
+                            <span className="text-xs font-semibold text-[#0B3D91]">Pilih</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </form>
                 ) : (
                   <div className="space-y-4 py-2">
                     <p className="text-xs text-slate-600 text-center leading-relaxed">
-                      Masuk sekali ketuk dengan Akun Google Anda yang terhubung dengan rekam medis MYITARU SIMK.
+                      Masuk sekali ketuk dengan Akun Google Anda yang terhubung dengan rekam medis Klinik Tarumanagara (MYITARU SIMK).
                     </p>
                     <button
                       type="button"
@@ -1141,7 +1184,7 @@ export const PatientMobileApp: React.FC = () => {
             {/* Live Queue Ticket */}
             <div className="lg:col-span-7 space-y-4">
               {primaryQueue ? (
-                <div className="rounded-3xl bg-gradient-to-br from-[#0B3D91] to-[#1E3163] text-white p-6 shadow-lg space-y-5">
+                <div className="group relative rounded-3xl bg-gradient-to-br from-[#0B3D91] via-[#13387D] to-[#1E3163] text-white p-6 space-y-5 border border-white/15 ring-1 ring-white/10 hover:ring-sky-300/35 shadow-[0_12px_30px_-8px_rgba(11,61,145,0.35),0_4px_12px_-4px_rgba(15,23,42,0.12)] hover:shadow-[0_24px_48px_-12px_rgba(11,61,145,0.48),0_12px_24px_-8px_rgba(15,23,42,0.22)] transition-[transform,box-shadow,ring-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-safe:hover:scale-[1.015] motion-safe:active:scale-[0.995] will-change-transform">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wider text-sky-300">
@@ -1150,12 +1193,12 @@ export const PatientMobileApp: React.FC = () => {
                       <h2 className="text-lg font-extrabold mt-0.5">{primaryQueue.poli}</h2>
                       <p className="text-xs text-blue-100 mt-0.5">{primaryQueue.dokter}</p>
                     </div>
-                    <span className="px-3 py-1 rounded-full bg-white/15 text-xs font-bold text-white whitespace-nowrap">
+                    <span className="px-3 py-1 rounded-full bg-white/15 text-xs font-bold text-white whitespace-nowrap border border-white/15">
                       {primaryQueue.status}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3 bg-white/10 rounded-2xl p-4 border border-white/10">
+                  <div className="grid grid-cols-3 gap-3 bg-white/10 group-hover:bg-white/[0.13] rounded-2xl p-4 border border-white/15 transition-colors duration-300">
                     <div>
                       <p className="text-[11px] text-blue-200">Nomor Anda</p>
                       <p className="text-2xl sm:text-3xl font-extrabold font-mono tabular-nums mt-0.5">
@@ -1183,14 +1226,14 @@ export const PatientMobileApp: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setShowQrModal(true)}
-                      className="font-bold text-white underline underline-offset-4 cursor-pointer"
+                      className="font-bold text-white underline underline-offset-4 hover:text-sky-200 transition-colors cursor-pointer"
                     >
                       Tunjukkan QR Check-In
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="rounded-3xl bg-white border border-slate-200 p-6 text-center space-y-3">
+                <div className="rounded-3xl bg-white border border-slate-200/90 hover:border-[#0B3D91]/30 p-6 text-center space-y-3 shadow-[0_6px_20px_-6px_rgba(15,23,42,0.08)] hover:shadow-[0_18px_38px_-10px_rgba(11,61,145,0.16),0_6px_16px_-6px_rgba(15,23,42,0.08)] transition-[transform,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-safe:hover:scale-[1.015] will-change-transform">
                   <CalendarPlus className="w-10 h-10 text-[#0B3D91] mx-auto" />
                   <h2 className="font-bold text-slate-900">Belum Ada Antrean Hari Ini</h2>
                   <p className="text-xs text-slate-600">
@@ -1199,7 +1242,7 @@ export const PatientMobileApp: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => switchTab('jadwal')}
-                    className="px-5 py-2.5 rounded-xl bg-[#0B3D91] text-white text-xs font-bold cursor-pointer"
+                    className="px-5 py-2.5 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white text-xs font-bold cursor-pointer transition-colors"
                   >
                     Cari Dokter &amp; Daftar Poli
                   </button>
@@ -1208,14 +1251,14 @@ export const PatientMobileApp: React.FC = () => {
 
               {/* Additional Active Appointments */}
               {dossier.activeQueues.length > 1 && (
-                <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+                <div className="bg-white rounded-2xl border border-slate-200/90 hover:border-[#0B3D91]/25 p-4 space-y-3 shadow-[0_4px_16px_-4px_rgba(15,23,42,0.06)] hover:shadow-[0_16px_32px_-8px_rgba(11,61,145,0.14),0_6px_14px_-6px_rgba(15,23,42,0.06)] transition-[transform,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-safe:hover:scale-[1.01] will-change-transform">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                     Daftar Kunjungan Lainnya
                   </h3>
                   {dossier.activeQueues.slice(1).map((apt) => (
                     <div
                       key={apt.id}
-                      className="flex items-center justify-between gap-3 py-2 border-t border-slate-100 first:border-t-0"
+                      className="flex items-center justify-between gap-3 py-2.5 px-2.5 -mx-2.5 rounded-xl border-t border-slate-100 first:border-t-0 hover:bg-slate-50/90 transition-colors duration-200"
                     >
                       <div>
                         <p className="text-sm font-bold text-slate-900">{apt.poli}</p>
@@ -1719,8 +1762,21 @@ export const PatientMobileApp: React.FC = () => {
             </div>
 
             <div className="lg:col-span-5 space-y-4">
-              <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
-                <h3 className="text-sm font-extrabold text-slate-900">Identitas Terverifikasi</h3>
+              <div className="bg-white rounded-2xl border border-slate-200/90 hover:border-[#0B3D91]/30 p-5 space-y-3.5 shadow-[0_6px_20px_-6px_rgba(15,23,42,0.08)] hover:shadow-[0_20px_40px_-10px_rgba(11,61,145,0.18),0_8px_18px_-6px_rgba(15,23,42,0.08)] transition-[transform,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-safe:hover:scale-[1.015] will-change-transform">
+                <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-[#0B3D91]" />
+                    <h3 className="text-sm font-extrabold text-slate-900">Identitas Terverifikasi</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowQrModal(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0B3D91] hover:text-[#082D6E] transition-colors cursor-pointer"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>Kartu QR</span>
+                  </button>
+                </div>
                 <div className="text-xs space-y-1.5 text-slate-600">
                   <p>
                     Nama: <strong className="text-slate-900">{dossier.patient.nama}</strong>
@@ -1798,9 +1854,9 @@ export const PatientMobileApp: React.FC = () => {
       {/* Modal QR Kartu Berobat Digital */}
       {showQrModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 backdrop-blur-xs p-4">
-          <div className="bg-white text-slate-900 rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl">
+          <div className="bg-white text-slate-900 rounded-3xl max-w-sm w-full p-6 text-center space-y-4 border border-slate-200/80 shadow-[0_24px_56px_-12px_rgba(11,61,145,0.28),0_12px_24px_-8px_rgba(15,23,42,0.18)] hover:shadow-[0_30px_64px_-12px_rgba(11,61,145,0.36),0_16px_32px_-8px_rgba(15,23,42,0.22)] transition-[transform,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-safe:hover:scale-[1.015] will-change-transform">
             <h3 className="text-lg font-extrabold text-slate-900">Kartu Pasien &amp; Check-In QR</h3>
-            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 inline-block mx-auto">
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 inline-block mx-auto shadow-xs transition-[transform,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-safe:hover:scale-[1.02] hover:shadow-md">
               <QRCodeSVG
                 value={JSON.stringify({
                   no_rm: dossier.patient.no_rm,
@@ -1816,13 +1872,13 @@ export const PatientMobileApp: React.FC = () => {
                 {dossier.patient.no_rm} · {primaryQueue?.nomor_antrian || 'Terdaftar'}
               </p>
               <p className="text-xs text-slate-500 mt-2">
-                Pindai QR ini pada Anjungan Mandiri (APM) saat tiba di MYITARU.
+                Pindai QR ini pada Anjungan Mandiri (APM) saat tiba di rumah sakit.
               </p>
             </div>
             <button
               type="button"
               onClick={() => setShowQrModal(false)}
-              className="w-full py-3 rounded-xl bg-[#0B3D91] text-white font-bold text-sm cursor-pointer"
+              className="w-full py-3 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] transition-colors text-white font-bold text-sm cursor-pointer"
             >
               Tutup
             </button>
@@ -1850,15 +1906,6 @@ export const PatientMobileApp: React.FC = () => {
                   value={bookingDate}
                   onChange={(e) => setBookingDate(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm outline-none focus:border-[#0B3D91]"
-                />
-              </div>
-              <div className="flex justify-center">
-                <CloudflareTurnstile
-                  key={bookingTurnstileGeneration}
-                  action="patient_booking"
-                  onSuccess={setBookingTurnstileToken}
-                  onError={() => setBookingTurnstileToken('')}
-                  onExpire={() => setBookingTurnstileToken('')}
                 />
               </div>
               <div>
@@ -1894,7 +1941,7 @@ export const PatientMobileApp: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isBookingSubmitting || !bookingTurnstileToken}
+                  disabled={isBookingSubmitting}
                   className="py-3 rounded-xl bg-[#0B3D91] text-white font-bold text-xs cursor-pointer disabled:opacity-60 flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle2 className="w-4 h-4" />
@@ -1999,7 +2046,7 @@ export const PatientMobileApp: React.FC = () => {
                     className={`px-3 py-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 ${
                       queueAlertsEnabled
                         ? 'bg-white border-[#0B3D91]/40 text-slate-900'
-                        : 'bg-slate-100 border-slate-200 text-slate-700'
+                        : 'bg-slate-100 border-slate-200 text-slate-500'
                     }`}
                   >
                     <div>
@@ -2008,7 +2055,7 @@ export const PatientMobileApp: React.FC = () => {
                     </div>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                        queueAlertsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
+                        queueAlertsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
                       }`}
                     >
                       {queueAlertsEnabled ? 'ON' : 'OFF'}
@@ -2021,7 +2068,7 @@ export const PatientMobileApp: React.FC = () => {
                     className={`px-3 py-2.5 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-2 ${
                       labAlertsEnabled
                         ? 'bg-white border-[#0B3D91]/40 text-slate-900'
-                        : 'bg-slate-100 border-slate-200 text-slate-700'
+                        : 'bg-slate-100 border-slate-200 text-slate-500'
                     }`}
                   >
                     <div>
@@ -2030,7 +2077,7 @@ export const PatientMobileApp: React.FC = () => {
                     </div>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                        labAlertsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
+                        labAlertsEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
                       }`}
                     >
                       {labAlertsEnabled ? 'ON' : 'OFF'}
@@ -2125,7 +2172,7 @@ export const PatientMobileApp: React.FC = () => {
                               ? 'Hasil Laboratorium'
                               : 'Sistem'}
                           </span>
-                          <span className="text-[10px] font-mono text-slate-700">
+                          <span className="text-[10px] font-mono text-slate-500">
                             {new Date(item.createdAt).toLocaleTimeString('id-ID', {
                               hour: '2-digit',
                               minute: '2-digit'

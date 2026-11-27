@@ -7,10 +7,12 @@ import {
 import toast from 'react-hot-toast';
 import { ClinicalPathway } from '../CP/ClinicalPathway';
 import { CSSDManagement } from '../CSSD/CSSDManagement';
+import { useAuth } from '../../contexts/AuthContext';
 
 export function PatientSafety() {
   const outletCtx = useOutletContext<{ activeTab?: string }>();
   const [searchParams] = useSearchParams();
+  const { facilityMode } = useAuth();
   const [activeTab, setActiveTab] = useState<'incident' | 'investigation' | 'risk' | 'cp' | 'cssd'>('incident');
 
   useEffect(() => {
@@ -20,7 +22,7 @@ export function PatientSafety() {
       if (tab.includes('clinical pathway') || tab.includes('pathway') || tab.includes('cp')) {
         setActiveTab('cp');
         return;
-      } else if (tab.includes('cssd') || tab.includes('sterilisasi')) {
+      } else if ((tab.includes('cssd') || tab.includes('sterilisasi')) && facilityMode === 'rumah_sakit') {
         setActiveTab('cssd');
         return;
       } else if (subtab === 'investigation' || tab.includes('investigasi') || tab.includes('rca')) {
@@ -37,13 +39,13 @@ export function PatientSafety() {
     if (subtab === 'investigation') setActiveTab('investigation');
     else if (subtab === 'risk') setActiveTab('risk');
     else if (subtab === 'incident') setActiveTab('incident');
-  }, [outletCtx?.activeTab, searchParams]);
+  }, [outletCtx?.activeTab, searchParams, facilityMode]);
 
   if (activeTab === 'cp') {
     return <ClinicalPathway />;
   }
 
-  if (activeTab === 'cssd') {
+  if (activeTab === 'cssd' && facilityMode === 'rumah_sakit') {
     return <CSSDManagement />;
   }
 
@@ -52,7 +54,9 @@ export function PatientSafety() {
     { id: 'investigation', label: 'Investigation & RCA', icon: Search },
     { id: 'risk', label: 'Risk Register Matrix', icon: Activity },
     { id: 'cp', label: 'Clinical Pathway', icon: GitMerge },
-    { id: 'cssd', label: 'CSSD Sterilisasi', icon: PackageSearch },
+    ...(facilityMode === 'rumah_sakit'
+      ? [{ id: 'cssd', label: 'CSSD Sterilisasi', icon: PackageSearch }]
+      : []),
   ];
 
   return (

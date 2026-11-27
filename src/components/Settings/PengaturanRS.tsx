@@ -1,12 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useHospital } from '../../contexts/HospitalContext';
 import { 
-  Save, Image as ImageIcon, Building, Phone, Mail, Globe, MapPin,
-  Award, ShieldCheck, UserCheck, Eye, RefreshCw, FileText, CheckCircle2
+  Save, Image as ImageIcon, Building, Phone, Mail, Globe, MapPin, 
+  Award, Trash2, ShieldCheck, UserCheck, Eye, RefreshCw, FileText, CheckCircle2
 } from 'lucide-react';
 import { useToast } from '../../contexts/ToastContext';
 import { DEFAULT_HOSPITAL_INFO } from '../../types/document';
-import { OFFICIAL_LOGO_URL } from '../Common/BrandLogo';
 
 export function PengaturanRS() {
   const { hospitalSettings, updateHospitalSettings } = useHospital();
@@ -29,14 +28,42 @@ export function PengaturanRS() {
     directorName: hospitalSettings.directorName || DEFAULT_HOSPITAL_INFO.directorName || 'dr. H. Hendra, MARS, Sp.PK',
     directorNip: hospitalSettings.directorNip || DEFAULT_HOSPITAL_INFO.directorNip || '197508122002121001',
     hospitalType: hospitalSettings.hospitalType || DEFAULT_HOSPITAL_INFO.hospitalType || 'Klinik Umum (Kelas B Pendidikan)',
-    ownership: hospitalSettings.ownership || DEFAULT_HOSPITAL_INFO.ownership || 'Yayasan MYITARU',
+    ownership: hospitalSettings.ownership || DEFAULT_HOSPITAL_INFO.ownership || 'Yayasan Tarumanagara',
     emergencyHotline: hospitalSettings.emergencyHotline || DEFAULT_HOSPITAL_INFO.emergencyHotline || '(021) 56958999',
     faxNumber: hospitalSettings.faxNumber || DEFAULT_HOSPITAL_INFO.faxNumber || '(021) 56958724',
   });
 
+  const [logoPreview, setLogoPreview] = useState<string | null>(hospitalSettings.logoUrl || null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error('Ukuran file logo maksimal 2MB');
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setLogoPreview(reader.result as string);
+        toast.success('Logo berhasil dimuat!');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveLogo = () => {
+    setLogoPreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    toast.info('Logo dihapus');
   };
 
   const handleResetToDefault = () => {
@@ -65,7 +92,7 @@ export function PengaturanRS() {
   const handleSave = () => {
     updateHospitalSettings({
       ...formData,
-      logoUrl: OFFICIAL_LOGO_URL
+      logoUrl: logoPreview || ''
     });
     toast.success('Pengaturan profil & legalitas Klinik berhasil disimpan ke sistem');
   };
@@ -139,14 +166,47 @@ export function PengaturanRS() {
               <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col items-center">
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-4 w-full flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 pb-2">
                   <ImageIcon className="w-4 h-4 text-blue-500" />
-                  Logo Resmi MYITARU
+                  Logo Resmi Klinik
                 </h3>
                 
-                <div className="w-44 h-44 rounded-2xl border border-slate-300 dark:border-slate-600 flex items-center justify-center bg-white mb-4 overflow-hidden">
-                  <img src={OFFICIAL_LOGO_URL} alt="Logo MYITARU" className="w-full h-full object-contain p-2" />
+                <div className="w-44 h-44 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center bg-slate-50 dark:bg-slate-900/50 mb-4 overflow-hidden relative group">
+                  {logoPreview ? (
+                    <>
+                      <img src={logoPreview} alt="Logo Klinik" className="w-full h-full object-contain p-2" />
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <button 
+                          onClick={handleRemoveLogo}
+                          className="p-2.5 bg-rose-600 text-white rounded-full hover:bg-rose-700 transition"
+                          title="Hapus Logo"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center p-3 text-center">
+                      <img src="/logo-myitaru.png" alt="Logo Default MYITARU" className="w-24 h-24 rounded-2xl object-cover shadow-sm mb-2" />
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Logo Standar MYITARU</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, SVG (Max 2MB) untuk ubah</p>
+                    </div>
+                  )}
                 </div>
+                
+                <input 
+                  type="file" 
+                  ref={fileInputRef}
+                  accept="image/png, image/jpeg, image/svg+xml"
+                  onChange={handleLogoUpload}
+                  className="hidden" 
+                />
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                >
+                  {logoPreview ? 'Ganti Logo Klinik' : 'Upload File Logo'}
+                </button>
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 text-center">
-                  Logo MYITARU ini digunakan konsisten pada seluruh aplikasi dan dokumen.
+                  Logo akan otomatis disematkan pada seluruh cetakan dokumen, kwitansi, dan SEP.
                 </p>
               </div>
             </div>
@@ -169,7 +229,7 @@ export function PengaturanRS() {
                       name="name"
                       value={formData.name}
                       onChange={handleInputChange}
-                      placeholder="Contoh: MYITARU"
+                      placeholder="Contoh: KLINIK TARUMANAGARA"
                       className="w-full p-2.5 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold"
                     />
                   </div>
@@ -183,7 +243,7 @@ export function PengaturanRS() {
                       name="subname"
                       value={formData.subname}
                       onChange={handleInputChange}
-                      placeholder="Contoh: MYITARU"
+                      placeholder="Contoh: KLINIK UMUM PENDIDIKAN TARUMANAGARA"
                       className="w-full p-2.5 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                     />
                   </div>
@@ -429,7 +489,7 @@ export function PengaturanRS() {
             <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50 flex items-start gap-3">
               <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
               <div className="text-xs text-blue-800 dark:text-blue-200">
-                <span className="font-bold">Keabsahan Tanda Tangan Digital:</span> Integrasi tanda tangan elektronik tersertifikasi (BSrE / Sertisign) belum aktif. Data penanggung jawab di atas belum diverifikasi oleh penyelenggara sertifikasi elektronik.
+                <span className="font-bold">Keabsahan Tanda Tangan Digital:</span> Sistem MYITARU mendukung sertifikasi tanda tangan elektronik (TTE) BSrE / Sertisign yang diverifikasi langsung dengan data penanggung jawab di atas.
               </div>
             </div>
           </div>
@@ -457,7 +517,13 @@ export function PengaturanRS() {
                   {/* Official Header */}
                   <div className="flex items-center gap-5 pb-4 border-b-2 border-slate-900">
                     <div className="w-20 h-20 shrink-0 flex items-center justify-center">
-                      <img src={OFFICIAL_LOGO_URL} alt="Logo MYITARU" className="max-w-full max-h-full object-contain" />
+                      {logoPreview ? (
+                        <img src={logoPreview} alt="Logo Klinik" className="max-w-full max-h-full object-contain" />
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-2xl">
+                          {formData.name.charAt(0) || 'H'}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex-1 text-center pr-10">

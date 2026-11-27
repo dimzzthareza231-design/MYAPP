@@ -7,6 +7,8 @@ import {
 import { useOutletContext, useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { DemoDataBadge } from './DemoDataBadge';
+import { useAuth } from '../../contexts/AuthContext';
+import { isModuleAllowedInFacilityMode } from '../../data/moduleRegistry';
 
 interface BridgingService {
   id: string;
@@ -27,6 +29,7 @@ export function BridgingHub() {
   const { activeTab } = useOutletContext<{ activeTab?: string }>() || {};
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { facilityMode } = useAuth();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<'ALL' | 'BPJS' | 'Kemenkes' | 'External' | 'Internal'>('ALL');
   const [testLog, setTestLog] = useState<string[]>([]);
@@ -258,7 +261,9 @@ export function BridgingHub() {
     }, 400);
   };
 
-  const filteredServices = services.filter(s => {
+  const allowedServices = services.filter(s => isModuleAllowedInFacilityMode(s.id, facilityMode));
+
+  const filteredServices = allowedServices.filter(s => {
     if (selectedFilter === 'ALL') return true;
     return s.category === selectedFilter;
   });
@@ -388,7 +393,7 @@ export function BridgingHub() {
       {/* Filter Tabs */}
       <div className="flex flex-wrap gap-2 items-center justify-between">
         <div className="flex gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-x-auto custom-scrollbar">
-          {(['ALL', 'BPJS', 'Kemenkes', 'External', 'Internal'] as const).map(cat => (
+          {(['ALL', ...(facilityMode === 'rumah_sakit' ? ['BPJS'] as const : []), 'Kemenkes', 'External', 'Internal'] as const).map(cat => (
             <button
               key={cat}
               onClick={() => setSelectedFilter(cat)}
@@ -398,7 +403,7 @@ export function BridgingHub() {
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              {cat === 'ALL' ? 'Semua Modul (12)' : `${cat} Integrations`}
+              {cat === 'ALL' ? `Semua Modul (${allowedServices.length})` : `${cat} Integrations`}
             </button>
           ))}
         </div>

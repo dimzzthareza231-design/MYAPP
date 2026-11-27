@@ -9,7 +9,6 @@ import { KatalogLabTab } from './KatalogLabTab';
 import { QualityControlTab } from './QualityControlTab';
 import { BankDarahTab } from './BankDarahTab';
 import { CetakHasilModal } from './CetakHasilModal';
-import { usesServerPersistence } from '../../lib/firestoreService';
 import { 
   TestTube, Cpu, ShieldCheck, BookOpen, 
   Activity, Droplet, Sparkles, RefreshCw
@@ -34,7 +33,7 @@ export function LaboratoriumDashboard() {
         console.warn(e);
       }
     }
-    return usesServerPersistence ? [] : INITIAL_LAB_ORDERS_MOCK;
+    return INITIAL_LAB_ORDERS_MOCK;
   });
 
   useEffect(() => {
@@ -132,7 +131,7 @@ export function LaboratoriumDashboard() {
         </div>
 
         <div className="flex items-center gap-2">
-          {import.meta.env.DEV && <button
+          <button
             onClick={() => {
               setOrders(INITIAL_LAB_ORDERS_MOCK);
 
@@ -141,7 +140,7 @@ export function LaboratoriumDashboard() {
             className="px-3.5 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition-all"
           >
             <RefreshCw className="w-3.5 h-3.5" /> Reset Data Demo
-          </button>}
+          </button>
         </div>
       </div>
 

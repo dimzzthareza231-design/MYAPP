@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef, ReactNode } from 'react';
+import React, { useEffect, ReactNode } from 'react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -28,56 +28,21 @@ export function Modal({
   variant = 'default',
   badgeText
 }: ModalProps) {
-  const titleId = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
   useEffect(() => {
-    if (!isOpen) return;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const getFocusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter((element) => element.getClientRects().length > 0);
-    const focusable = getFocusable();
-    (focusable[0] || dialog).focus();
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onCloseRef.current();
-        return;
-      }
-      if (e.key !== 'Tab' || !dialog) return;
-      const currentFocusable = getFocusable();
-      const first = currentFocusable[0];
-      const last = currentFocusable[currentFocusable.length - 1];
-      if (!first || !last) {
-        e.preventDefault();
-        dialog.focus();
-      } else if (!dialog.contains(document.activeElement)) {
-        e.preventDefault();
-        (e.shiftKey ? last : first).focus();
-      } else if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
     };
-
-    document.addEventListener('keydown', handleKeyDown);
-    document.body.style.overflow = 'hidden';
+    if (isOpen) {
+      document.addEventListener('keydown', handleEsc);
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
-      previousFocus?.focus();
+      document.removeEventListener('keydown', handleEsc);
+      document.body.style.overflow = 'unset';
     };
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -127,11 +92,9 @@ export function Modal({
       onClick={onClose}
     >
       <div 
-        ref={dialogRef}
-        tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
+        aria-labelledby="modal-title"
         onClick={(e) => e.stopPropagation()}
         className={`relative bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl shadow-2xl w-full max-w-[calc(100vw-1.5rem)] ${widthClass} flex flex-col max-h-[92vh] overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200`}
       >
@@ -145,7 +108,7 @@ export function Modal({
             )}
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 id={titleId} className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight truncate">
+                <h3 id="modal-title" className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight truncate">
                   {title}
                 </h3>
                 {badgeText && (
@@ -162,9 +125,7 @@ export function Modal({
             </div>
           </div>
           <button 
-            type="button"
             onClick={onClose}
-            aria-label="Tutup modal"
             className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors rounded-xl hover:bg-slate-200/60 dark:hover:bg-slate-700/60 shrink-0 ml-2"
             title="Tutup (Esc)"
           >

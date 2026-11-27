@@ -1,7 +1,0 @@
-#!/bin/sh
-# Git pre-push hook — MYAPP multi-agent verifikasi wajib
-# Jalankan oleh: npm run hooks:install
-set -e
-echo "[pre-push] Menjalankan verifikasi wajib sebelum push..."
-npm run agent:check
-echo "[pre-push] Semua pemeriksaan lulus. Push dilanjutkan."

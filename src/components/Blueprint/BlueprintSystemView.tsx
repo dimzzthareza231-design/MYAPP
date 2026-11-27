@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import { 
   BLUEPRINT_VISION, 
   BLUEPRINT_PRINCIPLES, 
@@ -49,6 +50,7 @@ import toast from 'react-hot-toast';
 
 export function BlueprintSystemView() {
   const navigate = useNavigate();
+  const { facilityMode } = useAuth();
 
   // Active section tab
   const [activeTab, setActiveTab] = useState<'full' | 'visi_prinsip' | 'flow' | 'modules' | 'database' | 'ai_gov' | 'gap_dod'>('full');
@@ -89,9 +91,22 @@ export function BlueprintSystemView() {
 
   const progressPercent = Math.round((completedCount / BLUEPRINT_DOD_CHECKLIST.length) * 100);
 
+  const visibleFlowSteps = useMemo(() => {
+    return BLUEPRINT_PATIENT_FLOW.map((s) =>
+      facilityMode === 'klinik' && s.route === '/modul/rawat-inap'
+        ? {
+            ...s,
+            name: '7. Rujukan / Pulang',
+            items: ['Rujuk FKRTL', 'Kontrol Ulang', 'Edukasi Pulang'],
+            route: '/modul/rekam-medis'
+          }
+        : s
+    );
+  }, [facilityMode]);
+
   // Selected patient flow step for interactive preview
   const [selectedFlowStep, setSelectedFlowStep] = useState<number>(1);
-  const currentStepData = BLUEPRINT_PATIENT_FLOW.find(s => s.step === selectedFlowStep) || BLUEPRINT_PATIENT_FLOW[0];
+  const currentStepData = visibleFlowSteps.find(s => s.step === selectedFlowStep) || visibleFlowSteps[0];
 
   // GAP Analysis Filter
   const [gapFilter, setGapFilter] = useState<'ALL' | 'P0' | 'P1' | 'P2' | 'P3'>('ALL');
@@ -313,7 +328,7 @@ export function BlueprintSystemView() {
 
           {/* 8-STEP HORIZONTAL PIPELINE STEPPER */}
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-            {BLUEPRINT_PATIENT_FLOW.map(flow => {
+            {visibleFlowSteps.map(flow => {
               const isSelected = selectedFlowStep === flow.step;
               return (
                 <div
@@ -562,7 +577,7 @@ export function BlueprintSystemView() {
               <div className="mt-3 flex items-center justify-between text-center gap-1">
                 {BLUEPRINT_OFFLINE_SYNC.pipeline.map((p, i) => (
                   <React.Fragment key={i}>
-                    <div className="flex-1 min-w-0 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                    <div className="flex-1 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                       <span className="text-sm block">{p.icon}</span>
                       <span className="text-[9px] font-bold text-slate-800 dark:text-slate-200 block truncate">{p.title}</span>
                     </div>

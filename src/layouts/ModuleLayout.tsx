@@ -1,10 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation, useSearchParams, useParams } from 'react-router-dom';
 import TopNavbar from '../components/TopNavbar';
-import { findModule, MODULE_REGISTRY } from '../data/moduleRegistry';
-import { isModuleAvailableInMode, type OperatingMode } from '../data/operatingModes';
+import { findModule, MODULE_REGISTRY, isModuleAllowedInFacilityMode, isSubmenuAllowedInFacilityMode } from '../data/moduleRegistry';
 import { useAuth } from '../contexts/AuthContext';
-import { useHospital } from '../contexts/HospitalContext';
 import toast from 'react-hot-toast';
 import { 
   ChevronLeft, ChevronRight, Users, UserCheck, UserPlus,
@@ -200,9 +198,7 @@ export default function ModuleLayout() {
   // Category Accordion State
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
 
-  const { hasAccess, currentUser } = useAuth();
-  const { hospitalSettings } = useHospital();
-  const operatingMode: OperatingMode = hospitalSettings.operatingMode === 'SIMRS' ? 'SIMRS' : 'SIMK';
+  const { hasAccess, currentUser, facilityMode } = useAuth();
   const { moduleId: paramModuleId } = useParams();
 
   useEffect(() => {
@@ -212,21 +208,20 @@ export default function ModuleLayout() {
   // Extract module ID from URL (e.g. /modul/pendaftaran -> pendaftaran)
   const pathParts = location.pathname.split('/');
   const moduleId = paramModuleId || pathParts[pathParts.length - 1];
-  const found = findModule(moduleId);
-  const modeAllowsModule = !found || isModuleAvailableInMode(moduleId, operatingMode);
+  const modeAllowsModule = !moduleId || isModuleAllowedInFacilityMode(moduleId, facilityMode);
 
-  // Role-based module access check
+  // Role-based module access check + facility mode check
   const hasModuleAccess = (!moduleId || !currentUser || hasAccess(moduleId)) && modeAllowsModule;
 
-  // Proteksi: jika user tidak punya akses, redirect ke dashboard
+  // Proteksi: jika user tidak punya akses atau modul khusus RS pada mode klinik, redirect ke dashboard
   useEffect(() => {
     if (moduleId && currentUser) {
       if (!hasAccess(moduleId) || !modeAllowsModule) {
-        toast.error(modeAllowsModule ? 'Anda tidak memiliki akses ke modul ini' : `Modul tidak tersedia pada mode ${operatingMode}.`);
+        toast.error(modeAllowsModule ? 'Anda tidak memiliki akses ke modul ini' : 'Modul khusus Rumah Sakit disembunyikan pada Mode Modul Klinik.');
         navigate('/dashboard');
       }
     }
-  }, [moduleId, currentUser, navigate, hasAccess, modeAllowsModule, operatingMode]);
+  }, [moduleId, currentUser, navigate, hasAccess, modeAllowsModule]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -253,37 +248,29 @@ export default function ModuleLayout() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [navigate]);
 
-  if (!hasModuleAccess) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-slate-900 flex-col">
-        <div className="text-center bg-slate-800 p-10 rounded-2xl border border-slate-700 shadow-2xl">
-          <div className="text-6xl mb-4">🔒</div>
-          <h2 className="text-2xl font-bold text-white mb-2">Akses Ditolak</h2>
-          <p className="text-slate-400">Anda tidak memiliki izin untuk mengakses modul ini.</p>
-          <button 
-            onClick={() => navigate('/dashboard')}
-            className="mt-8 px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors"
-          >
-            Kembali ke Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+  const found = findModule(moduleId);
   const config = found ? found.module : { label: moduleId, icon: '⚙️', submenus: [] };
   const category = found ? found.category : null;
 
-  // Default tab or tab from URL
-  const defaultTab = (config.submenus && config.submenus.length > 0) ? (typeof config.submenus[0] === 'string' ? config.submenus[0] : (config.submenus[0]?.label || 'Data')) : 'Data';
-  const activeTab = searchParams.get('tab') || defaultTab;
+  const allowedSubmenus = useMemo(() => {
+    const raw = config.submenus || [];
+    return raw.filter((sub: any) => {
+      const label = typeof sub === 'string' ? sub : sub.label;
+      return isSubmenuAllowedInFacilityMode(moduleId, label, facilityMode);
+    });
+  }, [config.submenus, moduleId, facilityMode]);
 
-  const hasSubmenus = Boolean(config.submenus && config.submenus.length > 0);
+  // Default tab or tab from URL
+  const defaultTab = (allowedSubmenus.length > 0) ? (typeof allowedSubmenus[0] === 'string' ? allowedSubmenus[0] : (allowedSubmenus[0]?.label || 'Data')) : 'Data';
+  const rawTab = searchParams.get('tab');
+  const activeTab = rawTab && isSubmenuAllowedInFacilityMode(moduleId, rawTab, facilityMode) ? rawTab : defaultTab;
+
+  const hasSubmenus = allowedSubmenus.length > 0;
 
   // Grouped submenus for RME sidebar layout
   const rawSidebarGroups = useMemo(() => {
-    return groupSubmenus(moduleId, config.submenus || [], activeTab);
-  }, [moduleId, config.submenus, activeTab]);
+    return groupSubmenus(moduleId, allowedSubmenus, activeTab);
+  }, [moduleId, allowedSubmenus, activeTab]);
 
   // Context-aware filtered submenus & groups
   const { sidebarGroups, totalHiddenCount, hasSecondaryItems } = useMemo(() => {
@@ -339,13 +326,35 @@ export default function ModuleLayout() {
 
   // Mobile horizontal submenu items
   const mobileSubmenus = useMemo(() => {
-    if (!config.submenus) return [];
-    if (!sidebarSearch.trim()) return config.submenus;
-    return config.submenus.filter((sub: any) => {
+    if (!allowedSubmenus.length) return [];
+    if (!sidebarSearch.trim()) return allowedSubmenus;
+    return allowedSubmenus.filter((sub: any) => {
       const label = typeof sub === 'string' ? sub : sub.label;
       return label.toLowerCase().includes(sidebarSearch.toLowerCase());
     });
-  }, [config.submenus, sidebarSearch]);
+  }, [allowedSubmenus, sidebarSearch]);
+
+  if (!hasModuleAccess) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-900 flex-col">
+        <div className="text-center bg-slate-800 p-10 rounded-2xl border border-slate-700 shadow-2xl">
+          <div className="text-6xl mb-4">🔒</div>
+          <h2 className="text-2xl font-bold text-white mb-2">Akses Ditolak</h2>
+          <p className="text-slate-400">
+            {modeAllowsModule
+              ? 'Anda tidak memiliki izin untuk mengakses modul ini.'
+              : 'Modul khusus Rumah Sakit disembunyikan pada Mode Modul Klinik.'}
+          </p>
+          <button 
+            onClick={() => navigate('/dashboard')}
+            className="mt-8 px-6 py-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg transition-colors"
+          >
+            Kembali ke Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const toggleCategory = (groupId: string) => {
     setCollapsedCategories(prev => ({

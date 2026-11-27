@@ -5,21 +5,6 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
-type DeferredInstallPrompt = Pick<BeforeInstallPromptEvent, 'prompt' | 'userChoice'>;
-
-export async function consumeInstallPrompt(
-  prompt: DeferredInstallPrompt | null,
-  onConsumed: () => void,
-): Promise<boolean> {
-  if (!prompt) return false;
-  try {
-    await prompt.prompt();
-    return (await prompt.userChoice).outcome === 'accepted';
-  } finally {
-    onConsumed();
-  }
-}
-
 export function usePWAInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -56,9 +41,15 @@ export function usePWAInstall() {
   }, []);
 
   const install = async () => {
-    const installed = await consumeInstallPrompt(deferredPrompt, () => setDeferredPrompt(null));
-    if (installed) setIsInstalled(true);
-    return installed;
+    if (!deferredPrompt) return false;
+    await deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+      return true;
+    }
+    return false;
   };
 
   return {

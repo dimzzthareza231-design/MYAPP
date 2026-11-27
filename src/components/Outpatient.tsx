@@ -671,7 +671,7 @@ export function Outpatient() {
   };
 
   // Add new patient to queue (Quick / Complete Registration)
-  const handleAddNewQueue = async () => {
+  const handleAddNewQueue = () => {
     const targetPoli = allPoliList.find(p => p.id === newQueueForm.poliId) || currentPoli || allPoliList[0];
     let chosenPatient = pasien.find(p => String(p.id) === String(newQueueForm.pasienId));
     
@@ -699,12 +699,8 @@ export function Outpatient() {
         alamat: newQueueForm.alamat.trim() || 'Kota Bandung, Jawa Barat'
       };
 
-      try {
-        chosenPatient = await addPasien(newP);
-      } catch (error) {
-        toast.error(`Pasien gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
-        return;
-      }
+      chosenPatient = newP;
+      addPasien(newP);
     }
 
     if (!chosenPatient) {
@@ -734,14 +730,8 @@ export function Outpatient() {
       keluhan_utama: newQueueForm.keluhan.trim() || `Pemeriksaan klinis di ${targetPoli.nama}`
     };
 
-    // 1. Simpan Kunjungan di HospitalContext (server memberi id dan nomor antrean final)
-    let savedVisit: Kunjungan;
-    try {
-      savedVisit = await addKunjungan(newVisit);
-    } catch (error) {
-      toast.error(`Kunjungan gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
-      return;
-    }
+    // 1. Simpan Kunjungan di HospitalContext
+    addKunjungan(newVisit);
 
     // 2. Sinkronkan ke PatientFlowContext
     try {
@@ -778,7 +768,7 @@ export function Outpatient() {
     // Interline integration for billing, EMR and visit
     integrateRegistration({
       patient: chosenPatient,
-      visit: savedVisit,
+      visit: newVisit,
       isBPJS: newQueueForm.penjamin.includes('BPJS'),
       poliNama: targetPoli.nama,
       dokterNama: assignedDoc.nama,
@@ -787,10 +777,10 @@ export function Outpatient() {
 
     // 4. Update Filter & Focus
     setSelectedPoliFilter(targetPoli.id);
-    setActiveQueue(savedVisit.id);
+    setActiveQueue(newVisit.id);
     setShowAddPatientModal(false);
 
-    toast.success(`🎫 Pasien ${chosenPatient.nama} berhasil didaftarkan ke ${targetPoli.nama}! (No. Antrean: ${savedVisit.nomor_antrian || nomorAntrian})`);
+    toast.success(`🎫 Pasien ${chosenPatient.nama} berhasil didaftarkan ke ${targetPoli.nama}! (No. Antrean: ${nomorAntrian})`);
 
     // Reset Form State
     setNewQueueForm({
@@ -861,7 +851,7 @@ export function Outpatient() {
     const countCheckedIn = bookingList.filter(b => b.status_booking === 'Check-In').length;
     const countDone = bookingList.filter(b => b.status_booking === 'Selesai').length;
 
-    const handleCheckInBooking = async (b: any) => {
+    const handleCheckInBooking = (b: any) => {
       // Find patient or create
       let p = pasien.find(px => px.no_rm === b.no_rm || String(px.id) === String(b.pasien_id));
       if (!p) {
@@ -879,12 +869,8 @@ export function Outpatient() {
           status: 'Aktif',
           alamat: 'Kota Bandung'
         };
-        try {
-          p = await addPasien(newP);
-        } catch (error) {
-          toast.error(`Pasien gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
-          return;
-        }
+        addPasien(newP);
+        p = newP;
       }
 
       const targetPoli = allPoliList.find(x => x.id === b.poli_id || x.nama === b.poli_tujuan) || allPoliList[0];
@@ -906,17 +892,11 @@ export function Outpatient() {
         keluhan_utama: b.keluhan || `Booking Registrasi di ${targetPoli.nama}`
       };
 
-      let savedVisit: Kunjungan;
-      try {
-        savedVisit = await addKunjungan(newVisit);
-      } catch (error) {
-        toast.error(`Check-in gagal disimpan ke server: ${error instanceof Error ? error.message : 'coba lagi'}`);
-        return;
-      }
+      addKunjungan(newVisit);
 
       // Update booking status
       setBookingList(prev => prev.map(item => item.id === b.id ? { ...item, status_booking: 'Check-In' } : item));
-      toast.success(`Pasien ${b.nama_pasien} berhasil Check-In ke Antrian ${targetPoli.nama} (${savedVisit.nomor_antrian || newVisit.nomor_antrian})`);
+      toast.success(`Pasien ${b.nama_pasien} berhasil Check-In ke Antrian ${targetPoli.nama} (${newVisit.nomor_antrian})`);
     };
 
     return (
@@ -1527,13 +1507,13 @@ export function Outpatient() {
             <UserPlus className="w-3.5 h-3.5" /> + Pasien Baru
           </button>
 
-          {import.meta.env.DEV && <button
+          <button
             onClick={() => handleLoadDemoScribe('dalam')}
             className="px-3 py-2 bg-purple-950/60 hover:bg-purple-900/70 border border-purple-700/60 text-purple-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
             title="Muat demo suara AI Scribe kasus Penyakit Dalam"
           >
             <Sparkles className="w-3.5 h-3.5" /> Demo AI
-          </button>}
+          </button>
         </div>
       </div>
 

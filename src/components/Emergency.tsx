@@ -16,7 +16,6 @@ import { DATA_DOKTER_JAGA_LENGKAP } from '../data/dataDokterJagaLengkap';
 import PrintPDFButton from './PrintPDFButton';
 import { GoogleMapsHealthLocator } from './Common/GoogleMapsHealthLocator';
 import { allocatePatientToBed, integrateRegistration } from '../utils/interlineIntegration';
-import { usesServerPersistence } from '../lib/firestoreService';
 
 export function Emergency() {
   const { activeTab } = useOutletContext<{ activeTab: string }>() || { activeTab: 'Triase' };
@@ -36,7 +35,7 @@ export function Emergency() {
         console.warn('Failed parsing emergency triage storage:', e);
       }
     }
-    return usesServerPersistence ? [] : generate50IGDPatients();
+    return generate50IGDPatients();
   });
   
   // Save to LocalStorage whenever triagePatients changes

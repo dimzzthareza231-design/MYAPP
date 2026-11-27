@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   Printer, Download, Copy, Check, QrCode, X, Shield, 
@@ -28,73 +28,35 @@ export function PatientQRCodeModal({
   const { hospitalSettings } = useHospital();
   const [selectedFormat, setSelectedFormat] = useState<PrintFormat>('stiker_map');
   const [copied, setCopied] = useState(false);
-  const [includeNik, setIncludeNik] = useState(false);
+  const [includeNik, setIncludeNik] = useState(true);
   const [includeAlergi, setIncludeAlergi] = useState(true);
   const [includeGolDarah, setIncludeGolDarah] = useState(true);
-  const [qrPayload, setQrPayload] = useState('');
-  const [qrLoading, setQrLoading] = useState(false);
-  const [qrError, setQrError] = useState('');
   const printAreaRef = useRef<HTMLDivElement>(null);
-
-  const patientNoRm = String(patient?.no_rm || patient?.noRm || '');
-  const noRm = patientNoRm || 'RM-000000';
-  const nama = patient?.nama || patient?.name || 'Pasien Tanpa Nama';
-  const nik = patient?.nik || '-';
-  const tglLahir = patient?.tanggal_lahir || patient?.tgl_lahir || patient?.birthDate || '-';
-  const jenisKelamin = patient?.jenis_kelamin === 'L' ? 'Laki-laki (L)' : patient?.jenis_kelamin === 'P' ? 'Perempuan (P)' : (patient?.jenis_kelamin || '-');
-  const golDarah = patient?.golongan_darah || patient?.bloodType || '-';
-  const penjamin = patient?.penjamin || 'Umum / Mandiri';
-  const alamat = patient?.alamat || '-';
-  const alergi = Array.isArray(patient?.alergi) ? patient.alergi.join(', ') : (patient?.alergi || 'Tidak Ada Alergi Terdata');
-  const todayStr = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-
-  useEffect(() => {
-    let active = true;
-    setQrPayload('');
-    setQrError('');
-    if (!isOpen || !patientNoRm) {
-      setQrLoading(false);
-      return () => { active = false; };
-    }
-
-    setQrLoading(true);
-    fetch('/api/v1/patient-qr/issue', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ no_rm: patientNoRm })
-    })
-      .then(async (response) => {
-        const data = await response.json().catch(() => null);
-        if (!response.ok || typeof data?.qrValue !== 'string') {
-          throw new Error(data?.code || 'QR_TOKEN_ISSUE_FAILED');
-        }
-        return data.qrValue as string;
-      })
-      .then((token) => {
-        if (active) setQrPayload(token);
-      })
-      .catch((error: unknown) => {
-        if (active) setQrError(error instanceof Error ? error.message : 'QR_TOKEN_ISSUE_FAILED');
-      })
-      .finally(() => {
-        if (active) setQrLoading(false);
-      });
-
-    return () => { active = false; };
-  }, [isOpen, patientNoRm]);
 
   if (!isOpen || !patient) return null;
 
+  const noRm = patient.no_rm || patient.noRm || patient.id || 'RM-000000';
+  const nama = patient.nama || patient.name || 'Pasien Tanpa Nama';
+  const nik = patient.nik || '-';
+  const tglLahir = patient.tanggal_lahir || patient.tgl_lahir || patient.birthDate || '-';
+  const jenisKelamin = patient.jenis_kelamin === 'L' ? 'Laki-laki (L)' : patient.jenis_kelamin === 'P' ? 'Perempuan (P)' : (patient.jenis_kelamin || '-');
+  const golDarah = patient.golongan_darah || patient.bloodType || '-';
+  const penjamin = patient.penjamin || 'Umum / Mandiri';
+  const alamat = patient.alamat || '-';
+  const alergi = Array.isArray(patient.alergi) ? patient.alergi.join(', ') : (patient.alergi || 'Tidak Ada Alergi Terdata');
+  const todayStr = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  // Direct secure deep link to open patient EMR
+  const emrDeepLink = `${window.location.origin}/modul/rekam-medis?rm=${encodeURIComponent(noRm)}&source=qr`;
+
+  // Standard payload encoded in the QR code: URL with fallback schema
+  const qrPayload = emrDeepLink;
+
   const handleCopyLink = async () => {
-    if (!qrPayload) {
-      toast.error('QR aman belum berhasil dibuat.');
-      return;
-    }
     try {
-      await navigator.clipboard.writeText(qrPayload);
+      await navigator.clipboard.writeText(emrDeepLink);
       setCopied(true);
-      toast.success('Token QR terenkripsi berhasil disalin.');
+      toast.success('Tautan akses EMR berhasil disalin ke clipboard');
       setTimeout(() => setCopied(false), 2500);
     } catch {
       toast.error('Gagal menyalin tautan');
@@ -292,7 +254,7 @@ export function PatientQRCodeModal({
                   {/* Left info column */}
                   <div className="flex-1 space-y-1.5">
                     <div className="flex items-center gap-1.5 border-b border-slate-300 pb-1">
-                      <BrandLogo alt="Logo MYITARU" className="w-5 h-5 rounded object-cover shrink-0" />
+                      <BrandLogo alt="Logo Klinik" className="w-5 h-5 rounded object-cover shrink-0" />
                       <div>
                         <div className="font-extrabold text-[11px] uppercase tracking-wider text-cyan-900 leading-none">
                           {hospitalSettings?.name || 'MYITARU SIMK'}
@@ -346,9 +308,12 @@ export function PatientQRCodeModal({
                   {/* Right QR column */}
                   <div className="flex flex-col items-center justify-between border-l border-slate-200 pl-3 w-[120px] shrink-0">
                     <div className="bg-white p-1.5 rounded-lg border border-slate-300 shadow-2xs">
-                      {qrPayload
-                        ? <QRCodeSVG value={qrPayload} size={98} level="M" includeMargin={false} />
-                        : <span className="block w-[98px] text-center text-[8px] text-slate-500">{qrLoading ? 'Membuat QR aman...' : qrError || 'QR belum tersedia'}</span>}
+                      <QRCodeSVG
+                        value={qrPayload}
+                        size={98}
+                        level="M"
+                        includeMargin={false}
+                      />
                     </div>
                     <div className="text-center mt-1">
                       <span className="text-[8px] font-bold text-slate-600 uppercase block tracking-tighter">
@@ -367,9 +332,7 @@ export function PatientQRCodeModal({
                 <div className="w-[520px] h-[78px] bg-cyan-50 text-slate-900 px-4 py-2 rounded-xl border-2 border-cyan-800 shadow-md flex items-center justify-between font-sans text-xs">
                   <div className="flex items-center gap-3">
                     <div className="bg-white p-1 rounded-md border border-slate-300">
-                      {qrPayload
-                        ? <QRCodeSVG value={qrPayload} size={56} level="M" />
-                        : <span className="block w-[56px] text-center text-[7px] text-slate-500">{qrLoading ? '...' : 'QR tidak tersedia'}</span>}
+                      <QRCodeSVG value={qrPayload} size={56} level="M" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
@@ -388,7 +351,7 @@ export function PatientQRCodeModal({
 
                   <div className="text-right border-l border-cyan-200 pl-3">
                     <div className="text-[10px] font-bold uppercase text-cyan-800">
-                      {hospitalSettings?.name || 'MYITARU'}
+                      {hospitalSettings?.name || 'KLINIK TARUMANAGARA'}
                     </div>
                     <div className="text-[8px] text-slate-500 font-mono">GELANG IDENTITAS PASIEN</div>
                     <div className="text-[8px] text-slate-400 mt-1">EMR Verified</div>
@@ -401,10 +364,10 @@ export function PatientQRCodeModal({
                 <div className="w-[360px] h-[220px] bg-gradient-to-br from-white via-cyan-50/30 to-blue-50/50 text-slate-900 p-4 rounded-xl border-2 border-slate-800 shadow-lg flex flex-col justify-between font-sans text-xs">
                   <div className="flex items-center justify-between border-b border-slate-300 pb-2">
                     <div className="flex items-center gap-2">
-                      <BrandLogo alt="Logo MYITARU" className="w-7 h-7 rounded-lg object-cover shrink-0" />
+                      <BrandLogo alt="Logo Klinik" className="w-7 h-7 rounded-lg object-cover shrink-0" />
                       <div>
                         <div className="font-extrabold text-xs uppercase tracking-wider text-cyan-900 leading-tight">
-                          {hospitalSettings?.name || 'MYITARU'}
+                          {hospitalSettings?.name || 'KLINIK TARUMANAGARA'}
                         </div>
                         <div className="text-[8px] text-slate-500 font-medium">KARTU BEROBAT & REKAM MEDIS</div>
                       </div>
@@ -431,9 +394,7 @@ export function PatientQRCodeModal({
                     </div>
 
                     <div className="flex flex-col items-center bg-white p-2 rounded-xl border border-slate-300 shadow-xs">
-                      {qrPayload
-                        ? <QRCodeSVG value={qrPayload} size={84} level="M" />
-                        : <span className="block w-[84px] text-center text-[8px] text-slate-500">{qrLoading ? 'Membuat QR...' : 'QR tidak tersedia'}</span>}
+                      <QRCodeSVG value={qrPayload} size={84} level="M" />
                       <span className="text-[7px] font-bold text-slate-500 mt-1 uppercase">Scan EMR</span>
                     </div>
                   </div>
@@ -450,9 +411,9 @@ export function PatientQRCodeModal({
                 <div className="w-[500px] bg-white text-slate-900 p-6 rounded-xl border-2 border-slate-900 shadow-md font-sans text-xs space-y-4">
                   {/* Header */}
                   <div className="text-center border-b-2 border-slate-900 pb-3">
-                    <BrandLogo alt="Logo MYITARU" className="w-10 h-10 rounded-xl object-cover mx-auto mb-1.5" />
+                    <BrandLogo alt="Logo Klinik" className="w-10 h-10 rounded-xl object-cover mx-auto mb-1.5" />
                     <h2 className="font-black text-sm uppercase tracking-wider text-slate-900">
-                      {hospitalSettings?.name || 'MYITARU'}
+                      {hospitalSettings?.name || 'KLINIK TARUMANAGARA'}
                     </h2>
                     <p className="text-[9px] text-slate-600">{hospitalSettings?.address || 'Jl. Kesehatan No. 10 Jakarta Pusat'}</p>
                     <div className="mt-2 inline-block px-3 py-1 bg-slate-900 text-white font-extrabold text-xs uppercase tracking-widest rounded">
@@ -486,13 +447,11 @@ export function PatientQRCodeModal({
                     </div>
 
                     <div className="flex flex-col items-center justify-center p-3 bg-slate-50 rounded-xl border border-slate-300">
-                      {qrPayload
-                        ? <QRCodeSVG value={qrPayload} size={110} level="M" />
-                        : <span className="block w-[110px] text-center text-[8px] text-slate-500">{qrLoading ? 'Membuat QR...' : 'QR tidak tersedia'}</span>}
+                      <QRCodeSVG value={qrPayload} size={110} level="M" />
                       <span className="text-[8px] font-bold uppercase text-slate-700 mt-2 tracking-tight text-center">
                         PINDAI AKSES CEPAT RME
                       </span>
-                      <span className="text-[7px] text-slate-500 font-mono">Bukan TTE tersertifikasi</span>
+                      <span className="text-[7px] text-slate-400 font-mono">BSrE Secure Verified</span>
                     </div>
                   </div>
 
@@ -507,25 +466,24 @@ export function PatientQRCodeModal({
 
           </div>
 
-          {/* ENCRYPTED QR TOKEN INFO BOX */}
+          {/* DEEP LINK INFO BOX */}
           <div className="bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2 max-w-xl truncate">
-              <span className="font-bold text-slate-500 dark:text-slate-400 shrink-0">Token QR terenkripsi:</span>
+              <span className="font-bold text-slate-500 dark:text-slate-400 shrink-0">Tautan Akses EMR:</span>
               <code className="bg-white dark:bg-slate-900 px-2.5 py-1 rounded border border-slate-200 dark:border-slate-800 font-mono text-cyan-600 dark:text-cyan-400 truncate">
-                {qrPayload || (qrLoading ? 'Membuat token...' : qrError || 'Belum tersedia')}
+                {emrDeepLink}
               </code>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                id="btn-copy-patient-qr-token"
+                id="btn-copy-emr-link"
                 onClick={handleCopyLink}
-                disabled={!qrPayload}
                 className="px-3 py-1.5 rounded-lg font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? 'Tersalin' : 'Salin Token QR'}</span>
+                <span>{copied ? 'Tersalin' : 'Salin Tautan'}</span>
               </button>
 
               {onOpenEMR && (

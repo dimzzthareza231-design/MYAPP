@@ -1,31 +1,48 @@
 import React, { useState } from 'react';
 import { usePatientFlow, STATUS_RJ, STATUS_RI } from '../contexts/PatientFlowContext';
+import { useAuth } from '../contexts/AuthContext';
 import PatientJourneyTracker from './PatientJourneyTracker';
 import FormSOAP from './FormSOAP';
 
 export default function PatientFlowDashboard() {
   const { kunjungan, notifications, markNotifRead, markAllNotifRead } = usePatientFlow();
+  const { facilityMode } = useAuth();
   const [filter, setFilter] = useState('all');
   const [selectedPasien, setSelectedPasien] = useState<any>(null);
   const [showJourneyModal, setShowJourneyModal] = useState(false);
   const [showSOAPModal, setShowSOAPModal] = useState(false);
+
+  const visibleKunjungan = facilityMode === 'klinik'
+    ? kunjungan.filter((k: any) => k.jenis_kunjungan !== 'Rawat Inap')
+    : kunjungan;
+
+  const activeFilter = facilityMode === 'klinik' && filter === 'rawat_inap' ? 'all' : filter;
   
   const stats = {
-    total_aktif: kunjungan.filter((k: any) => k.status !== 'PULANG').length,
-    rawat_jalan: kunjungan.filter((k: any) => k.jenis_kunjungan === 'Rawat Jalan' && k.status !== 'PULANG').length,
-    rawat_inap: kunjungan.filter((k: any) => k.jenis_kunjungan === 'Rawat Inap' && k.status !== 'PULANG').length,
-    antri_poli: kunjungan.filter((k: any) => k.status === 'ANTRI_POLI').length,
-    antri_farmasi: kunjungan.filter((k: any) => k.status === 'ANTRI_FARMASI').length,
-    antri_kasir: kunjungan.filter((k: any) => k.status === 'ANTRI_KASIR').length,
-    sedang_dirawat: kunjungan.filter((k: any) => k.status === 'DIRAWAT').length
+    total_aktif: visibleKunjungan.filter((k: any) => k.status !== 'PULANG').length,
+    rawat_jalan: visibleKunjungan.filter((k: any) => k.jenis_kunjungan === 'Rawat Jalan' && k.status !== 'PULANG').length,
+    rawat_inap: visibleKunjungan.filter((k: any) => k.jenis_kunjungan === 'Rawat Inap' && k.status !== 'PULANG').length,
+    antri_poli: visibleKunjungan.filter((k: any) => k.status === 'ANTRI_POLI').length,
+    antri_farmasi: visibleKunjungan.filter((k: any) => k.status === 'ANTRI_FARMASI').length,
+    antri_kasir: visibleKunjungan.filter((k: any) => k.status === 'ANTRI_KASIR').length,
+    sedang_dirawat: visibleKunjungan.filter((k: any) => k.status === 'DIRAWAT').length
   };
   
-  const filteredKunjungan = kunjungan.filter((k: any) => {
-    if (filter === 'all') return k.status !== 'PULANG';
-    if (filter === 'rawat_jalan') return k.jenis_kunjungan === 'Rawat Jalan' && k.status !== 'PULANG';
-    if (filter === 'rawat_inap') return k.jenis_kunjungan === 'Rawat Inap' && k.status !== 'PULANG';
-    return k.status === filter;
+  const filteredKunjungan = visibleKunjungan.filter((k: any) => {
+    if (activeFilter === 'all') return k.status !== 'PULANG';
+    if (activeFilter === 'rawat_jalan') return k.jenis_kunjungan === 'Rawat Jalan' && k.status !== 'PULANG';
+    if (activeFilter === 'rawat_inap') return k.jenis_kunjungan === 'Rawat Inap' && k.status !== 'PULANG';
+    return k.status === activeFilter;
   });
+
+  const filterButtons = [
+    { id: 'all', label: 'Semua Aktif' },
+    { id: 'rawat_jalan', label: 'Rawat Jalan' },
+    ...(facilityMode === 'rumah_sakit' ? [{ id: 'rawat_inap', label: 'Rawat Inap' }] : []),
+    { id: 'ANTRI_POLI', label: 'Antri Poli' },
+    { id: 'ANTRI_FARMASI', label: 'Antri Farmasi' },
+    { id: 'ANTRI_KASIR', label: 'Antri Kasir' }
+  ];
   
   const getStatusBadge = (status: string) => {
     const colors: any = {
@@ -54,7 +71,7 @@ export default function PatientFlowDashboard() {
       </div>
       
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+      <div className={`grid grid-cols-2 md:grid-cols-4 ${facilityMode === 'klinik' ? 'lg:grid-cols-5' : 'lg:grid-cols-7'} gap-3 mb-6`}>
         <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg p-3">
           <div className="text-2xl">👥</div>
           <div className="text-2xl font-bold">{stats.total_aktif}</div>
@@ -65,11 +82,13 @@ export default function PatientFlowDashboard() {
           <div className="text-2xl font-bold">{stats.rawat_jalan}</div>
           <div className="text-xs">Rawat Jalan</div>
         </div>
-        <div className="bg-gradient-to-br from-red-500 to-red-600 text-white rounded-lg p-3">
-          <div className="text-2xl">🛏️</div>
-          <div className="text-2xl font-bold">{stats.rawat_inap}</div>
-          <div className="text-xs">Rawat Inap</div>
-        </div>
+        {facilityMode === 'rumah_sakit' && (
+          <div className="bg-gradient-to-br from-red-500 to-red-600 text-white rounded-lg p-3">
+            <div className="text-2xl">🛏️</div>
+            <div className="text-2xl font-bold">{stats.rawat_inap}</div>
+            <div className="text-xs">Rawat Inap</div>
+          </div>
+        )}
         <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-lg p-3">
           <div className="text-2xl">🏥</div>
           <div className="text-2xl font-bold">{stats.antri_poli}</div>
@@ -85,11 +104,13 @@ export default function PatientFlowDashboard() {
           <div className="text-2xl font-bold">{stats.antri_kasir}</div>
           <div className="text-xs">Antri Kasir</div>
         </div>
-        <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg p-3">
-          <div className="text-2xl">💉</div>
-          <div className="text-2xl font-bold">{stats.sedang_dirawat}</div>
-          <div className="text-xs">Dirawat</div>
-        </div>
+        {facilityMode === 'rumah_sakit' && (
+          <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg p-3">
+            <div className="text-2xl">💉</div>
+            <div className="text-2xl font-bold">{stats.sedang_dirawat}</div>
+            <div className="text-xs">Dirawat</div>
+          </div>
+        )}
       </div>
       
       {/* Notifications */}
@@ -115,19 +136,12 @@ export default function PatientFlowDashboard() {
       {/* Filter */}
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4 mb-4 border border-slate-200 dark:border-slate-700">
         <div className="flex flex-wrap gap-2">
-          {[
-            { id: 'all', label: 'Semua Aktif' },
-            { id: 'rawat_jalan', label: 'Rawat Jalan' },
-            { id: 'rawat_inap', label: 'Rawat Inap' },
-            { id: 'ANTRI_POLI', label: 'Antri Poli' },
-            { id: 'ANTRI_FARMASI', label: 'Antri Farmasi' },
-            { id: 'ANTRI_KASIR', label: 'Antri Kasir' }
-          ].map(f => (
+          {filterButtons.map(f => (
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
               className={`px-4 py-2 rounded text-sm transition-colors ${
-                filter === f.id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600'
+                activeFilter === f.id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600'
               }`}
             >
               {f.label}

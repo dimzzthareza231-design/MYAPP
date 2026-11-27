@@ -72,7 +72,7 @@ export const EmployeePortal: React.FC = () => {
   // Gateway auth state
   const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('myitaru_emp_token'));
   const [loginIdentifier, setLoginIdentifier] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
+  const [loginPassword, setLoginPassword] = useState('myitaru2026');
   const [selectedLoginDivId, setSelectedLoginDivId] = useState<string>('keperawatan');
   const [loginCategoryFilter, setLoginCategoryFilter] = useState<'Semua' | DivisionCategory>('Semua');
   const [authLoading, setAuthLoading] = useState(false);
@@ -248,7 +248,7 @@ export const EmployeePortal: React.FC = () => {
           password: loginPassword,
           divisionId: divOverride || (loginIdentifier.trim() ? undefined : selectedLoginDivId),
           authType,
-          googleEmail: authType === 'google' ? 'pegawai@myitaru.id' : undefined,
+          googleEmail: authType === 'google' ? 'pegawai@tarumanagara-klinik.id' : undefined,
           deviceInfo: navigator.userAgent.slice(0, 60)
         })
       });
@@ -429,7 +429,7 @@ export const EmployeePortal: React.FC = () => {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="space-y-1">
               <p className="text-xs font-bold uppercase tracking-wider text-[#0B3D91] dark:text-sky-400">
-                PORTAL KEPEGAWAIAN &amp; HRIS · MYITARU SIMK
+                PORTAL KEPEGAWAIAN &amp; HRIS · KLINIK TARUMANAGARA (MYITARU SIMK)
               </p>
               <div className="flex flex-wrap items-center gap-2.5">
                 <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
@@ -460,24 +460,35 @@ export const EmployeePortal: React.FC = () => {
                 <>
                   <div>
                     <p className="text-xs font-bold uppercase tracking-wider text-[#0B3D91] dark:text-sky-400">
-                      SINGLE SIGN-ON KARYAWAN MYITARU
+                      SINGLE SIGN-ON KARYAWAN KLINIK TARUMANAGARA
                     </p>
                     <h2 className="text-2xl font-extrabold mt-1">Masuk Portal Karyawan</h2>
                     <p className="text-xs text-slate-500 mt-1">
-                      Autentikasi NIP/Email HRIS. Role Klinis &amp; Admin wajib verifikasi MFA 6-digit.
+                      Autentikasi NIP/Email HRIS atau akun Google. Role Klinis &amp; Admin wajib verifikasi MFA 6-digit.
                     </p>
                   </div>
 
-                  {import.meta.env.PROD && (
-                    <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
-                      Login belum tersedia: autentikasi HRIS dan penyimpanan portal karyawan belum dikonfigurasi untuk produksi.
-                    </p>
-                  )}
+                  <button
+                    type="button"
+                    disabled={authLoading}
+                    onClick={() => executeGatewayLogin('google')}
+                    className="w-full py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 font-bold text-xs flex items-center justify-center gap-2.5 cursor-pointer"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-[#0B3D91] dark:text-sky-400" />
+                    <span>Masuk dengan SSO Akun Google Institusi</span>
+                  </button>
+
+                  <div className="relative flex items-center justify-center">
+                    <span className="border-t border-slate-200 dark:border-slate-800 w-full" />
+                    <span className="bg-white dark:bg-slate-900 px-3 text-[11px] text-slate-400 font-semibold whitespace-nowrap">
+                      atau Login NIP / Divisi
+                    </span>
+                    <span className="border-t border-slate-200 dark:border-slate-800 w-full" />
+                  </div>
 
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
-                      if (import.meta.env.PROD) return;
                       executeGatewayLogin('nip');
                     }}
                     className="space-y-4"
@@ -488,7 +499,6 @@ export const EmployeePortal: React.FC = () => {
                         type="text"
                         value={loginIdentifier}
                         onChange={(e) => setLoginIdentifier(e.target.value)}
-                        disabled={import.meta.env.PROD}
                         placeholder="Contoh: NIP-19840920-015 atau kosongkan untuk demo"
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                       />
@@ -499,7 +509,6 @@ export const EmployeePortal: React.FC = () => {
                       <select
                         value={selectedLoginDivId}
                         onChange={(e) => setSelectedLoginDivId(e.target.value)}
-                        disabled={import.meta.env.PROD}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         {HOSPITAL_DIVISIONS.map((d) => (
@@ -516,17 +525,16 @@ export const EmployeePortal: React.FC = () => {
                         type="password"
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
-                        disabled={import.meta.env.PROD}
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
 
                     <button
                       type="submit"
-                      disabled={authLoading || import.meta.env.PROD}
+                      disabled={authLoading}
                       className="w-full py-3 rounded-xl bg-[#0B3D91] hover:bg-[#082D6E] text-white font-bold text-sm transition cursor-pointer disabled:opacity-60"
                     >
-                      {authLoading ? 'Memverifikasi via API Gateway...' : import.meta.env.PROD ? 'Belum tersedia di produksi' : 'Lanjutkan Login'}
+                      {authLoading ? 'Memverifikasi via API Gateway...' : 'Lanjutkan Login'}
                     </button>
                   </form>
 
@@ -592,7 +600,7 @@ export const EmployeePortal: React.FC = () => {
             {/* Right: 34 Divisions Instant Access Matrix */}
             <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-sm">
               <div>
-                <h2 className="text-lg font-extrabold">Akses Cepat Seluruh 34 Divisi &amp; Jabatan MYITARU</h2>
+                <h2 className="text-lg font-extrabold">Akses Cepat Seluruh 34 Divisi &amp; Jabatan Klinik Tarumanagara</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Klik salah satu divisi di bawah untuk langsung login &amp; melihat modul inti + modul spesifik RBAC/ABAC divisi tersebut.
                 </p>
@@ -794,7 +802,7 @@ export const EmployeePortal: React.FC = () => {
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs text-slate-500 whitespace-nowrap">
               <span className="font-medium text-slate-600 dark:text-slate-300">
-                MYITARU
+                Klinik Tarumanagara
               </span>
               <span>/</span>
               <span>Portal Karyawan</span>
@@ -1207,14 +1215,14 @@ export const EmployeePortal: React.FC = () => {
                   Radius Kampus: <strong>{attendanceData.geofence.name}</strong> (Maks. {attendanceData.geofence.radiusMeters} meter).
                 </p>
 
-                {import.meta.env.DEV && <label className="flex items-center gap-2 text-xs font-semibold p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 cursor-pointer">
+                <label className="flex items-center gap-2 text-xs font-semibold p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={simulateOutOfRange}
                     onChange={(e) => setSimulateOutOfRange(e.target.checked)}
                   />
                   <span>Simulasikan Posisi di Luar Radius Klinik (Uji Tolak Geofence)</span>
-                </label>}
+                </label>
 
                 <div className="grid grid-cols-2 gap-2.5">
                   {(['MASUK', 'PULANG', 'LEMBUR', 'KOREKSI'] as const).map((clockType) => (
@@ -1778,7 +1786,7 @@ export const EmployeePortal: React.FC = () => {
                 </form>
 
                 <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-2.5">
-                  <h3 className="font-bold text-sm">Pengumuman Resmi MYITARU</h3>
+                  <h3 className="font-bold text-sm">Pengumuman Resmi Klinik Tarumanagara</h3>
                   {sbarData.announcements.map((a: any) => (
                     <div key={a.id} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs space-y-1">
                       <p className="font-bold">{a.title}</p>

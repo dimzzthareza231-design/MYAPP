@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from './AuthContext';
 
 interface Shortcut {
   key: string;
   description: string;
   action: () => void;
   category: string;
+  moduleId?: string;
 }
 
 interface KeyboardShortcutsContextType {
@@ -19,23 +21,24 @@ const KeyboardShortcutsContext = createContext<KeyboardShortcutsContextType | un
 export function KeyboardShortcutsProvider({ children }: { children: React.ReactNode }) {
   const [showHelp, setShowHelp] = useState(false);
   const navigate = useNavigate();
+  const { hasAccess } = useAuth();
   
-  const shortcuts: Shortcut[] = [
+  const rawShortcuts: Shortcut[] = [
     { key: 'Ctrl+K', description: 'Command Palette', action: () => window.dispatchEvent(new CustomEvent('open-command-palette')), category: 'Global' },
     { key: '?', description: 'Show Shortcuts Help', action: () => setShowHelp(true), category: 'Global' },
     { key: 'Ctrl+/', description: 'Toggle Help', action: () => setShowHelp(prev => !prev), category: 'Global' },
     { key: 'Escape', description: 'Close Modal/Dialog', action: () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })), category: 'Global' },
     
     { key: 'g h', description: 'Ke Dashboard Utama', action: () => navigate('/dashboard'), category: 'Navigation' },
-    { key: 'g p', description: 'Ke Pendaftaran Pasien', action: () => navigate('/modul/pendaftaran'), category: 'Navigation' },
-    { key: 'g r', description: 'Ke Rawat Jalan (Poli)', action: () => navigate('/modul/rawat-jalan'), category: 'Navigation' },
-    { key: 'g i', description: 'Ke Rawat Inap', action: () => navigate('/modul/rawat-inap'), category: 'Navigation' },
-    { key: 'g e', description: 'Ke IGD & Triase', action: () => navigate('/modul/igd'), category: 'Navigation' },
-    { key: 'g f', description: 'Ke Farmasi & Apotek', action: () => navigate('/modul/apotek-ralan'), category: 'Navigation' },
-    { key: 'g b', description: 'Ke Kasir & Billing', action: () => navigate('/modul/kasir'), category: 'Navigation' },
-    { key: 'g l', description: 'Ke Laboratorium', action: () => navigate('/modul/laboratorium'), category: 'Navigation' },
-    { key: 'g m', description: 'Ke Monitoring Sistem', action: () => navigate('/modul/monitoring'), category: 'Navigation' },
-    { key: 'g a', description: 'Ke Laporan & Mutu', action: () => navigate('/modul/laporan'), category: 'Navigation' },
+    { key: 'g p', description: 'Ke Pendaftaran Pasien', moduleId: 'pendaftaran', action: () => navigate('/modul/pendaftaran'), category: 'Navigation' },
+    { key: 'g r', description: 'Ke Rawat Jalan (Poli)', moduleId: 'rawat-jalan', action: () => navigate('/modul/rawat-jalan'), category: 'Navigation' },
+    { key: 'g i', description: 'Ke Rawat Inap', moduleId: 'rawat-inap', action: () => navigate('/modul/rawat-inap'), category: 'Navigation' },
+    { key: 'g e', description: 'Ke IGD & Triase', moduleId: 'igd', action: () => navigate('/modul/igd'), category: 'Navigation' },
+    { key: 'g f', description: 'Ke Farmasi & Apotek', moduleId: 'apotek-ralan', action: () => navigate('/modul/apotek-ralan'), category: 'Navigation' },
+    { key: 'g b', description: 'Ke Kasir & Billing', moduleId: 'kasir', action: () => navigate('/modul/kasir'), category: 'Navigation' },
+    { key: 'g l', description: 'Ke Laboratorium', moduleId: 'laboratorium', action: () => navigate('/modul/laboratorium'), category: 'Navigation' },
+    { key: 'g m', description: 'Ke Monitoring Sistem', moduleId: 'monitoring', action: () => navigate('/modul/monitoring'), category: 'Navigation' },
+    { key: 'g a', description: 'Ke Laporan & Mutu', moduleId: 'laporan', action: () => navigate('/modul/laporan'), category: 'Navigation' },
     
     { key: 'Ctrl+P', description: 'Print Current Page', action: () => window.print(), category: 'Actions' },
     { key: 'Ctrl+F', description: 'Focus Search', action: () => {
@@ -54,6 +57,8 @@ export function KeyboardShortcutsProvider({ children }: { children: React.ReactN
       }
     }, category: 'View' },
   ];
+
+  const shortcuts = rawShortcuts.filter(s => !s.moduleId || hasAccess(s.moduleId));
   
   useEffect(() => {
     let keyBuffer = '';

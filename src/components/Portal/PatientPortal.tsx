@@ -57,9 +57,9 @@ export function PatientPortal() {
         {activeTab === 'maps' && (
           <div className="space-y-4">
             <GoogleMapsHealthLocator
-              initialQuery="MYITARU dan Fasilitas Kesehatan terdekat"
+              initialQuery="Klinik Tarumanagara dan Fasilitas Kesehatan terdekat"
               defaultCategory="hospital"
-              title="Peta Lokasi MYITARU & Petunjuk Arah Fasilitas Kesehatan"
+              title="Peta Lokasi Klinik Tarumanagara & Petunjuk Arah Fasilitas Kesehatan"
               subtitle="Navigasi langsung menggunakan Google Maps, estimasi jarak dan rute berkendara terdekat"
             />
           </div>
