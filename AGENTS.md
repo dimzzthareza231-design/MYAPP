@@ -1,6 +1,6 @@
 # AGENTS.md — Multi-Agent Collaboration Guidelines (MYAPP / MYITARU)
 
-Dokumen ini adalah acuan bersama (**always-on**) bagi seluruh agent yang bekerja di repositori **MYAPP (MYITARU)**: **Claude**, **GitHub Copilot CLI**, **Google Antigravity**, dan **Gemini CLI**.
+Dokumen ini adalah acuan bersama (**always-on**) bagi seluruh agent yang bekerja di repositori **MYAPP (MYITARU)**: **Claude** (koordinator), **GitHub Copilot CLI**, **Google Antigravity**, **Gemini CLI**, dan **Cloudflare** (`cloudflare-worker`).
 
 ## 1. Pembagian Peran & Routing Tugas
 
@@ -19,12 +19,13 @@ Mencakup: perbaikan bug terisolasi, penyesuaian UI/UX kecil, penambahan unit tes
 ### Pembagian per Kemampuan Agent
 | Agent | Kekuatan | Tugas yang diberikan |
 |---|---|---|
-| **Claude** (lead) | Penalaran mendalam, perubahan lintas modul | Arsitektur, keamanan/auth, migrasi D1/Firestore, refactor besar, integrasi akhir, verifikasi, commit/push |
-| **GitHub Copilot CLI** | Terintegrasi GitHub (`gh`, PR, CI, issue) | Review diff, analisis CI gagal, perbaikan error `tsc`/lint, unit test terisolasi |
-| **Gemini CLI** | Konteks besar, cepat & murah (`gemini-3.5-flash-lite`) | Riset/pemetaan codebase read-only, ringkasan file/log besar, cek terminologi Klinik/SIMK/RME, dokumentasi |
-| **Antigravity** (`agy`) | Agent editor, kuat di frontend | Perubahan UI/UX kecil di `src/components/`, penyesuaian tampilan, test komponen |
+| **Claude** (koordinator) | Penalaran mendalam, perubahan lintas modul | Membagi & mengoordinasi tugas tim, turun langsung pada tugas berat (arsitektur, keamanan/auth, migrasi D1/Firestore, refactor besar), integrasi akhir, verifikasi, commit/push |
+| **GitHub Copilot CLI** | Ekosistem **GitHub** (`gh`, repo, PR, CI/Actions, issue) | Pengelolaan repo GitHub, review diff, analisis CI gagal, perbaikan error `tsc`/lint, unit test terisolasi |
+| **Gemini CLI** | Ekosistem **Google** (Gemini, Firebase/Firestore, Google Cloud); konteks besar (`gemini-3.5-flash-lite`) | Riset/pemetaan codebase read-only, urusan Firebase/Firestore, ringkasan file/log besar, cek terminologi Klinik/SIMK/RME, dokumentasi |
+| **Antigravity** (`agy`) | Ekosistem **Google**; agent editor, kuat di frontend | Perubahan UI/UX kecil di `src/components/`, penyesuaian tampilan, test komponen |
+| **Cloudflare** (`cloudflare-worker`) | Ekosistem **Cloudflare** (`wrangler`: Workers, D1, Durable Objects, DNS, log) | Cek status/health produksi, log worker, status migrasi D1, `wrangler.jsonc`, diagnosa deploy gagal. Deploy, migrasi remote, secret, dan DNS hanya dengan persetujuan pengguna |
 
-Claude memanggil pendamping lewat subagent `.claude/agents/*` atau `npm run agent:assist|light -- --agent=<gemini|copilot|agy> "<tugas>"` (`assist` = read-only/plan, `light` = boleh edit) dan `npm run agent:parallel -- "gemini: <riset>" "copilot: <test>" "agy: <UI>"` (awalan memilih agent; tanpa awalan dibagi round-robin). Pendamping tidak pernah commit/push/deploy; Claude meninjau setiap diff dan menjalankan verifikasi sebelum commit.
+Anggota Cloudflare dipanggil lewat subagent `.claude/agents/cloudflare-worker.md` (bukan dispatcher, karena Cloudflare tidak punya CLI agent AI). Claude memanggil pendamping lain lewat subagent `.claude/agents/*` atau `npm run agent:assist|light -- --agent=<gemini|copilot|agy> "<tugas>"` (`assist` = read-only/plan, `light` = boleh edit) dan `npm run agent:parallel -- "gemini: <riset>" "copilot: <test>" "agy: <UI>"` (awalan memilih agent; tanpa awalan dibagi round-robin). Pendamping tidak pernah commit/push/deploy; Claude meninjau setiap diff dan menjalankan verifikasi sebelum commit.
 
 ## 2. Konvensi Teknis & Domain (Wajib Semua Agent)
 - **Terminologi Domain**: Selalu gunakan istilah klinik (`Klinik`, `SIMK`, `RME`), bukan `Rumah Sakit` atau `SIMRS`.
