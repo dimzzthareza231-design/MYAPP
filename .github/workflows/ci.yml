@@ -117,9 +117,15 @@ jobs:
       - name: Cek health aplikasi inti
         if: steps.secret.outputs.ok == 'true'
         run: |
-          body="$(curl -fsS --retry 5 --retry-delay 10 --retry-all-errors https://myitaru.my.id/api/v1/health)"
-          echo "$body"
-          [ "$(printf '%s' "$body" | jq -r '.status')" = "HEALTHY" ]
+          for attempt in 1 2 3 4 5 6; do
+            code="$(curl -sS -o body.json -D headers.txt -w '%{http_code}' https://myitaru.my.id/api/v1/health || echo 000)"
+            if [ "$code" = 200 ] && [ "$(jq -r '.status' body.json 2>/dev/null)" = HEALTHY ]; then cat body.json; exit 0; fi
+            # Header cf-mitigated/server membedakan blokir Cloudflare (WAF/bot) dari error aplikasi.
+            echo "::warning::Percobaan $attempt: HTTP $code $(grep -iE '^(cf-mitigated|server|cf-ray):' headers.txt | tr -d '\r' | tr '\n' ' ')"
+            head -c 300 body.json; echo
+            sleep 10
+          done
+          exit 1
 
       - name: Rollback aplikasi inti jika deploy atau health check gagal
         if: failure() && steps.secret.outputs.ok == 'true' && steps.versions.outputs.core != ''
