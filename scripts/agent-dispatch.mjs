@@ -5,16 +5,25 @@ const [, , mode = 'help', ...rest] = process.argv;
 
 function quoteArg(arg) {
   if (/^[A-Za-z0-9_./:=+-]+$/.test(arg)) return arg;
-  return `"${arg.replace(/"/g, '\\"')}"`;
+  // cmd tidak mengenal \" (setiap " membalik mode kutip dan bisa membuka & | ke shell), jadi ganti dengan '.
+  // %VAR% juga diekspansi cmd di dalam kutip; ganti % agar teks tugas tidak berubah.
+  return process.platform === 'win32'
+    ? `"${arg.replace(/"/g, "'").replace(/%/g, ' persen')}"`
+    : `"${arg.replace(/"/g, '\\"')}"`;
 }
 
+// Dikirim apa adanya ke cmd (windowsVerbatimArguments); tanpa itu Node meng-escape ulang tanda kutip dan prompt terpecah.
 function buildCommand(command, args) {
   return [command, ...args.map(quoteArg)].join(' ');
 }
 
+// Batas waktu agar CLI yang macet (mis. Gemini retry 503 tanpa henti) tidak menggantung sesi.
+const AGENT_TIMEOUT_MS = 10 * 60 * 1000;
+const AGENTS = ['gemini', 'copilot', 'agy'];
+
 function run(command, args, opts = {}) {
   const result = process.platform === 'win32'
-    ? spawnSync('cmd', ['/c', buildCommand(command, args)], { stdio: 'inherit', ...opts })
+    ? spawnSync('cmd', ['/d', '/s', '/c', `"${buildCommand(command, args)}"`], { stdio: 'inherit', windowsVerbatimArguments: true, ...opts })
     : spawnSync(command, args, { stdio: 'inherit', ...opts });
   return result.status ?? 1;
 }
@@ -22,17 +31,32 @@ function run(command, args, opts = {}) {
 function runAsync(label, command, args) {
   return new Promise((resolve) => {
     const child = process.platform === 'win32'
-      ? spawn('cmd', ['/c', buildCommand(command, args)], { stdio: ['ignore', 'pipe', 'pipe'] })
-      : spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      ? spawn('cmd', ['/d', '/s', '/c', `"${buildCommand(command, args)}"`], { stdio: ['ignore', 'pipe', 'pipe'], windowsVerbatimArguments: true })
+      : spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    // Matikan seluruh pohon proses: membunuh cmd saja meninggalkan CLI anak tetap berjalan.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      else try { process.kill(-child.pid, 'SIGKILL'); } catch { /* sudah selesai */ }
+    }, AGENT_TIMEOUT_MS);
     child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('close', (code) => {
-      resolve({ label, code: code ?? 1, stdout: stdout.trim(), stderr: stderr.trim() });
+      clearTimeout(timer);
+      if (timedOut) stderr += `\n[agent] ${command} timeout ${AGENT_TIMEOUT_MS / 60000} menit`;
+      resolve({ label, code: timedOut ? 124 : code ?? 1, stdout: stdout.trim(), stderr: stderr.trim() });
     });
   });
+}
+
+function printResult(res) {
+  console.log(`\n=== [${res.label}] (exit ${res.code}) ===`);
+  if (res.stdout) console.log(res.stdout);
+  if (res.stderr) console.error(res.stderr);
 }
 
 function hasCli(name) {
@@ -46,20 +70,19 @@ function printHelp() {
   console.log(`
 MYAPP Multi-Agent Dispatcher (sesuai AGENTS.md)
 
-Catatan: dispatcher ini hanya dapat memanggil CLI yang terinstal di PATH
-(Gemini CLI dan GitHub Copilot CLI). Claude dan Antigravity tidak dipanggil
-lewat CLI ini — keduanya bekerja via IDE/VS Code atau conversation mereka
-masing-masing. Gunakan --dry-run untuk melihat prompt tanpa mengeksekusi CLI.
+Catatan: dispatcher ini memanggil CLI yang terinstal di PATH: Gemini CLI,
+GitHub Copilot CLI, dan Antigravity CLI (agy). Claude adalah lead yang memanggil
+dispatcher ini. Gunakan --dry-run untuk melihat prompt tanpa mengeksekusi CLI.
 
 Perintah:
   npm run agent:check [-- --build]          Jalankan verifikasi wajib (typecheck, test, opsional build)
-  npm run agent:light -- "<tugas>"           Jalankan tugas ringan via Gemini CLI / Copilot CLI
-  npm run agent:assist -- "<konteks>"        Jalankan mode pendamping (riset/audit/test) via Gemini / Copilot
+  npm run agent:light -- "<tugas>"           Jalankan tugas ringan via Gemini / Copilot / Antigravity
+  npm run agent:assist -- "<konteks>"        Jalankan mode pendamping (riset/audit/test) via Gemini / Copilot / Antigravity
   npm run agent:auto -- "<tugas>"            Klasifikasi otomatis (ringan vs berat) dan panggil agent
-  npm run agent:parallel -- "<t1>" "<t2>"    Jalankan Gemini CLI & Copilot CLI secara paralel
+  npm run agent:parallel -- "gemini: <t1>" "agy: <t2>"  Jalankan paralel; awalan memilih agent, tanpa awalan round-robin
 
 Opsi untuk light / assist / auto:
-  --agent=gemini|copilot                     Pilih CLI secara eksplisit (default: auto-detect di PATH)
+  --agent=gemini|copilot|agy                 Pilih CLI secara eksplisit (default: auto-detect di PATH)
   --dry-run                                  Tampilkan prompt & target tanpa mengeksekusi CLI
 `.trim());
 }
@@ -88,9 +111,9 @@ function isHeavyTask(task) {
 
 function buildPrompt(kind, task) {
   if (kind === 'light') {
-    return `Ikuti AGENTS.md untuk TUGAS RINGAN. Gunakan terminologi Klinik/SIMK/RME, jaga strict TypeScript, jalankan npm run typecheck dan npm test setelah selesai. Tugas: ${task}`;
+    return `Ikuti AGENTS.md untuk TUGAS RINGAN. Gunakan terminologi Klinik/SIMK/RME, jaga strict TypeScript. Jangan jalankan perintah shell, commit, push, atau deploy; Claude yang memverifikasi (npm run agent:check). Jawab ringkas dan sebutkan file yang diubah. Tugas: ${task}`;
   }
-  return `Ikuti AGENTS.md sebagai PENDAMPING CLAUDE untuk KASUS BERAT (riset, audit, verifikasi regresi, dan test; jangan ubah arsitektur inti tanpa arahan). Konteks: ${task}`;
+  return `Ikuti AGENTS.md sebagai PENDAMPING CLAUDE untuk KASUS BERAT (riset, audit, verifikasi regresi, dan test; jangan ubah arsitektur inti tanpa arahan; jangan commit, push, atau deploy). Konteks: ${task}`;
 }
 
 function cliInvocation(resolvedAgent, kind, prompt) {
@@ -100,13 +123,16 @@ function cliInvocation(resolvedAgent, kind, prompt) {
       args: kind === 'assist' ? ['--approval-mode', 'plan', '-p', prompt] : ['-p', prompt]
     };
   }
+  if (resolvedAgent === 'agy') {
+    return { command: 'agy', args: ['-p', prompt, '--mode', kind === 'assist' ? 'plan' : 'accept-edits'] };
+  }
   return {
     command: 'copilot',
     args: ['-p', prompt, '--silent']
   };
 }
 
-function runAgentTask(kind, args) {
+async function runAgentTask(kind, args) {
   let agent = 'auto';
   let dryRun = false;
   const taskParts = [];
@@ -125,7 +151,7 @@ function runAgentTask(kind, args) {
 
   const effectiveKind = kind === 'auto' ? (isHeavyTask(task) ? 'assist' : 'light') : kind;
   const resolvedAgent = agent === 'auto'
-    ? (hasCli('gemini') ? 'gemini' : hasCli('copilot') ? 'copilot' : null)
+    ? (AGENTS.find(hasCli) ?? null)
     : (hasCli(agent) ? agent : null);
 
   const prompt = buildPrompt(effectiveKind, task);
@@ -138,7 +164,9 @@ function runAgentTask(kind, args) {
   }
 
   const { command, args: cliArgs } = cliInvocation(resolvedAgent, effectiveKind, prompt);
-  process.exit(run(command, cliArgs));
+  const res = await runAsync(`${resolvedAgent}:${effectiveKind}`, command, cliArgs);
+  printResult(res);
+  process.exit(res.code);
 }
 
 async function runParallel(args) {
@@ -149,17 +177,20 @@ async function runParallel(args) {
     process.exit(1);
   }
 
-  let available = ['gemini', 'copilot'].filter(hasCli);
+  let available = AGENTS.filter(hasCli);
   if (available.length === 0) {
     if (!dryRun) {
-      console.error('[agent:parallel] Tidak ada CLI gemini atau copilot di PATH.');
+      console.error('[agent:parallel] Tidak ada CLI gemini, copilot, atau agy di PATH.');
       process.exit(1);
     }
-    available = ['gemini', 'copilot'];
+    available = AGENTS;
   }
 
-  const jobs = tasks.map((task, idx) => {
-    const target = available[idx % available.length];
+  // Awalan 'gemini:' / 'copilot:' / 'agy:' memilih agent sesuai kemampuan; tanpa awalan dibagi round-robin.
+  const jobs = tasks.map((raw, idx) => {
+    const [, picked, body] = raw.match(/^(gemini|copilot|agy):\s*(.*)$/s) ?? [];
+    const task = picked ? body : raw;
+    const target = picked ?? available[idx % available.length];
     const kind = isHeavyTask(task) ? 'assist' : 'light';
     const prompt = buildPrompt(kind, task);
     return { target, kind, task, ...cliInvocation(target, kind, prompt) };
@@ -178,15 +209,13 @@ async function runParallel(args) {
 
   let hasFailure = false;
   for (const res of results) {
-    console.log(`\n=== [${res.label}] (exit ${res.code}) ===`);
-    if (res.stdout) console.log(res.stdout);
-    if (res.stderr) console.error(res.stderr);
+    printResult(res);
     if (res.code !== 0) hasFailure = true;
   }
   if (hasFailure) process.exit(1);
 }
 
 if (mode === 'check') runCheck(rest);
-else if (mode === 'light' || mode === 'assist' || mode === 'auto') runAgentTask(mode, rest);
+else if (mode === 'light' || mode === 'assist' || mode === 'auto') void runAgentTask(mode, rest);
 else if (mode === 'parallel') void runParallel(rest);
 else printHelp();
