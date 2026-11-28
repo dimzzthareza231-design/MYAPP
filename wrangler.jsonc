@@ -1,10 +1,11 @@
 // Dua Worker, tiga D1. Level atas = aplikasi inti (`wrangler deploy`), `--env public` = web publik.
-// Worker publik hanya terikat ke myitaru-public, jadi data pasien (core) dan karyawan (hr) tidak terjangkau dari sana.
+// Hanya Worker inti yang memegang D1. Worker publik cuma melayani assets dan meneruskan /api/* ke inti lewat service binding.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "myitaru-core",
   "main": "worker/core.ts",
   "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "routes": [{ "pattern": "myitaru.my.id", "custom_domain": true }],
   "assets": {
@@ -14,7 +15,8 @@
   },
   "d1_databases": [
     { "binding": "DB_CORE", "database_name": "myitaru-core", "database_id": "c3805872-9d78-40e8-9568-112b6914fe0e", "migrations_dir": "migrations/core" },
-    { "binding": "DB_HR", "database_name": "myitaru-hr", "database_id": "51c8e53e-93d9-4803-b47c-df2f0b2aeb08", "migrations_dir": "migrations/hr" }
+    { "binding": "DB_HR", "database_name": "myitaru-hr", "database_id": "51c8e53e-93d9-4803-b47c-df2f0b2aeb08", "migrations_dir": "migrations/hr" },
+    { "binding": "DB_PUBLIC", "database_name": "myitaru-public", "database_id": "c11b3ea1-0652-4854-a161-5d34a99c2f7e", "migrations_dir": "migrations/public" }
   ],
   "env": {
     "public": {
@@ -26,9 +28,7 @@
         "not_found_handling": "single-page-application",
         "run_worker_first": ["/api/*"]
       },
-      "d1_databases": [
-        { "binding": "DB_PUBLIC", "database_name": "myitaru-public", "database_id": "c11b3ea1-0652-4854-a161-5d34a99c2f7e", "migrations_dir": "migrations/public" }
-      ]
+      "services": [{ "binding": "CORE", "service": "myitaru-core" }]
     }
   }
 }

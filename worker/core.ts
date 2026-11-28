@@ -1,22 +1,10 @@
 /// <reference types="@cloudflare/workers-types" />
-// Aplikasi inti. Hanya /api/* sampai ke sini; sisanya dilayani assets.
-interface Env {
-  DB_CORE: D1Database;
-  DB_HR: D1Database;
-}
+// Aplikasi inti: Express yang sama dengan dev server, data di tiga D1. Non-/api dilayani assets.
+import { env } from 'cloudflare:workers';
+import { httpServerHandler } from 'cloudflare:node';
+import { createApp } from '../src/server/app';
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(request.url);
-    if (pathname === '/api/health') {
-      try {
-        await env.DB_CORE.prepare('SELECT 1').first();
-        await env.DB_HR.prepare('SELECT 1').first();
-        return Response.json({ ok: true });
-      } catch {
-        return Response.json({ ok: false }, { status: 503 });
-      }
-    }
-    return Response.json({ error: 'Not found' }, { status: 404 });
-  },
-} satisfies ExportedHandler<Env>;
+const app = createApp({ core: env.DB_CORE, hr: env.DB_HR, public: env.DB_PUBLIC });
+app.listen(3000);
+
+export default httpServerHandler({ port: 3000 });

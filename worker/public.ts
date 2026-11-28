@@ -1,20 +1,9 @@
 /// <reference types="@cloudflare/workers-types" />
-// Web publik. Sengaja hanya punya DB_PUBLIC.
+// Web publik: hanya assets. /api/* diteruskan ke Worker inti lewat service binding, jadi Worker ini tidak memegang database apa pun.
 interface Env {
-  DB_PUBLIC: D1Database;
+  CORE: Fetcher;
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(request.url);
-    if (pathname === '/api/health') {
-      try {
-        await env.DB_PUBLIC.prepare('SELECT 1').first();
-        return Response.json({ ok: true });
-      } catch {
-        return Response.json({ ok: false }, { status: 503 });
-      }
-    }
-    return Response.json({ error: 'Not found' }, { status: 404 });
-  },
+  fetch: (request, env) => env.CORE.fetch(request),
 } satisfies ExportedHandler<Env>;
