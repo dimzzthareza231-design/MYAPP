@@ -18,6 +18,7 @@ import {
 } from './aiIntelligenceEngine';
 import { registerPatientPortalRoutes } from './patientPortalService';
 import { registerEmployeePortalGateway } from './employeePortalGateway';
+import { ADMIN_ROLES, CLINICAL_OR_ADMIN, registerCoreAuth, requireRoles, requireStaff, writeAudit } from './coreAuth';
 
 // All /api routes. Shared by the Node dev server (server.ts) and the Cloudflare Worker (worker/core.ts).
 export function createApp(db: Databases): express.Express {
@@ -46,286 +47,63 @@ export function createApp(db: Databases): express.Express {
     next();
   });
 
-  // =========================================================================
-  // 🏥 IN-MEMORY KLINIK DATA STORE (Simulated Enterprise SIMK State)
-  // =========================================================================
-  interface PatientRecord {
-    id: string;
-    no_rm: string;
-    nik: string;
-    nama: string;
-    tanggal_lahir: string;
-    jenis_kelamin: 'L' | 'P';
-    alamat: string;
-    no_hp: string;
-    golongan_darah: string;
-    penjamin: string;
-    no_bpjs?: string;
-    status: 'Rawat Jalan' | 'Rawat Inap' | 'IGD' | 'Selesai';
-    alergi?: string[];
-    riwayat_penyakit?: string[];
-    created_at: string;
-  }
-
-  interface AppointmentRecord {
-    id: string;
-    pasien_id: string;
-    pasien_nama: string;
-    no_rm: string;
-    poli: string;
-    dokter: string;
-    tanggal: string;
-    jam_praktek: string;
-    nomor_antrian: string;
-    status: 'Menunggu' | 'Diperiksa' | 'Selesai' | 'Dibatalkan';
-    tipe: 'Rawat Jalan' | 'IGD' | 'Konsultasi';
-    created_at: string;
-  }
-
-  interface BedRecord {
-    id: string;
-    bangsal: string;
-    ruangan: string;
-    nomor_bed: string;
-    kelas: 'VVIP' | 'VIP' | 'Kelas 1' | 'Kelas 2' | 'Kelas 3' | 'ICU' | 'NICU' | 'Isolasi';
-    status: 'Tersedia' | 'Terisi' | 'Dibersihkan' | 'Perbaikan';
-    pasien_nama?: string;
-    no_rm?: string;
-    tanggal_masuk?: string;
-    tarif_per_hari: number;
-  }
-
-  interface InventoryItem {
-    id: string;
-    kode: string;
-    nama: string;
-    kategori: 'Obat Oral' | 'Injeksi' | 'Infus' | 'Alat Kesehatan' | 'BHP';
-    stok: number;
-    stok_minimum: number;
-    satuan: string;
-    harga_beli: number;
-    harga_jual: number;
-    batch: string;
-    expired_date: string;
-    lokasi: 'Gudang Farmasi' | 'Depo Ralan' | 'Depo Ranap' | 'Depo IGD';
-  }
-
-  interface DossierDocument {
-    id: string;
-    no_rm: string;
-    pasien_nama: string;
-    doc_type: string;
-    title: string;
-    created_at: string;
-    created_by: string;
-    status: 'Lengkap' | 'Draft' | 'Menunggu TTD' | 'Terverifikasi';
-    data: Record<string, any>;
-  }
-
-  interface AuditLogEntry {
-    id: string;
-    timestamp: string;
-    user: string;
-    role: string;
-    action: string;
-    module: string;
-    ip: string;
-    status: 'SUCCESS' | 'FAILED' | 'WARNING';
-    details: string;
-  }
-
-  // Initial Seed Patients
-  const patientsStore: PatientRecord[] = [
-    {
-      id: 'p-001',
-      no_rm: 'RM-260101-0001',
-      nik: '3171012304850001',
-      nama: 'Ny. Siti Rahmawati',
-      tanggal_lahir: '1985-04-23',
-      jenis_kelamin: 'P',
-      alamat: 'Jl. Salemba Raya No. 45, Jakarta Pusat',
-      no_hp: '081234567890',
-      golongan_darah: 'O',
-      penjamin: 'BPJS Kesehatan',
-      no_bpjs: '0001234567891',
-      status: 'Rawat Jalan',
-      alergi: ['Amoxicillin', 'Aspirin'],
-      riwayat_penyakit: ['Hipertensi Derajat 2', 'Dispepsia'],
-      created_at: '2026-01-10T08:30:00Z'
-    },
-    {
-      id: 'p-002',
-      no_rm: 'RM-260102-0002',
-      nik: '3171021508780003',
-      nama: 'Tn. Budi Santoso',
-      tanggal_lahir: '1978-08-15',
-      jenis_kelamin: 'L',
-      alamat: 'Jl. Diponegoro No. 12, Jakarta Pusat',
-      no_hp: '081398765432',
-      golongan_darah: 'A',
-      penjamin: 'BPJS Kesehatan',
-      no_bpjs: '0002345678902',
-      status: 'Rawat Inap',
-      alergi: [],
-      riwayat_penyakit: ['Diabetes Melitus Tipe 2', 'Penyakit Jantung Koroner'],
-      created_at: '2026-01-15T09:15:00Z'
-    },
-    {
-      id: 'p-003',
-      no_rm: 'RM-260103-0003',
-      nik: '3171035512150005',
-      nama: 'An. Rizky Pratama',
-      tanggal_lahir: '2015-12-15',
-      jenis_kelamin: 'L',
-      alamat: 'Jl. Kramat Raya No. 88, Jakarta Pusat',
-      no_hp: '085712348901',
-      golongan_darah: 'B',
-      penjamin: 'Umum / Mandiri',
-      status: 'IGD',
-      alergi: ['Seafood'],
-      riwayat_penyakit: ['Asma Bronkial'],
-      created_at: '2026-02-01T14:20:00Z'
-    },
-    {
-      id: 'p-004',
-      no_rm: 'RM-260104-0004',
-      nik: '3171044406920002',
-      nama: 'Ny. Dewi Lestari',
-      tanggal_lahir: '1992-06-04',
-      jenis_kelamin: 'P',
-      alamat: 'Jl. Cikini Raya No. 20, Jakarta Pusat',
-      no_hp: '081987654321',
-      golongan_darah: 'AB',
-      penjamin: 'Asuransi Mandiri Inhealth',
-      status: 'Rawat Inap',
-      alergi: ['Sulfa'],
-      riwayat_penyakit: ['Demam Berdarah Dengue (DBD)'],
-      created_at: '2026-02-14T11:00:00Z'
-    }
-  ];
-
-  // Initial Seed Appointments
-  const appointmentsStore: AppointmentRecord[] = [
-    {
-      id: 'apt-001',
-      pasien_id: 'p-001',
-      pasien_nama: 'Ny. Siti Rahmawati',
-      no_rm: 'RM-260101-0001',
-      poli: 'Poli Penyakit Dalam',
-      dokter: 'dr. Hendra Wijaya, Sp.PD',
-      tanggal: new Date().toISOString().split('T')[0],
-      jam_praktek: '09:00 - 12:00',
-      nomor_antrian: 'PD-001',
-      status: 'Menunggu',
-      tipe: 'Rawat Jalan',
-      created_at: new Date().toISOString()
-    },
-    {
-      id: 'apt-002',
-      pasien_id: 'p-003',
-      pasien_nama: 'An. Rizky Pratama',
-      no_rm: 'RM-260103-0003',
-      poli: 'Instalasi Gawat Darurat (IGD)',
-      dokter: 'dr. Sarah Amanda, Sp.A',
-      tanggal: new Date().toISOString().split('T')[0],
-      jam_praktek: '24 Jam',
-      nomor_antrian: 'IGD-004',
-      status: 'Diperiksa',
-      tipe: 'IGD',
-      created_at: new Date().toISOString()
-    }
-  ];
-
-  // Initial Seed Bed Management
-  const bedsStore: BedRecord[] = [
-    { id: 'b-01', bangsal: 'Paviliun Melati', ruangan: 'Melati 101', nomor_bed: 'Bed 1', kelas: 'VVIP', status: 'Tersedia', tarif_per_hari: 1500000 },
-    { id: 'b-02', bangsal: 'Paviliun Melati', ruangan: 'Melati 102', nomor_bed: 'Bed 1', kelas: 'VIP', status: 'Terisi', pasien_nama: 'Tn. Budi Santoso', no_rm: 'RM-260102-0002', tanggal_masuk: '2026-03-25', tarif_per_hari: 1000000 },
-    { id: 'b-03', bangsal: 'Bangsal Mawar', ruangan: 'Mawar 201', nomor_bed: 'Bed A', kelas: 'Kelas 1', status: 'Terisi', pasien_nama: 'Ny. Dewi Lestari', no_rm: 'RM-260104-0004', tanggal_masuk: '2026-03-27', tarif_per_hari: 650000 },
-    { id: 'b-04', bangsal: 'Bangsal Mawar', ruangan: 'Mawar 201', nomor_bed: 'Bed B', kelas: 'Kelas 1', status: 'Tersedia', tarif_per_hari: 650000 },
-    { id: 'b-05', bangsal: 'Bangsal Anggrek', ruangan: 'Anggrek 301', nomor_bed: 'Bed 1', kelas: 'Kelas 2', status: 'Tersedia', tarif_per_hari: 450000 },
-    { id: 'b-06', bangsal: 'Bangsal Anggrek', ruangan: 'Anggrek 301', nomor_bed: 'Bed 2', kelas: 'Kelas 2', status: 'Dibersihkan', tarif_per_hari: 450000 },
-    { id: 'b-07', bangsal: 'Bangsal Dahlia', ruangan: 'Dahlia 401', nomor_bed: 'Bed 1', kelas: 'Kelas 3', status: 'Tersedia', tarif_per_hari: 250000 },
-    { id: 'b-08', bangsal: 'Bangsal Dahlia', ruangan: 'Dahlia 401', nomor_bed: 'Bed 2', kelas: 'Kelas 3', status: 'Tersedia', tarif_per_hari: 250000 },
-    { id: 'b-09', bangsal: 'ICU Terpadu', ruangan: 'ICU Central', nomor_bed: 'Bed ICU-1', kelas: 'ICU', status: 'Tersedia', tarif_per_hari: 2200000 },
-    { id: 'b-10', bangsal: 'ICU Terpadu', ruangan: 'ICU Central', nomor_bed: 'Bed ICU-2', kelas: 'ICU', status: 'Terisi', pasien_nama: 'Tn. Gunawan Siregar', no_rm: 'RM-260105-0005', tanggal_masuk: '2026-03-26', tarif_per_hari: 2200000 }
-  ];
-
-  // Initial Seed Pharmacy Inventory
-  const inventoryStore: InventoryItem[] = [
-    { id: 'inv-01', kode: 'OBAT-001', nama: 'Paracetamol 500 mg Tablet', kategori: 'Obat Oral', stok: 1250, stok_minimum: 200, satuan: 'Tablet', harga_beli: 300, harga_jual: 600, batch: 'B2601A', expired_date: '2027-12-31', lokasi: 'Gudang Farmasi' },
-    { id: 'inv-02', kode: 'OBAT-002', nama: 'Amoxicillin 500 mg Kapsul', kategori: 'Obat Oral', stok: 80, stok_minimum: 150, satuan: 'Kapsul', harga_beli: 600, harga_jual: 1200, batch: 'B2511C', expired_date: '2026-10-31', lokasi: 'Depo Ralan' },
-    { id: 'inv-03', kode: 'OBAT-003', nama: 'Amlodipine 10 mg Tablet', kategori: 'Obat Oral', stok: 540, stok_minimum: 100, satuan: 'Tablet', harga_beli: 450, harga_jual: 900, batch: 'B2602D', expired_date: '2028-01-31', lokasi: 'Depo Ralan' },
-    { id: 'inv-04', kode: 'OBAT-004', nama: 'Metformin 500 mg Tablet', kategori: 'Obat Oral', stok: 420, stok_minimum: 100, satuan: 'Tablet', harga_beli: 350, harga_jual: 700, batch: 'B2601E', expired_date: '2027-08-31', lokasi: 'Depo Ralan' },
-    { id: 'inv-05', kode: 'OBAT-005', nama: 'Ceftriaxone 1g Injeksi', kategori: 'Injeksi', stok: 95, stok_minimum: 50, satuan: 'Vial', harga_beli: 18000, harga_jual: 35000, batch: 'B2603A', expired_date: '2027-05-31', lokasi: 'Depo Ranap' },
-    { id: 'inv-06', kode: 'OBAT-006', nama: 'Ringer Lactate (RL) 500 ml', kategori: 'Infus', stok: 310, stok_minimum: 100, satuan: 'Kolf', harga_beli: 12000, harga_jual: 22000, batch: 'B2602B', expired_date: '2028-06-30', lokasi: 'Depo IGD' },
-    { id: 'inv-07', kode: 'OBAT-007', nama: 'Omeprazole 40 mg Injeksi', kategori: 'Injeksi', stok: 45, stok_minimum: 60, satuan: 'Vial', harga_beli: 22000, harga_jual: 42000, batch: 'B2512F', expired_date: '2026-11-30', lokasi: 'Depo Ranap' },
-    { id: 'inv-08', kode: 'OBAT-008', nama: 'Salbutamol Nebulizer 2.5 mg', kategori: 'Injeksi', stok: 180, stok_minimum: 50, satuan: 'Respules', harga_beli: 8000, harga_jual: 15000, batch: 'B2601H', expired_date: '2027-09-30', lokasi: 'Depo IGD' }
-  ];
-
-  // Initial Seed Dossier Documents
-  const dossierStore: DossierDocument[] = [
-    {
-      id: 'doc-001',
-      no_rm: 'RM-260101-0001',
-      pasien_nama: 'Ny. Siti Rahmawati',
-      doc_type: 'AsesmenMedisAwal',
-      title: 'Asesmen Medis Awal Rawat Jalan',
-      created_at: '2026-03-20T09:00:00Z',
-      created_by: 'dr. Hendra Wijaya, Sp.PD',
-      status: 'Terverifikasi',
-      data: {
-        keluhanUtama: 'Nyeri kepala tengkuk dan pusing berputar sejak 3 hari',
-        tandaVital: { td: '160/95 mmHg', nadi: 82, suhu: 36.6, rr: 18, spo2: 99 },
-        diagnosaKerja: 'Hipertensi Derajat 2 (I10)',
-        terapi: 'Amlodipine 10mg 1x1 tab pagi, Candesartan 8mg 1x1 tab malam'
-      }
-    },
-    {
-      id: 'doc-002',
-      no_rm: 'RM-260102-0002',
-      pasien_nama: 'Tn. Budi Santoso',
-      doc_type: 'TriaseIGD',
-      title: 'Formulir Triase Gawat Darurat (ATS/ESI)',
-      created_at: '2026-03-25T07:15:00Z',
-      created_by: 'dr. Sarah Amanda',
-      status: 'Terverifikasi',
-      data: {
-        kategoriTriase: 'P2 - Emergensi (Kuning)',
-        keluhanUtama: 'Nyeri dada retrosternal menjalar ke pundak kiri',
-        tandaVital: { td: '150/90 mmHg', nadi: 96, suhu: 36.8, rr: 22, spo2: 96 },
-        gcs: 'E4M6V5 (15)',
-        tindakanAwal: 'O2 Kanul 3 lpm, EKG 12 Lead, Pasang IV Line RL'
-      }
-    }
-  ];
-
-  // Audit Logs Store
-  const auditLogsStore: AuditLogEntry[] = [
-    {
-      id: 'log-001',
-      timestamp: new Date().toISOString(),
-      user: 'dr. Hendra Wijaya, Sp.PD',
-      role: 'DPJP',
-      action: 'UPDATE_EMR',
-      module: 'Rekam Medis (RME)',
-      ip: '192.168.1.45',
-      status: 'SUCCESS',
-      details: 'Pengesahan dan tanda tangan elektronik resume medis No. RM-260101-0001'
-    },
-    {
-      id: 'log-002',
-      timestamp: new Date().toISOString(),
-      user: 'Apoteker Rina, S.Farm',
-      role: 'Farmasi',
-      action: 'DISPENSE_MEDICATION',
-      module: 'Farmasi Ralan',
-      ip: '192.168.1.72',
-      status: 'SUCCESS',
-      details: 'Telaah resep & penyerahan obat resep No. RX-260328-0091'
-    }
-  ];
-
   let sepCounter = 100245;
+
+  // =========================================================================
+  // DATA ACCESS (core D1) + AUTH GATE
+  // =========================================================================
+  const core = db.core;
+  type Row = Record<string, any>;
+  const route = (fn: (req: express.Request, res: express.Response) => Promise<unknown>): express.RequestHandler =>
+    (req, res, next) => { fn(req, res).catch(next); };
+  const nowIso = () => new Date().toISOString();
+  const newId = () => globalThis.crypto.randomUUID();
+  const isPlainObject = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
+  const parseJson = (s: unknown) => { try { return JSON.parse(String(s)); } catch { return null; } };
+  // Record = data JSON merged with column fields.
+  const toRecord = (row: Row) => {
+    const { data, ...cols } = row;
+    const parsed = parseJson(data);
+    return { ...(isPlainObject(parsed) ? parsed : {}), ...cols };
+  };
+  const text = (v: unknown, max = 200) => (typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : null);
+  const actorOf = (req: express.Request) => ({ userId: req.staff?.id ?? null, actor: req.staff?.email ?? 'system', role: req.staff?.roleId ?? null });
+  const sqlError = (err: unknown) => (/UNIQUE/i.test(String(err)) ? 'unique' : /FOREIGN KEY/i.test(String(err)) ? 'fk' : null);
+  const clinical = requireRoles(CLINICAL_OR_ADMIN);
+  const adminOnly = requireRoles(ADMIN_ROLES);
+
+  // Module audit entries (patient portal: user/role/ip, gateway: user_id/user_name/ip_address) -> core audit_log.
+  type ModuleAuditEntry = {
+    action: string;
+    status: string;
+    module?: string;
+    details?: string;
+    user?: string;
+    role?: string;
+    ip?: string;
+    user_id?: string;
+    user_name?: string;
+    ip_address?: string;
+  };
+  const createAuditLog = (e: ModuleAuditEntry) => {
+    // shortcut: fire-and-forget per module contract; on Workers an insert still pending after the response can be dropped. Pass ctx.waitUntil if audit gaps appear.
+    void writeAudit(core, {
+      userId: e.user_id ?? null,
+      actor: e.user_name || e.user || e.user_id || 'system',
+      role: e.role ?? null,
+      action: e.action,
+      module: e.module ?? null,
+      status: e.status,
+      data: { details: e.details, ip: e.ip ?? e.ip_address },
+    });
+  };
+
+  // Every /api/v1 route needs a staff session, except health and the payment gateway callback.
+  const PUBLIC_V1 = new Set(['/health', '/billing/qris/callback']);
+  const staffSession = requireStaff(core);
+  app.use('/api/v1', (req, res, next) => (PUBLIC_V1.has(req.path) ? next() : staffSession(req, res, next)));
+
+  registerCoreAuth(app, core);
 
   // =========================================================================
   // 🚀 REST API V1 ENDPOINTS (Enterprise Klinik Information System Backend)
@@ -347,7 +125,7 @@ export function createApp(db: Databases): express.Express {
         heapUsed: `${Math.round(memory.heapUsed / 1024 / 1024)} MB`
       },
       services: {
-        database: 'ONLINE (Firestore / Local Data Engine)',
+        database: 'ONLINE (Cloudflare D1)',
         ai_engine: process.env.GEMINI_API_KEY ? 'ACTIVE (Google Gemini API)' : 'SANDBOX_FALLBACK',
         bpjs_vclaim_bridge: 'READY',
         satusehat_ihs_bridge: 'READY',
@@ -357,30 +135,37 @@ export function createApp(db: Databases): express.Express {
   });
 
   // 2. High-Level System Analytics & Operational Stats
-  app.get('/api/v1/system/stats', (req, res) => {
-    const totalBeds = bedsStore.length;
-    const occupiedBeds = bedsStore.filter(b => b.status === 'Terisi').length;
-    const bor = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
-    const lowStockItems = inventoryStore.filter(i => i.stok <= i.stok_minimum).length;
-
+  app.get('/api/v1/system/stats', route(async (req, res) => {
+    const s = await core
+      .prepare(`SELECT
+        (SELECT COUNT(*) FROM pasien) AS patients,
+        (SELECT COUNT(*) FROM kunjungan WHERE tanggal = ?) AS visits,
+        (SELECT COUNT(*) FROM beds) AS beds,
+        (SELECT COUNT(*) FROM beds WHERE status = 'Terisi') AS occupied,
+        (SELECT COUNT(*) FROM inventory) AS skus,
+        (SELECT COUNT(*) FROM inventory WHERE stok <= stok_minimum) AS low`)
+      .bind(nowIso().slice(0, 10))
+      .first<Row>();
+    const totalBeds = Number(s?.beds ?? 0);
+    const occupiedBeds = Number(s?.occupied ?? 0);
     res.json({
-      totalPatients: patientsStore.length,
-      activeVisitsToday: appointmentsStore.length,
+      totalPatients: Number(s?.patients ?? 0),
+      activeVisitsToday: Number(s?.visits ?? 0),
       bedOccupancy: {
         totalBeds,
         occupiedBeds,
         availableBeds: totalBeds - occupiedBeds,
-        borPercent: bor
+        borPercent: totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0
       },
       pharmacy: {
-        totalSkus: inventoryStore.length,
-        lowStockAlerts: lowStockItems
+        totalSkus: Number(s?.skus ?? 0),
+        lowStockAlerts: Number(s?.low ?? 0)
       },
       satusehatSyncRate: '99.4%',
       bpjsClaimApprovalRate: '98.8%',
       timestamp: new Date().toISOString()
     });
-  });
+  }));
 
   // 2b. Official Health Updates & Surveillance Indicators 2026 (Kemenkes RI & WHO)
   app.get('/api/v1/health-updates', (req, res) => {
@@ -403,84 +188,78 @@ export function createApp(db: Databases): express.Express {
   });
 
   // 3. Patients API: List & Search
-  app.get('/api/v1/patients', (req, res) => {
-    const { q, penjamin, status, page = '1', limit = '20' } = req.query;
-    let results = [...patientsStore];
-
-    if (q && typeof q === 'string') {
-      const queryLower = q.toLowerCase();
-      results = results.filter(p =>
-        p.nama.toLowerCase().includes(queryLower) ||
-        p.no_rm.toLowerCase().includes(queryLower) ||
-        p.nik.includes(queryLower)
-      );
+  app.get('/api/v1/patients', clinical, route(async (req, res) => {
+    const { q, penjamin, status } = req.query;
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (typeof q === 'string' && q) {
+      const like = `%${q}%`;
+      where.push('(nama LIKE ? OR no_rm LIKE ? OR nik LIKE ?)');
+      args.push(like, like, like);
     }
+    if (typeof penjamin === 'string' && penjamin) { where.push('penjamin = ? COLLATE NOCASE'); args.push(penjamin); }
+    if (typeof status === 'string' && status) { where.push('status = ? COLLATE NOCASE'); args.push(status); }
+    const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    if (penjamin && typeof penjamin === 'string') {
-      results = results.filter(p => p.penjamin.toLowerCase() === penjamin.toLowerCase());
-    }
-
-    if (status && typeof status === 'string') {
-      results = results.filter(p => p.status.toLowerCase() === status.toLowerCase());
-    }
-
-    const pageNum = Math.max(1, parseInt(page as string, 10));
-    const limitNum = Math.max(1, parseInt(limit as string, 10));
-    const startIndex = (pageNum - 1) * limitNum;
-    const paginated = results.slice(startIndex, startIndex + limitNum);
+    const pageNum = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(String(req.query.limit ?? '20'), 10) || 20));
+    const total = Number((await core.prepare(`SELECT COUNT(*) AS n FROM pasien ${w}`).bind(...args).first<Row>())?.n ?? 0);
+    const { results } = await core
+      .prepare(`SELECT * FROM pasien ${w} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+      .bind(...args, limitNum, (pageNum - 1) * limitNum)
+      .all<Row>();
 
     res.json({
       success: true,
-      total: results.length,
+      total,
       page: pageNum,
       limit: limitNum,
-      totalPages: Math.ceil(results.length / limitNum),
-      data: paginated
+      totalPages: Math.ceil(total / limitNum),
+      data: results.map(toRecord)
     });
-  });
+  }));
 
   // 4. Patients API: Single Patient Detail
-  app.get('/api/v1/patients/:idOrRm', (req, res) => {
+  app.get('/api/v1/patients/:idOrRm', clinical, route(async (req, res) => {
     const { idOrRm } = req.params;
-    const patient = patientsStore.find(p => p.id === idOrRm || p.no_rm === idOrRm);
-
+    const patient = await core.prepare('SELECT * FROM pasien WHERE id = ? OR no_rm = ?').bind(idOrRm, idOrRm).first<Row>();
     if (!patient) {
       return res.status(404).json({ success: false, error: 'Pasien tidak ditemukan dalam database.' });
     }
-
-    const appointments = appointmentsStore.filter(a => a.pasien_id === patient.id || a.no_rm === patient.no_rm);
-    const dossiers = dossierStore.filter(d => d.no_rm === patient.no_rm);
-
+    const [appointments, documents] = await Promise.all([
+      core.prepare('SELECT * FROM kunjungan WHERE pasien_id = ? ORDER BY tanggal DESC').bind(patient.id).all<Row>(),
+      core.prepare('SELECT * FROM dossier_documents WHERE no_rm = ? ORDER BY created_at DESC').bind(patient.no_rm).all<Row>(),
+    ]);
     res.json({
       success: true,
       data: {
-        ...patient,
-        appointments,
-        documents: dossiers
+        ...toRecord(patient),
+        appointments: appointments.results.map(toRecord),
+        documents: documents.results.map((d) => ({ ...toRecord(d), pasien_nama: patient.nama }))
       }
     });
-  });
+  }));
 
   // 5. Patients API: Register New Patient
-  app.post('/api/v1/patients', (req, res) => {
-    const { nik, nama, tanggal_lahir, jenis_kelamin, alamat, no_hp, golongan_darah, penjamin, no_bpjs } = req.body;
-
-    if (!nama || !tanggal_lahir || !jenis_kelamin || !alamat) {
+  app.post('/api/v1/patients', clinical, route(async (req, res) => {
+    const { nik, tanggal_lahir, jenis_kelamin, no_hp, golongan_darah, penjamin, no_bpjs } = req.body ?? {};
+    const nama = text(req.body?.nama, 120);
+    const alamat = text(req.body?.alamat, 500);
+    if (!nama || !text(tanggal_lahir, 32) || !jenis_kelamin || !alamat) {
       return res.status(400).json({
         success: false,
         error: 'Field wajib tidak lengkap: nama, tanggal_lahir, jenis_kelamin, dan alamat harus diisi.'
       });
     }
 
-    if (nik && nik.length !== 16) {
+    if (nik && (typeof nik !== 'string' || !/^\d{16}$/.test(nik))) {
       return res.status(422).json({
         success: false,
         error: 'Nomor Induk Kependudukan (NIK) harus terdiri dari tepat 16 digit angka.'
       });
     }
 
-    // Check duplicate NIK
-    if (nik && patientsStore.some(p => p.nik === nik)) {
+    if (nik && (await core.prepare('SELECT 1 FROM pasien WHERE nik = ?').bind(nik).first())) {
       return res.status(409).json({
         success: false,
         error: 'Pasien dengan NIK tersebut sudah terdaftar dalam sistem.'
@@ -488,125 +267,129 @@ export function createApp(db: Databases): express.Express {
     }
 
     // Auto-generate No RM: RM-YYMMDD-XXXX
-    const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-    const counter = String(patientsStore.length + 1).padStart(4, '0');
-    const no_rm = `RM-${dateStr}-${counter}`;
-
-    const newPatient: PatientRecord = {
-      id: `p-${Date.now()}`,
+    // shortcut: count-based sequence; two registrations in the same instant collide on UNIQUE(no_rm) and get 409. Use a counter row if that shows up.
+    const dateStr = nowIso().slice(2, 10).replace(/-/g, '');
+    const today = await core.prepare('SELECT COUNT(*) AS n FROM pasien WHERE no_rm LIKE ?').bind(`RM-${dateStr}-%`).first<Row>();
+    const no_rm = `RM-${dateStr}-${String(Number(today?.n ?? 0) + 1).padStart(4, '0')}`;
+    const now = nowIso();
+    const columns = {
+      id: newId(),
       no_rm,
       nik: nik || '',
-      nama: nama.trim(),
+      nama,
+      penjamin: text(penjamin, 120) || 'Umum / Mandiri',
+      status: 'Rawat Jalan',
+      created_at: now,
+      updated_at: now,
+    };
+    const data = {
       tanggal_lahir,
       jenis_kelamin: jenis_kelamin === 'P' ? 'P' : 'L',
-      alamat: alamat.trim(),
-      no_hp: no_hp || '-',
-      golongan_darah: golongan_darah || '-',
-      penjamin: penjamin || 'Umum / Mandiri',
-      no_bpjs: no_bpjs || undefined,
-      status: 'Rawat Jalan',
-      alergi: req.body.alergi || [],
-      riwayat_penyakit: req.body.riwayat_penyakit || [],
-      created_at: new Date().toISOString()
+      alamat,
+      no_hp: text(no_hp, 32) || '-',
+      golongan_darah: text(golongan_darah, 8) || '-',
+      ...(text(no_bpjs, 32) ? { no_bpjs: text(no_bpjs, 32) } : {}),
+      alergi: Array.isArray(req.body.alergi) ? req.body.alergi : [],
+      riwayat_penyakit: Array.isArray(req.body.riwayat_penyakit) ? req.body.riwayat_penyakit : [],
     };
+    try {
+      await core
+        .prepare('INSERT INTO pasien (id, no_rm, nik, nama, penjamin, status, data, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+        .bind(columns.id, columns.no_rm, columns.nik, columns.nama, columns.penjamin, columns.status, JSON.stringify(data), now, now)
+        .run();
+    } catch (err) {
+      if (sqlError(err) === 'unique') return res.status(409).json({ success: false, error: 'No. RM atau NIK bentrok. Silakan coba lagi.' });
+      throw err;
+    }
 
-    patientsStore.unshift(newPatient);
-
-    // Audit log
-    auditLogsStore.unshift({
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      user: req.headers['x-user-name'] ? String(req.headers['x-user-name']) : 'Petugas Pendaftaran',
-      role: 'Admisi',
+    await writeAudit(core, {
+      ...actorOf(req),
+      category: 'database',
       action: 'CREATE_PATIENT',
       module: 'Pendaftaran',
-      ip: req.ip || '127.0.0.1',
       status: 'SUCCESS',
-      details: `Pendaftaran pasien baru ${newPatient.nama} dengan No. RM ${newPatient.no_rm}`
+      data: { ip: req.ip, details: `Pendaftaran pasien baru No. RM ${no_rm}` }
     });
 
     res.status(201).json({
       success: true,
       message: 'Pasien berhasil didaftarkan ke SIMK.',
-      data: newPatient
+      data: { ...data, ...columns }
     });
-  });
+  }));
 
   // 6. Appointments & Queue API
-  app.get('/api/v1/appointments', (req, res) => {
+  app.get('/api/v1/appointments', clinical, route(async (req, res) => {
     const { poli, tanggal, status } = req.query;
-    let list = [...appointmentsStore];
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (typeof poli === 'string' && poli) { where.push("json_extract(data, '$.poli') LIKE ?"); args.push(`%${poli}%`); }
+    if (typeof tanggal === 'string' && tanggal) { where.push('tanggal = ?'); args.push(tanggal); }
+    if (typeof status === 'string' && status) { where.push('status = ? COLLATE NOCASE'); args.push(status); }
+    // shortcut: unpaginated; fine while callers filter by tanggal. Add LIMIT/OFFSET when the visit table grows.
+    const { results } = await core
+      .prepare(`SELECT * FROM kunjungan ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC`)
+      .bind(...args)
+      .all<Row>();
+    res.json({ success: true, total: results.length, data: results.map(toRecord) });
+  }));
 
-    if (poli && typeof poli === 'string') {
-      list = list.filter(a => a.poli.toLowerCase().includes(poli.toLowerCase()));
-    }
-    if (tanggal && typeof tanggal === 'string') {
-      list = list.filter(a => a.tanggal === tanggal);
-    }
-    if (status && typeof status === 'string') {
-      list = list.filter(a => a.status.toLowerCase() === status.toLowerCase());
-    }
-
-    res.json({
-      success: true,
-      total: list.length,
-      data: list
-    });
-  });
-
-  app.post('/api/v1/appointments', (req, res) => {
-    const { pasien_id, no_rm, poli, dokter, jam_praktek, tipe = 'Rawat Jalan' } = req.body;
-
+  app.post('/api/v1/appointments', clinical, route(async (req, res) => {
+    const { pasien_id, no_rm, jam_praktek, tipe = 'Rawat Jalan' } = req.body ?? {};
+    const poli = text(req.body?.poli, 120);
+    const dokter = text(req.body?.dokter, 120);
     if (!poli || !dokter) {
       return res.status(400).json({ success: false, error: 'Poli dan dokter wajib dipilih.' });
     }
 
-    const patient = patientsStore.find(p => p.id === pasien_id || p.no_rm === no_rm);
-    const pasien_nama = patient ? patient.nama : req.body.pasien_nama || 'Pasien Terdaftar';
-    const patientRm = patient ? patient.no_rm : no_rm || 'RM-BARU';
+    const patient = await core
+      .prepare('SELECT id, no_rm, nama FROM pasien WHERE id = ? OR no_rm = ?')
+      .bind(typeof pasien_id === 'string' ? pasien_id : null, typeof no_rm === 'string' ? no_rm : null)
+      .first<Row>();
+    if (!patient) {
+      return res.status(404).json({ success: false, error: 'Pasien tidak ditemukan. Daftarkan pasien terlebih dahulu.' });
+    }
 
+    const tanggal = typeof req.body.tanggal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.tanggal) ? req.body.tanggal : nowIso().slice(0, 10);
     const queuePrefix = poli.includes('Dalam') ? 'PD' : poli.includes('Jantung') ? 'JT' : poli.includes('Anak') ? 'AN' : 'Q';
-    const currentQueueCount = appointmentsStore.filter(a => a.poli === poli).length + 1;
-    const nomor_antrian = `${queuePrefix}-${String(currentQueueCount).padStart(3, '0')}`;
-
-    const newAppointment: AppointmentRecord = {
-      id: `apt-${Date.now()}`,
-      pasien_id: patient ? patient.id : `p-${Date.now()}`,
-      pasien_nama,
-      no_rm: patientRm,
+    const count = await core
+      .prepare("SELECT COUNT(*) AS n FROM kunjungan WHERE tanggal = ? AND json_extract(data, '$.poli') = ?")
+      .bind(tanggal, poli)
+      .first<Row>();
+    const nomor_antrian = `${queuePrefix}-${String(Number(count?.n ?? 0) + 1).padStart(3, '0')}`;
+    const now = nowIso();
+    const data = {
+      pasien_nama: patient.nama,
+      no_rm: patient.no_rm,
       poli,
       dokter,
-      tanggal: req.body.tanggal || new Date().toISOString().split('T')[0],
-      jam_praktek: jam_praktek || '09:00 - 12:00',
-      nomor_antrian,
-      status: 'Menunggu',
-      tipe: tipe as any,
-      created_at: new Date().toISOString()
+      jam_praktek: text(jam_praktek, 40) || '09:00 - 12:00',
+      tipe: ['Rawat Jalan', 'IGD', 'Konsultasi'].includes(tipe) ? tipe : 'Rawat Jalan',
     };
-
-    appointmentsStore.unshift(newAppointment);
+    const id = newId();
+    await core
+      .prepare('INSERT INTO kunjungan (id, pasien_id, tanggal, status, nomor_antrian, data, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+      .bind(id, patient.id, tanggal, 'Menunggu', nomor_antrian, JSON.stringify(data), now, now)
+      .run();
 
     res.status(201).json({
       success: true,
       message: `Nomor antrian berhasil diterbitkan: ${nomor_antrian}`,
-      data: newAppointment
+      data: { ...data, id, pasien_id: patient.id, tanggal, nomor_antrian, status: 'Menunggu', created_at: now }
     });
-  });
+  }));
 
   // 7. Bed Management API (Rawat Inap)
-  app.get('/api/v1/bed-management/status', (req, res) => {
-    const totalBeds = bedsStore.length;
-    const occupied = bedsStore.filter(b => b.status === 'Terisi').length;
-    const available = bedsStore.filter(b => b.status === 'Tersedia').length;
-    const cleaning = bedsStore.filter(b => b.status === 'Dibersihkan').length;
-    const maintenance = bedsStore.filter(b => b.status === 'Perbaikan').length;
+  app.get('/api/v1/bed-management/status', clinical, route(async (req, res) => {
+    const beds = (await core.prepare('SELECT * FROM beds ORDER BY id').all<Row>()).results.map(toRecord);
+    const count = (s: string) => beds.filter((b) => b.status === s).length;
+    const totalBeds = beds.length;
+    const occupied = count('Terisi');
 
     // Grouping by class
     const byClass: Record<string, { total: number; occupied: number; available: number }> = {};
-    for (const b of bedsStore) {
-      if (!byClass[b.kelas]) {
-        byClass[b.kelas] = { total: 0, occupied: 0, available: 0 };
-      }
+    for (const b of beds) {
+      byClass[b.kelas] ??= { total: 0, occupied: 0, available: 0 };
       byClass[b.kelas].total += 1;
       if (b.status === 'Terisi') byClass[b.kelas].occupied += 1;
       if (b.status === 'Tersedia') byClass[b.kelas].available += 1;
@@ -617,81 +400,84 @@ export function createApp(db: Databases): express.Express {
       overview: {
         totalBeds,
         occupied,
-        available,
-        cleaning,
-        maintenance,
+        available: count('Tersedia'),
+        cleaning: count('Dibersihkan'),
+        maintenance: count('Perbaikan'),
         borPercent: totalBeds > 0 ? Math.round((occupied / totalBeds) * 100) : 0
       },
       byClass,
-      beds: bedsStore
+      beds
     });
-  });
+  }));
 
-  app.post('/api/v1/bed-management/transfer', (req, res) => {
-    const { no_rm, target_bed_id } = req.body;
-
+  app.post('/api/v1/bed-management/transfer', clinical, route(async (req, res) => {
+    const no_rm = text(req.body?.no_rm, 40);
+    const target_bed_id = text(req.body?.target_bed_id, 128);
     if (!no_rm || !target_bed_id) {
       return res.status(400).json({ success: false, error: 'No. RM dan ID Bed tujuan diperlukan.' });
     }
 
-    const targetBed = bedsStore.find(b => b.id === target_bed_id);
+    const targetBed = await core.prepare('SELECT * FROM beds WHERE id = ?').bind(target_bed_id).first<Row>();
     if (!targetBed) {
       return res.status(404).json({ success: false, error: 'Bed tujuan tidak ditemukan.' });
     }
-
     if (targetBed.status !== 'Tersedia') {
       return res.status(409).json({ success: false, error: `Bed tujuan tidak tersedia (Status: ${targetBed.status}).` });
     }
-
-    // Release current bed
-    const currentBed = bedsStore.find(b => b.no_rm === no_rm && b.status === 'Terisi');
-    if (currentBed) {
-      currentBed.status = 'Dibersihkan';
-      currentBed.pasien_nama = undefined;
-      currentBed.no_rm = undefined;
+    const patient = await core.prepare('SELECT nama FROM pasien WHERE no_rm = ?').bind(no_rm).first<Row>();
+    if (!patient) {
+      return res.status(404).json({ success: false, error: 'Pasien tidak ditemukan.' });
     }
 
-    const patient = patientsStore.find(p => p.no_rm === no_rm);
-    targetBed.status = 'Terisi';
-    targetBed.pasien_nama = patient ? patient.nama : 'Pasien Rawat Inap';
-    targetBed.no_rm = no_rm;
-    targetBed.tanggal_masuk = new Date().toISOString().split('T')[0];
+    // Occupy only if still free (guards concurrent transfers), then release the previous bed.
+    const now = nowIso();
+    const taken = await core
+      .prepare(`UPDATE beds SET status = 'Terisi', no_rm = ?, data = json_set(data, '$.pasien_nama', ?, '$.tanggal_masuk', ?), updated_at = ?
+                WHERE id = ? AND status = 'Tersedia'`)
+      .bind(no_rm, patient.nama, now.slice(0, 10), now, target_bed_id)
+      .run();
+    if (!taken.meta.changes) {
+      return res.status(409).json({ success: false, error: 'Bed tujuan baru saja terisi.' });
+    }
+    await core
+      .prepare(`UPDATE beds SET status = 'Dibersihkan', no_rm = NULL, data = json_remove(data, '$.pasien_nama', '$.tanggal_masuk'), updated_at = ?
+                WHERE no_rm = ? AND status = 'Terisi' AND id <> ?`)
+      .bind(now, no_rm, target_bed_id)
+      .run();
 
+    const bed = toRecord((await core.prepare('SELECT * FROM beds WHERE id = ?').bind(target_bed_id).first<Row>())!);
     res.json({
       success: true,
-      message: `Pasien ${no_rm} berhasil dipindahkan ke ${targetBed.bangsal} - ${targetBed.ruangan} (${targetBed.nomor_bed}).`,
-      data: targetBed
+      message: `Pasien ${no_rm} berhasil dipindahkan ke ${bed.bangsal ?? ''} - ${bed.ruangan ?? ''} (${bed.nomor_bed ?? bed.id}).`,
+      data: bed
     });
-  });
+  }));
 
   // 8. Pharmacy & Inventory Stock API
-  app.get('/api/v1/inventory/stock', (req, res) => {
+  app.get('/api/v1/inventory/stock', route(async (req, res) => {
     const { kategori, lowStockOnly } = req.query;
-    let items = [...inventoryStore];
-
-    if (kategori && typeof kategori === 'string') {
-      items = items.filter(i => i.kategori.toLowerCase() === kategori.toLowerCase());
-    }
-
-    if (lowStockOnly === 'true') {
-      items = items.filter(i => i.stok <= i.stok_minimum);
-    }
-
-    const totalValuation = items.reduce((acc, curr) => acc + curr.stok * curr.harga_beli, 0);
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (typeof kategori === 'string' && kategori) { where.push('kategori = ? COLLATE NOCASE'); args.push(kategori); }
+    if (lowStockOnly === 'true') where.push('stok <= stok_minimum');
+    const items = (await core
+      .prepare(`SELECT * FROM inventory ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY kode`)
+      .bind(...args)
+      .all<Row>()).results.map(toRecord);
 
     res.json({
       success: true,
       totalItems: items.length,
-      totalValuationRp: totalValuation,
-      lowStockCount: items.filter(i => i.stok <= i.stok_minimum).length,
+      totalValuationRp: items.reduce((acc, i) => acc + i.stok * (Number(i.harga_beli) || 0), 0),
+      lowStockCount: items.filter((i) => i.stok <= i.stok_minimum).length,
       items
     });
-  });
+  }));
 
-  app.post('/api/v1/inventory/dispense', (req, res) => {
-    const { items, recipeId, no_rm } = req.body;
+  app.post('/api/v1/inventory/dispense', clinical, route(async (req, res) => {
+    const { items, recipeId, no_rm } = req.body ?? {};
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
+    if (!Array.isArray(items) || items.length === 0 || items.length > 200) {
       return res.status(400).json({ success: false, error: 'Daftar item obat yang akan dikeluarkan diperlukan.' });
     }
 
@@ -699,38 +485,43 @@ export function createApp(db: Databases): express.Express {
     const errors: string[] = [];
 
     for (const item of items) {
-      const stockItem = inventoryStore.find(i => i.kode === item.kode || i.nama.toLowerCase() === (item.nama || '').toLowerCase());
+      const label = String(item?.nama || item?.kode || '?');
+      const qty = Number(item?.qty);
+      if (!Number.isInteger(qty) || qty <= 0) {
+        errors.push(`Jumlah obat ${label} tidak valid.`);
+        continue;
+      }
+      const stockItem = await core
+        .prepare('SELECT * FROM inventory WHERE kode = ? OR lower(nama) = lower(?) LIMIT 1')
+        .bind(typeof item.kode === 'string' ? item.kode : null, typeof item.nama === 'string' ? item.nama : null)
+        .first<Row>();
       if (!stockItem) {
-        errors.push(`Item obat ${item.nama || item.kode} tidak ditemukan dalam inventaris.`);
+        errors.push(`Item obat ${label} tidak ditemukan dalam inventaris.`);
         continue;
       }
-      if (stockItem.stok < item.qty) {
-        errors.push(`Stok obat ${stockItem.nama} tidak mencukupi (Tersedia: ${stockItem.stok}, Diminta: ${item.qty}).`);
+      // Conditional decrement: stock can never go negative even with concurrent dispensing.
+      const left = await core
+        .prepare('UPDATE inventory SET stok = stok - ?, updated_at = ? WHERE id = ? AND stok >= ? RETURNING stok')
+        .bind(qty, nowIso(), stockItem.id, qty)
+        .first<Row>();
+      if (!left) {
+        errors.push(`Stok obat ${stockItem.nama} tidak mencukupi (Tersedia: ${stockItem.stok}, Diminta: ${qty}).`);
         continue;
       }
-      stockItem.stok -= item.qty;
-      dispensed.push({
-        kode: stockItem.kode,
-        nama: stockItem.nama,
-        qty: item.qty,
-        sisa_stok: stockItem.stok
-      });
+      dispensed.push({ kode: stockItem.kode, nama: stockItem.nama, qty, sisa_stok: left.stok });
     }
 
     if (errors.length > 0 && dispensed.length === 0) {
       return res.status(422).json({ success: false, errors });
     }
 
-    auditLogsStore.unshift({
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      user: 'Petugas Farmasi',
-      role: 'Farmasi',
+    await writeAudit(core, {
+      ...actorOf(req),
+      category: 'database',
       action: 'DISPENSE_MEDICATION',
       module: 'Farmasi',
-      ip: req.ip || '127.0.0.1',
       status: 'SUCCESS',
-      details: `Pengeluaran ${dispensed.length} item obat untuk resep ${recipeId || 'R-DIRECT'} (Pasien: ${no_rm || '-'})`
+      data: { ip: req.ip, details: `Pengeluaran ${dispensed.length} item obat untuk resep ${recipeId || 'R-DIRECT'} (Pasien: ${no_rm || '-'})` }
     });
 
     res.json({
@@ -739,15 +530,18 @@ export function createApp(db: Databases): express.Express {
       dispensed,
       warnings: errors.length > 0 ? errors : undefined
     });
-  });
+  }));
 
   // 9. BPJS V-Claim API Simulation
-  app.get('/api/v1/bpjs/vclaim/peserta/:nikOrNoka', (req, res) => {
+  app.get('/api/v1/bpjs/vclaim/peserta/:nikOrNoka', clinical, route(async (req, res) => {
     const { nikOrNoka } = req.params;
-    const patient = patientsStore.find(p => p.nik === nikOrNoka || p.no_bpjs === nikOrNoka);
+    const row = await core
+      .prepare("SELECT * FROM pasien WHERE (nik = ? AND nik <> '') OR json_extract(data, '$.no_bpjs') = ? LIMIT 1")
+      .bind(nikOrNoka, nikOrNoka)
+      .first<Row>();
+    const patient = row ? toRecord(row) : null;
 
     sepCounter += 1;
-    const isMockRegistered = Boolean(patient);
 
     res.json({
       metaData: {
@@ -756,12 +550,12 @@ export function createApp(db: Databases): express.Express {
       },
       response: {
         peserta: {
-          noKartu: patient?.no_bpjs || (nikOrNoka.length === 13 ? nikOrNoka : '0001892345671'),
-          nik: patient?.nik || (nikOrNoka.length === 16 ? nikOrNoka : '3171012304850001'),
+          noKartu: patient?.no_bpjs || (nikOrNoka.length === 13 ? nikOrNoka : ''),
+          nik: patient?.nik || (nikOrNoka.length === 16 ? nikOrNoka : ''),
           nama: patient?.nama || 'Peserta Terdaftar BPJS',
           pisa: '1 (Peserta)',
           sex: patient?.jenis_kelamin || 'L',
-          tglLahir: patient?.tanggal_lahir || '1985-04-23',
+          tglLahir: patient?.tanggal_lahir || '',
           tglCetakKartu: '2019-01-01',
           statusPeserta: {
             kode: '0',
@@ -784,11 +578,14 @@ export function createApp(db: Databases): express.Express {
             umurSaatPelayanan: '39 tahun'
           },
           dinsos: null,
-          prolanisPRB: patient?.riwayat_penyakit?.some(r => r.includes('Hipertensi') || r.includes('Diabetes')) ? 'PRB Aktif' : null
+          prolanisPRB: Array.isArray(patient?.riwayat_penyakit) &&
+            patient.riwayat_penyakit.some((r: unknown) => typeof r === 'string' && (r.includes('Hipertensi') || r.includes('Diabetes')))
+            ? 'PRB Aktif'
+            : null
         }
       }
     });
-  });
+  }));
 
   app.post('/api/v1/bpjs/vclaim/sep/generate', (req, res) => {
     const { noKartu, poliTujuan, diagnosaAwal, noRujukan, faskesPerujuk } = req.body;
@@ -836,8 +633,8 @@ export function createApp(db: Databases): express.Express {
           tglKunjungan: new Date().toISOString().split('T')[0],
           provKunjungan: { kdProvider: '0112U001', nmProvider: 'Puskesmas Kecamatan Senen' },
           peserta: {
-            noKartu: '0001234567891',
-            nama: 'Ny. Siti Rahmawati',
+            noKartu: '-',
+            nama: 'Peserta BPJS',
             statusPeserta: { keterangan: 'AKTIF' }
           },
           poliRujukan: { kode: 'INT', nama: 'Penyakit Dalam' },
@@ -864,7 +661,7 @@ export function createApp(db: Databases): express.Express {
         display: encounterType === 'inpatient' ? 'inpatient encounter' : encounterType === 'emergency' ? 'emergency' : 'ambulatory'
       },
       subject: {
-        reference: `Patient/${patientId || 'P-3171012304850001'}`,
+        reference: `Patient/${patientId || '-'}`,
         display: 'Pasien Terdaftar SatuSehat'
       },
       participant: [
@@ -891,22 +688,26 @@ export function createApp(db: Databases): express.Express {
     });
   });
 
-  // 11. Payment Gateway & QRIS Callback Webhook
-  app.post('/api/v1/billing/qris/callback', (req, res) => {
-    const { invoiceNo, amount, paymentStatus, transactionId, signature } = req.body;
+  // 11. Payment Gateway & QRIS Callback Webhook (public: called by the gateway, no staff session)
+  // shortcut: no gateway secret is configured, so the signature is NOT verified; this route only writes an audit row marked unverified
+  // and changes no billing data. Verify the HMAC with the gateway secret before letting it mark invoices paid.
+  app.post('/api/v1/billing/qris/callback', route(async (req, res) => {
+    const { invoiceNo, amount, paymentStatus, transactionId } = req.body ?? {};
 
     console.log(`[QRIS-WEBHOOK] Callback received for Invoice: ${invoiceNo}, Status: ${paymentStatus}, Amount: Rp ${amount}`);
 
-    auditLogsStore.unshift({
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      user: 'Payment Gateway (Duitku / Midtrans)',
+    await writeAudit(core, {
+      actor: 'Payment Gateway (Duitku / Midtrans)',
       role: 'SYSTEM',
-      action: 'PAYMENT_RECEIVED',
+      category: 'security',
+      action: 'PAYMENT_CALLBACK_UNVERIFIED',
       module: 'Kasir & Billing',
-      ip: req.ip || '127.0.0.1',
-      status: 'SUCCESS',
-      details: `Pembayaran QRIS lunas untuk Invoice ${invoiceNo || 'INV-DIRECT'} sejumlah Rp ${amount || 0}`
+      status: 'WARNING',
+      data: {
+        ip: req.ip,
+        signatureVerified: false,
+        details: `Callback QRIS (tanda tangan belum diverifikasi) untuk Invoice ${String(invoiceNo || 'INV-DIRECT').slice(0, 64)} sejumlah Rp ${Number(amount) || 0}`
+      }
     });
 
     res.json({
@@ -915,100 +716,116 @@ export function createApp(db: Databases): express.Express {
       message: 'Notifikasi pembayaran berhasil diproses dan billing pasien terupdate lunas.',
       transactionId: transactionId || `TX-${Date.now()}`
     });
-  });
+  }));
 
   // 12. RME Complete Dossier Electronic Documents Hub API
-  app.get('/api/v1/dossier/documents/:noRm', (req, res) => {
+  const DOSSIER_STATUS = ['Lengkap', 'Draft', 'Menunggu TTD', 'Terverifikasi'];
+  app.get('/api/v1/dossier/documents/:noRm', clinical, route(async (req, res) => {
     const { noRm } = req.params;
-    const documents = dossierStore.filter(d => d.no_rm === noRm);
+    const { results } = await core
+      .prepare(`SELECT d.*, p.nama AS pasien_nama FROM dossier_documents d JOIN pasien p ON p.no_rm = d.no_rm
+                WHERE d.no_rm = ? ORDER BY d.created_at DESC`)
+      .bind(noRm)
+      .all<Row>();
+    res.json({ success: true, no_rm: noRm, total: results.length, documents: results.map(toRecord) });
+  }));
 
-    res.json({
-      success: true,
-      no_rm: noRm,
-      total: documents.length,
-      documents
-    });
-  });
-
-  app.post('/api/v1/dossier/documents', (req, res) => {
-    const { no_rm, pasien_nama, doc_type, title, data, created_by } = req.body;
-
+  app.post('/api/v1/dossier/documents', clinical, route(async (req, res) => {
+    const no_rm = text(req.body?.no_rm, 40);
+    const doc_type = text(req.body?.doc_type, 80);
+    const title = text(req.body?.title, 200);
     if (!no_rm || !doc_type || !title) {
       return res.status(400).json({
         success: false,
         error: 'no_rm, doc_type, dan title dokumen wajib diisi.'
       });
     }
+    const data = isPlainObject(req.body.data) ? req.body.data : {};
+    const patient = await core.prepare('SELECT nama FROM pasien WHERE no_rm = ?').bind(no_rm).first<Row>();
+    if (!patient) return res.status(404).json({ success: false, error: 'Pasien tidak ditemukan.' });
 
-    const newDoc: DossierDocument = {
-      id: `doc-${Date.now()}`,
+    const newDoc = {
+      id: newId(),
       no_rm,
-      pasien_nama: pasien_nama || 'Pasien',
       doc_type,
       title,
-      created_at: new Date().toISOString(),
-      created_by: created_by || 'Tenaga Medis',
-      status: 'Terverifikasi',
-      data: data || {}
+      status: DOSSIER_STATUS.includes(req.body.status) ? req.body.status : 'Terverifikasi',
+      created_by: req.staff!.nama, // from the session, never from the body
+      created_at: nowIso(),
     };
-
-    dossierStore.unshift(newDoc);
+    await core
+      .prepare('INSERT INTO dossier_documents (id, no_rm, doc_type, title, status, created_by, data, created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .bind(newDoc.id, no_rm, doc_type, title, newDoc.status, newDoc.created_by, JSON.stringify(data), newDoc.created_at)
+      .run();
 
     res.status(201).json({
       success: true,
       message: `Berkas ${title} berhasil disimpan ke Rekam Medis Elektronik (RME).`,
-      data: newDoc
+      data: { ...newDoc, pasien_nama: patient.nama, data }
     });
-  });
+  }));
 
-  // 13. Audit Trail API
-  app.get('/api/v1/audit/logs', (req, res) => {
-    const { module, user, limit = '50' } = req.query;
-    let logs = [...auditLogsStore];
-
-    if (module && typeof module === 'string') {
-      logs = logs.filter(l => l.module.toLowerCase().includes(module.toLowerCase()));
-    }
-    if (user && typeof user === 'string') {
-      logs = logs.filter(l => l.user.toLowerCase().includes(user.toLowerCase()));
-    }
-
-    const limitNum = Math.min(200, parseInt(limit as string, 10));
-    res.json({
-      success: true,
-      total: logs.length,
-      data: logs.slice(0, limitNum)
-    });
-  });
-
-  app.post('/api/v1/audit/logs', (req, res) => {
-    const { action, module, details, status = 'SUCCESS' } = req.body;
-    const entry: AuditLogEntry = {
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      user: req.body.user || 'Staf SIMK',
-      role: req.body.role || 'Tenaga Medis',
-      action: action || 'DATA_ACCESS',
-      module: module || 'Umum',
-      ip: req.ip || '127.0.0.1',
-      status: status as any,
-      details: details || 'Aktivitas terekam'
+  // 13. Audit Trail API (legacy shape over audit_log)
+  const toLegacyAudit = (row: Row) => {
+    const data = parseJson(row.data) ?? {};
+    return {
+      id: row.id,
+      timestamp: row.created_at,
+      user: row.actor,
+      role: row.role ?? '',
+      action: row.action,
+      module: row.module ?? '',
+      ip: data.ip ?? '',
+      status: row.status,
+      details: typeof data.details === 'string' ? data.details : JSON.stringify(data.details ?? '')
     };
-    auditLogsStore.unshift(entry);
-    res.status(201).json({ success: true, data: entry });
-  });
+  };
+
+  app.get('/api/v1/audit/logs', adminOnly, route(async (req, res) => {
+    const { module, user } = req.query;
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (typeof module === 'string' && module) { where.push('module LIKE ?'); args.push(`%${module}%`); }
+    if (typeof user === 'string' && user) { where.push('actor LIKE ?'); args.push(`%${user}%`); }
+    const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const limitNum = Math.min(200, Math.max(1, parseInt(String(req.query.limit ?? '50'), 10) || 50));
+    const total = Number((await core.prepare(`SELECT COUNT(*) AS n FROM audit_log ${w}`).bind(...args).first<Row>())?.n ?? 0);
+    const { results } = await core
+      .prepare(`SELECT * FROM audit_log ${w} ORDER BY created_at DESC LIMIT ?`)
+      .bind(...args, limitNum)
+      .all<Row>();
+    res.json({ success: true, total, data: results.map(toLegacyAudit) });
+  }));
+
+  app.post('/api/v1/audit/logs', route(async (req, res) => {
+    const { action, module, details, status = 'SUCCESS' } = req.body ?? {};
+    if (!['SUCCESS', 'FAILED', 'WARNING', 'DENIED'].includes(status)) return res.status(400).json({ error: 'Status audit tidak valid.' });
+    const entry = {
+      ...actorOf(req),
+      action: text(action, 80) || 'DATA_ACCESS',
+      module: text(module, 200) || 'Umum',
+      status,
+      data: { ip: req.ip, details: text(details, 2000) || 'Aktivitas terekam' }
+    };
+    await writeAudit(core, entry);
+    res.status(201).json({
+      success: true,
+      data: { timestamp: nowIso(), user: entry.actor, role: entry.role, action: entry.action, module: entry.module, ip: req.ip, status, details: entry.data.details }
+    });
+  }));
 
   // 14. Database Backup & Disaster Recovery API
-  app.post('/api/v1/backup/create', (req, res) => {
+  app.post('/api/v1/backup/create', adminOnly, route(async (req, res) => {
     const backupId = `BKP-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-    const payload = {
-      patientsCount: patientsStore.length,
-      appointmentsCount: appointmentsStore.length,
-      bedsCount: bedsStore.length,
-      inventoryCount: inventoryStore.length,
-      dossierDocumentsCount: dossierStore.length,
-      auditLogsCount: auditLogsStore.length
-    };
+    const c = await core
+      .prepare(`SELECT
+        (SELECT COUNT(*) FROM pasien) AS patientsCount,
+        (SELECT COUNT(*) FROM kunjungan) AS appointmentsCount,
+        (SELECT COUNT(*) FROM beds) AS bedsCount,
+        (SELECT COUNT(*) FROM inventory) AS inventoryCount,
+        (SELECT COUNT(*) FROM dossier_documents) AS dossierDocumentsCount,
+        (SELECT COUNT(*) FROM audit_log) AS auditLogsCount`)
+      .first<Row>();
 
     res.status(201).json({
       success: true,
@@ -1017,10 +834,10 @@ export function createApp(db: Databases): express.Express {
       type: 'FULL_SNAPSHOT',
       size: '2.4 MB',
       checksum: 'sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      summary: payload,
+      summary: c,
       message: 'Snapshot backup basis data SIMK berhasil dibuat dan diarsipkan dengan aman.'
     });
-  });
+  }));
 
   app.get('/api/v1/backup/status', (req, res) => {
     res.json({
@@ -1031,6 +848,294 @@ export function createApp(db: Databases): express.Express {
       totalBackupsStored: 14
     });
   });
+
+  // =========================================================================
+  // CORE REST API (client data layer)
+  // =========================================================================
+  const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+
+  // Records: column fields are lifted out of the body, everything else goes to data.
+  const RECORD_COLS: Record<string, {
+    fields: Record<string, { required?: boolean; fallback?: string }>;
+    filters: Record<string, string>;
+    hasCreatedAt: boolean;
+    readRoles: string[] | null; // null = any staff
+  }> = {
+    pasien: {
+      fields: { no_rm: { required: true }, nik: { fallback: '' }, nama: { required: true }, penjamin: {}, status: {} },
+      filters: { no_rm: 'no_rm' },
+      hasCreatedAt: true,
+      readRoles: CLINICAL_OR_ADMIN,
+    },
+    kunjungan: {
+      fields: { pasien_id: { required: true }, dokter_id: {}, tanggal: { required: true }, status: { fallback: 'Menunggu' }, nomor_antrian: {} },
+      filters: { pasien_id: 'pasien_id', no_rm: "json_extract(data, '$.no_rm')" },
+      hasCreatedAt: true,
+      readRoles: CLINICAL_OR_ADMIN,
+    },
+    dokter: { fields: { nama: { required: true } }, filters: {}, hasCreatedAt: false, readRoles: null },
+    perawat: { fields: { nama: { required: true } }, filters: {}, hasCreatedAt: false, readRoles: null },
+  };
+
+  const recordCol = (allow: 'read' | 'write' | 'delete'): express.RequestHandler => (req, res, next) => {
+    const cfg = RECORD_COLS[req.params.col];
+    if (!cfg) return res.status(404).json({ error: 'Koleksi tidak dikenal.' });
+    if (req.params.id !== undefined && !ID_RE.test(req.params.id)) return res.status(400).json({ error: 'ID tidak valid.' });
+    const roles = allow === 'delete' ? ADMIN_ROLES : allow === 'write' ? CLINICAL_OR_ADMIN : cfg.readRoles;
+    if (roles && !roles.includes(req.staff!.roleId)) return res.status(403).json({ error: 'Peran Anda tidak memiliki akses ke koleksi ini.' });
+    next();
+  };
+
+  app.get('/api/v1/records/:col', recordCol('read'), route(async (req, res) => {
+    const col = req.params.col;
+    const cfg = RECORD_COLS[col];
+    const where: string[] = [];
+    const args: unknown[] = [];
+    for (const [param, expr] of Object.entries(cfg.filters)) {
+      const v = req.query[param];
+      if (typeof v === 'string' && v) { where.push(`${expr} = ?`); args.push(v); }
+    }
+    if (typeof req.query.since === 'string' && req.query.since) { where.push('updated_at > ?'); args.push(req.query.since); }
+    // shortcut: returns every matching row; add paging when a collection outgrows one response (clients poll with ?since=).
+    const { results } = await core
+      .prepare(`SELECT * FROM ${col} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY updated_at`)
+      .bind(...args)
+      .all<Row>();
+    res.json(results.map(toRecord));
+  }));
+
+  app.get('/api/v1/records/:col/:id', recordCol('read'), route(async (req, res) => {
+    const row = await core.prepare(`SELECT * FROM ${req.params.col} WHERE id = ?`).bind(req.params.id).first<Row>();
+    if (!row) return res.status(404).json({ error: 'Data tidak ditemukan.' });
+    res.json(toRecord(row));
+  }));
+
+  app.put('/api/v1/records/:col/:id', recordCol('write'), route(async (req, res) => {
+    const col = req.params.col;
+    const cfg = RECORD_COLS[col];
+    const body = req.body;
+    if (!isPlainObject(body)) return res.status(400).json({ error: 'Body harus berupa objek record.' });
+
+    const { id: _id, created_at: _c, updated_at: _u, ...rest } = body;
+    const values: Record<string, string | null> = {};
+    for (const [name, spec] of Object.entries(cfg.fields)) {
+      const v = rest[name];
+      delete rest[name];
+      if (v === undefined || v === null || v === '') {
+        if (spec.required) return res.status(400).json({ error: `Field ${name} wajib diisi.` });
+        values[name] = spec.fallback ?? null;
+      } else if (typeof v !== 'string' || v.length > 200) {
+        return res.status(400).json({ error: `Field ${name} harus teks (maks. 200 karakter).` });
+      } else {
+        values[name] = v;
+      }
+    }
+
+    const now = nowIso();
+    const names = Object.keys(cfg.fields);
+    const insertCols = ['id', ...names, 'data', 'updated_at', ...(cfg.hasCreatedAt ? ['created_at'] : [])];
+    const insertVals = [req.params.id, ...names.map((n) => values[n]), JSON.stringify(rest), now, ...(cfg.hasCreatedAt ? [now] : [])];
+    const updates = [...names, 'data', 'updated_at'].map((c) => `${c} = excluded.${c}`).join(', ');
+    try {
+      await core
+        .prepare(`INSERT INTO ${col} (${insertCols.join(', ')}) VALUES (${insertCols.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`)
+        .bind(...insertVals)
+        .run();
+    } catch (err) {
+      const kind = sqlError(err);
+      if (kind === 'unique') return res.status(409).json({ error: 'Data bentrok dengan record lain (No. RM/NIK sudah dipakai).' });
+      if (kind === 'fk') return res.status(422).json({ error: 'Record merujuk data yang tidak ada (mis. pasien_id).' });
+      throw err;
+    }
+    if (col === 'pasien' || col === 'kunjungan') {
+      await writeAudit(core, { ...actorOf(req), category: 'database', action: 'RECORD_UPSERT', module: `records/${col}`, status: 'SUCCESS', data: { docId: req.params.id } });
+    }
+    const row = await core.prepare(`SELECT * FROM ${col} WHERE id = ?`).bind(req.params.id).first<Row>();
+    res.json(toRecord(row!));
+  }));
+
+  app.delete('/api/v1/records/:col/:id', recordCol('delete'), route(async (req, res) => {
+    const col = req.params.col;
+    let changes = 0;
+    try {
+      changes = (await core.prepare(`DELETE FROM ${col} WHERE id = ?`).bind(req.params.id).run()).meta.changes ?? 0;
+    } catch (err) {
+      if (sqlError(err) === 'fk') return res.status(409).json({ error: 'Data masih dirujuk record lain dan tidak dapat dihapus.' });
+      throw err;
+    }
+    if (!changes) return res.status(404).json({ error: 'Data tidak ditemukan.' });
+    await writeAudit(core, { ...actorOf(req), category: 'database', action: 'RECORD_DELETE', module: `records/${col}`, status: 'SUCCESS', data: { docId: req.params.id } });
+    res.json({ success: true });
+  }));
+
+  // System data: module datasets + hospital_settings, compare-and-swap on integer version.
+  const MAX_SYSTEM_VALUE = 1_900_000; // D1 row limit is 2 MB
+  const toSystem = (row: Row) => ({ key: row.key, value: parseJson(row.value), version: row.version });
+
+  app.get('/api/v1/system-data', route(async (req, res) => {
+    const { results } = await core.prepare('SELECT key, value, version FROM system_data ORDER BY key').all<Row>();
+    res.json(results.map(toSystem));
+  }));
+
+  app.get('/api/v1/system-data/:key', route(async (req, res) => {
+    const row = await core.prepare('SELECT key, value, version FROM system_data WHERE key = ?').bind(req.params.key).first<Row>();
+    if (!row) return res.status(404).json({ error: 'Data sistem tidak ditemukan.' });
+    res.json(toSystem(row));
+  }));
+
+  app.put('/api/v1/system-data/:key', route(async (req, res) => {
+    const key = req.params.key;
+    if (!ID_RE.test(key)) return res.status(400).json({ error: 'Key tidak valid.' });
+    const writeRoles = key === 'hospital_settings' ? ADMIN_ROLES : CLINICAL_OR_ADMIN;
+    if (!writeRoles.includes(req.staff!.roleId)) return res.status(403).json({ error: 'Peran Anda tidak boleh mengubah data ini.' });
+    const { value, version = 0 } = req.body ?? {};
+    if (value === undefined) return res.status(400).json({ error: 'value wajib diisi.' });
+    if (!Number.isInteger(version) || version < 0) return res.status(400).json({ error: 'version harus bilangan bulat >= 0.' });
+    const json = JSON.stringify(value);
+    if (json.length > MAX_SYSTEM_VALUE) return res.status(413).json({ error: 'Data terlalu besar.' });
+
+    const now = nowIso();
+    const result = version === 0
+      ? await core.prepare('INSERT INTO system_data (key, value, version, updated_at) VALUES (?, ?, 1, ?) ON CONFLICT(key) DO NOTHING').bind(key, json, now).run()
+      : await core.prepare('UPDATE system_data SET value = ?, version = version + 1, updated_at = ? WHERE key = ? AND version = ?').bind(json, now, key, version).run();
+    if (result.meta.changes) {
+      await writeAudit(core, { ...actorOf(req), category: 'database', action: 'SYSTEM_DATA_WRITE', module: `system_data/${key}`, status: 'SUCCESS', data: { version: version + 1 } });
+      return res.json({ version: version + 1 });
+    }
+    const current = await core.prepare('SELECT key, value, version FROM system_data WHERE key = ?').bind(key).first<Row>();
+    res.status(409).json(current ? { value: parseJson(current.value), version: current.version } : { value: null, version: 0 });
+  }));
+
+  // Activity logs (client activityLogger) -> audit_log. Identity comes from the session, not the body.
+  app.post('/api/v1/activity-logs', route(async (req, res) => {
+    const e = req.body;
+    if (!isPlainObject(e)) return res.status(400).json({ error: 'Entri aktivitas tidak valid.' });
+    const action = text(e.action, 80);
+    if (!action || !['SUCCESS', 'FAILED', 'DENIED', 'WARNING'].includes(e.status)) {
+      return res.status(400).json({ error: 'action dan status aktivitas wajib valid.' });
+    }
+    await writeAudit(core, {
+      ...actorOf(req),
+      category: e.category,
+      action,
+      module: text(e.target, 200),
+      status: e.status,
+      data: {
+        clientId: text(e.id, 128),
+        clientTimestamp: text(e.timestamp, 64),
+        details: isPlainObject(e.details) ? e.details : {},
+        ip: req.ip,
+      },
+    });
+    res.status(201).json({ success: true });
+  }));
+
+  app.get('/api/v1/activity-logs', adminOnly, route(async (req, res) => {
+    const limitNum = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? '200'), 10) || 200));
+    const { results } = await core.prepare('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?').bind(limitNum).all<Row>();
+    res.json(results.map((row) => {
+      const data = parseJson(row.data) ?? {};
+      return {
+        id: typeof data.clientId === 'string' ? data.clientId : row.id, // client merges its local buffer by id
+        timestamp: row.created_at,
+        category: row.category ?? 'database',
+        action: row.action,
+        target: row.module ?? '',
+        status: row.status,
+        user: { uid: row.user_id ?? undefined, email: row.actor, roleId: row.role ?? undefined },
+        details: isPlainObject(data.details) ? data.details : { message: data.details, ipAddress: data.ip },
+      };
+    }));
+  }));
+
+  // FCM tokens: the caller's own token (uid = session user).
+  app.put('/api/v1/fcm-tokens', route(async (req, res) => {
+    const b = req.body ?? {};
+    const no_rm = text(b.no_rm, 40);
+    const token = text(b.token, 512);
+    if (!no_rm || !token) return res.status(400).json({ error: 'no_rm dan token wajib diisi.' });
+    if (b.platform !== undefined && !['web', 'pwa', 'android', 'ios'].includes(b.platform)) return res.status(400).json({ error: 'platform tidak valid.' });
+    const flag = (v: unknown) => (v === false ? 0 : 1);
+    const id = typeof b.id === 'string' && ID_RE.test(b.id) ? b.id : newId();
+    try {
+      await core
+        .prepare(`INSERT INTO fcm_tokens (id, uid, no_rm, token, queue_alerts, lab_alerts, active, data, updated_at) VALUES (?,?,?,?,?,?,?,?,?)
+                  ON CONFLICT(uid, no_rm) DO UPDATE SET token = excluded.token, queue_alerts = excluded.queue_alerts,
+                  lab_alerts = excluded.lab_alerts, active = excluded.active, data = excluded.data, updated_at = excluded.updated_at`)
+        .bind(id, req.staff!.id, no_rm, token, flag(b.queueAlertsEnabled), flag(b.labAlertsEnabled), flag(b.active),
+          JSON.stringify({ platform: b.platform ?? 'web', userAgent: text(b.userAgent, 300) ?? undefined }), nowIso())
+        .run();
+    } catch (err) {
+      if (sqlError(err) === 'fk') return res.status(422).json({ error: 'No. RM tidak terdaftar.' });
+      if (sqlError(err) === 'unique') return res.status(409).json({ error: 'ID token sudah dipakai.' });
+      throw err;
+    }
+    res.json({ success: true });
+  }));
+
+  // Patient notifications. Clinical/admin see and manage all; other staff only their own.
+  const NOTIF_TYPES = ['queue_call', 'lab_ready', 'system'];
+  const toNotification = (row: Row) => ({
+    ...(parseJson(row.data) ?? {}),
+    id: row.id,
+    no_rm: row.no_rm,
+    recipientUid: row.recipient_uid,
+    type: row.type,
+    read: row.read === 1,
+    createdAt: row.created_at,
+  });
+  const isClinical = (req: express.Request) => CLINICAL_OR_ADMIN.includes(req.staff!.roleId);
+
+  app.get('/api/v1/patient-notifications', route(async (req, res) => {
+    const recipient = typeof req.query.recipient === 'string' && req.query.recipient ? req.query.recipient : null;
+    if (!isClinical(req) && recipient !== req.staff!.id) return res.status(403).json({ error: 'Hanya notifikasi milik Anda yang dapat dibaca.' });
+    const { results } = await core
+      .prepare(`SELECT * FROM patient_notifications ${recipient ? 'WHERE recipient_uid = ?' : ''} ORDER BY created_at DESC LIMIT 200`)
+      .bind(...(recipient ? [recipient] : []))
+      .all<Row>();
+    res.json(results.map(toNotification));
+  }));
+
+  app.post('/api/v1/patient-notifications', route(async (req, res) => {
+    const b = req.body ?? {};
+    const no_rm = text(b.no_rm, 40);
+    const recipientUid = text(b.recipientUid, 128);
+    const title = text(b.title, 160);
+    const body = text(b.body, 500);
+    if (!no_rm || !recipientUid || !title || !body || !NOTIF_TYPES.includes(b.type)) {
+      return res.status(400).json({ error: 'no_rm, recipientUid, type, title, dan body wajib valid.' });
+    }
+    if (!isClinical(req) && recipientUid !== req.staff!.id) return res.status(403).json({ error: 'Tidak boleh mengirim notifikasi ke penerima lain.' });
+    const id = typeof b.id === 'string' && ID_RE.test(b.id) ? b.id : newId();
+    const data = {
+      title,
+      body,
+      ...(text(b.poli, 120) ? { poli: text(b.poli, 120) } : {}),
+      ...(text(b.nomor_antrian, 32) ? { nomor_antrian: text(b.nomor_antrian, 32) } : {}),
+      ...(text(b.lab_order_id, 64) ? { lab_order_id: text(b.lab_order_id, 64) } : {}),
+      ...(['fcm_push', 'fcm_foreground', 'sse_realtime', 'firestore_realtime'].includes(b.channel) ? { channel: b.channel } : {}),
+    };
+    const createdAt = nowIso();
+    try {
+      await core
+        .prepare('INSERT INTO patient_notifications (id, recipient_uid, no_rm, type, read, data, created_at) VALUES (?,?,?,?,0,?,?)')
+        .bind(id, recipientUid, no_rm, b.type, JSON.stringify(data), createdAt)
+        .run();
+    } catch (err) {
+      if (sqlError(err) === 'fk') return res.status(422).json({ error: 'No. RM tidak terdaftar.' });
+      if (sqlError(err) === 'unique') return res.status(409).json({ error: 'ID notifikasi sudah dipakai.' });
+      throw err;
+    }
+    res.status(201).json({ ...data, id, no_rm, recipientUid, type: b.type, read: false, createdAt });
+  }));
+
+  app.patch('/api/v1/patient-notifications/:id', route(async (req, res) => {
+    const row = await core.prepare('SELECT * FROM patient_notifications WHERE id = ?').bind(req.params.id).first<Row>();
+    if (!row) return res.status(404).json({ error: 'Notifikasi tidak ditemukan.' });
+    if (!isClinical(req) && row.recipient_uid !== req.staff!.id) return res.status(403).json({ error: 'Bukan notifikasi milik Anda.' });
+    await core.prepare('UPDATE patient_notifications SET read = 1 WHERE id = ?').bind(row.id).run();
+    res.json(toNotification({ ...row, read: 1 }));
+  }));
 
   // =========================================================================
   // 🧠 AI MEDICAL INTELLIGENCE ENDPOINTS (Powered by Google Gemini 4)
@@ -2017,21 +2122,27 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
   });
 
   // Cloudflare Turnstile Verification API
+  // Production fails closed: no secret = 503, no demo token, no client-supplied secret, no success on network error.
   app.post('/api/cloudflare/verify-turnstile', async (req, res) => {
+    const isProduction = process.env.NODE_ENV === 'production';
     try {
-      const { token, secretKey } = req.body;
+      const { token } = req.body ?? {};
 
-      if (!token) {
+      if (!token || typeof token !== 'string') {
         return res.status(400).json({ success: false, message: 'Turnstile token is required.' });
       }
 
-      const effectiveSecret = 
-        process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY || 
-        secretKey || 
-        '1x0000000000000000000000000000000AA'; // Cloudflare test secret key (always passes)
+      const effectiveSecret =
+        process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY ||
+        (isProduction ? '' : '1x0000000000000000000000000000000AA'); // Cloudflare test secret key (always passes), dev only
+
+      if (!effectiveSecret) {
+        console.error('CLOUDFLARE_TURNSTILE_SECRET_KEY is not configured.');
+        return res.status(503).json({ success: false, message: 'Verifikasi Turnstile belum dikonfigurasi.' });
+      }
 
       // In development / demo testing or mock token
-      if (token.startsWith('CF_TURNSTILE_DEMO') || effectiveSecret.startsWith('1x00000000')) {
+      if (!isProduction && (token.startsWith('CF_TURNSTILE_DEMO') || effectiveSecret.startsWith('1x00000000'))) {
         return res.json({
           success: true,
           challenge_ts: new Date().toISOString(),
@@ -2063,7 +2174,10 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
       res.json(cfData);
     } catch (err: any) {
       console.error('Cloudflare Turnstile verification error:', err);
-      // Sandbox fallback on network failure
+      if (isProduction) {
+        return res.status(502).json({ success: false, message: 'Verifikasi Turnstile gagal dihubungi. Coba lagi.' });
+      }
+      // Sandbox fallback on network failure (dev only)
       res.json({
         success: true,
         challenge_ts: new Date().toISOString(),
@@ -2093,41 +2207,16 @@ Rangkaian Terapi & Tindakan: ${JSON.stringify(treatments || [])}
   });
 
   // Register Public Hospital Portal & Patient Mobile App Routes
-  registerPatientPortalRoutes(app, {
-    patientsStore: patientsStore as any,
-    appointmentsStore: appointmentsStore as any,
-    bedsStore: bedsStore as any,
-    createAuditLog: (entry) => {
-      auditLogsStore.unshift({
-        id: 'log-' + Date.now(),
-        timestamp: new Date().toISOString(),
-        ...entry
-      });
-    }
-  });
+  registerPatientPortalRoutes(app, { db, createAuditLog });
 
   // Register Unified Employee Ecosystem API Gateway (/api/gateway/*)
-  registerEmployeePortalGateway(app, {
-    createAuditLog: (entry) => {
-      auditLogsStore.unshift({
-        id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 99),
-        timestamp: new Date().toISOString(),
-        user: entry.user_name || entry.user_id,
-        role: entry.user_id,
-        action: entry.action,
-        module: entry.module,
-        ip: entry.ip_address || '127.0.0.1',
-        status: entry.status,
-        details: entry.details
-      });
-    }
-  });
+  registerEmployeePortalGateway(app, { db, createAuditLog });
 
   // Global Error Handler
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('Global Server Error:', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: err?.message || 'Terjadi kesalahan pada server.' });
+      res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
     }
   });
 
