@@ -6,8 +6,10 @@ import {
   GOVERNANCE_FRAMEWORKS,
   type DivisionDefinition
 } from '../data/employeePortalCatalog';
+import type { Databases } from './db';
 
 export interface GatewayDependencies {
+  db: Databases;
   createAuditLog?: (entry: {
     user_id: string;
     user_name: string;
@@ -46,15 +48,6 @@ interface EmployeeUserRecord {
   unitLocation: string;
   shiftPattern: string;
   lastHrisSync: string;
-}
-
-interface MfaChallenge {
-  challengeId: string;
-  userId: string;
-  otp: string;
-  authType: 'nip' | 'google';
-  deviceInfo: string;
-  expiresAt: number;
 }
 
 interface GatewaySession {
@@ -114,7 +107,60 @@ interface ConfigChangeProposal {
   reviewNote?: string;
 }
 
-const DEFAULT_DEMO_OTP = '123456';
+// Row shapes of db.hr / db.core tables (see migrations/hr/0001_init.sql, migrations/core/0002_sbar_handover.sql)
+interface EmployeeRow {
+  id: string;
+  nip: string;
+  email: string;
+  name: string;
+  division_id: string;
+  role_title: string;
+  portal_role: EmployeeUserRecord['portalRole'];
+  is_clinical: number;
+  is_admin_capable: number;
+  active: number;
+  str_number: string | null;
+  str_expiry: string | null;
+  sip_number: string | null;
+  sip_expiry: string | null;
+  unit_location: string;
+  shift_pattern: string;
+  last_hris_sync: string;
+}
+
+interface SessionRow {
+  employee_id: string;
+  name: string;
+  email: string;
+  auth_type: 'nip' | 'google';
+  mfa_verified: number;
+  device_fingerprint: string;
+  abac: string;
+  created_at: string;
+  nip: string;
+  division_id: string;
+  role_title: string;
+  portal_role: EmployeeUserRecord['portalRole'];
+  is_clinical: number;
+  is_admin_capable: number;
+}
+
+interface OtpRow {
+  id: string;
+  employee_id: string;
+  otp_hash: string;
+  auth_type: 'nip' | 'google';
+  device_info: string;
+}
+
+const SESSION_TTL_SQL = "datetime('now', '-12 hours')";
+const MAX_OTP_ATTEMPTS = 5;
+const ATTENDANCE_TYPES = ['MASUK', 'PULANG', 'LEMBUR', 'KOREKSI'] as const;
+const LEAVE_TYPES = ['Cuti Tahunan', 'Cuti Sakit', 'Izin Pelatihan / Seminar', 'Izin Khusus'] as const;
+const REIMBURSE_CATEGORIES = ['Diklat / SKP', 'Perjalanan Dinas', 'Kesehatan Pegawai', 'Operasional Unit'] as const;
+const HELPDESK_CATEGORIES = ['TI / SIMK & MFA', 'HR & Absensi / Payroll', 'Instalasi Aplikasi Mobile', 'Sarana / Medis'] as const;
+const HELPDESK_PRIORITIES = ['P1 - Kritis (15 Menit)', 'P2 - Tinggi (1 Jam)', 'P3 - Normal (4 Jam)'] as const;
+const DAY_LABELS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -137,7 +183,56 @@ function mapPortalRole(div: DivisionDefinition): EmployeeUserRecord['portalRole'
   return 'STAF_UMUM';
 }
 
-export function registerEmployeePortalGateway(app: express.Application, deps: GatewayDependencies = {}) {
+const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
+const nowStamp = (len = 19) => new Date().toISOString().replace('T', ' ').slice(0, len);
+const today = () => new Date().toISOString().slice(0, 10);
+const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+const isUniqueViolation = (e: unknown) => String((e as Error)?.message || '').includes('UNIQUE');
+const divisionById = (id: string) => HOSPITAL_DIVISIONS.find((d) => d.id === id);
+const oneOf = <T extends string>(list: readonly T[], v: unknown, fallback: T): T =>
+  list.includes(v as T) ? (v as T) : fallback;
+// Trimmed, length-capped string from untrusted input.
+const str = (v: unknown, fallback: string, max = 500) => {
+  const s = v === undefined || v === null ? '' : String(v).trim();
+  return (s || fallback).slice(0, max);
+};
+const daysUntil = (date?: string) => (date ? Math.ceil((Date.parse(date) - Date.now()) / 86_400_000) : 0);
+
+function toUser(r: EmployeeRow): EmployeeUserRecord {
+  return {
+    id: r.id,
+    nip: r.nip,
+    email: r.email,
+    name: r.name,
+    divisionId: r.division_id,
+    divisionName: divisionById(r.division_id)?.name || r.division_id,
+    roleTitle: r.role_title,
+    portalRole: r.portal_role,
+    isClinical: Boolean(r.is_clinical),
+    isAdminCapable: Boolean(r.is_admin_capable),
+    active: Boolean(r.active),
+    strNumber: r.str_number ?? undefined,
+    strExpiry: r.str_expiry ?? undefined,
+    sipNumber: r.sip_number ?? undefined,
+    sipExpiry: r.sip_expiry ?? undefined,
+    unitLocation: r.unit_location,
+    shiftPattern: r.shift_pattern,
+    lastHrisSync: r.last_hris_sync
+  };
+}
+
+// Express 4 does not catch rejected promises; forward them to the error handler.
+const asyncRoute =
+  (fn: (req: express.Request, res: express.Response) => Promise<unknown>) =>
+  (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    fn(req, res).catch(next);
+  };
+
+export function registerEmployeePortalGateway(app: express.Application, deps: GatewayDependencies) {
+  const hr = deps.db.hr;
+  const core = deps.db.core;
+
   // Klinik Campus Reference Coordinate (MYITARU Medical Center - Jakarta)
   const HOSPITAL_GEOFENCE = {
     name: 'Kampus Utama Klinik Tarumanagara Jakarta',
@@ -147,34 +242,14 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   };
 
   // =========================================================================
-  // 1. IN-MEMORY ENTERPRISE STORES (SIMK / HRIS / GATEWAY STATE)
+  // 1. GOVERNANCE STATE (employees, sessions and HR data live in db.hr; SBAR in db.core)
   // =========================================================================
-  const usersStore: EmployeeUserRecord[] = HOSPITAL_DIVISIONS.map((div, index) => ({
-    id: `emp-${div.id}`,
-    nip: div.defaultNip,
-    email: `${div.id.replace(/[^a-z0-9]/g, '')}@tarumanagara-klinik.id`,
-    name: div.defaultStaffName,
-    divisionId: div.id,
-    divisionName: div.name,
-    roleTitle: div.sampleRoles[0] || div.name,
-    portalRole: mapPortalRole(div),
-    isClinical: div.isClinical,
-    isAdminCapable: div.isAdminCapable,
-    active: true,
-    strNumber: div.isClinical ? `STR-3171-${100400 + index}` : undefined,
-    strExpiry: div.isClinical ? (index % 3 === 0 ? '2026-06-15' : '2028-11-30') : undefined,
-    sipNumber: div.isClinical ? `SIP-DKI-${2201 + index}/2025` : undefined,
-    sipExpiry: div.isClinical ? '2027-09-20' : undefined,
-    unitLocation: div.name,
-    shiftPattern: div.defaultShift,
-    lastHrisSync: new Date().toISOString()
-  }));
-
-  const mfaChallenges = new Map<string, MfaChallenge>();
-  const sessions = new Map<string, GatewaySession>();
+  // shortcut: per-isolate memory, resets on deploy and differs between Worker isolates; move to D1/KV when it must hold across instances.
   const idempotencyCache = new Map<string, { status: number; body: unknown; createdAt: number }>();
   const rateLimitMap = new Map<string, number[]>();
 
+  // shortcut: governance config (ABAC policies, feature flags, RBAC matrix, announcements, change proposals,
+  // changelog, integration health, landing analytics) is in memory and resets per isolate; move to D1 when admins must change it for real.
   let abacPolicies: AbacPolicies = {
     requireOnDutyForClinicalEmr: true,
     requireUnitMatchForSensitiveActions: true,
@@ -328,306 +403,14 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
   ];
 
-  // Shift schedule store (3-shift & long-shift with weekly hour calculation)
-  const shiftSchedulesStore: Array<{
-    id: string;
-    nip: string;
-    employeeName: string;
-    divisionId: string;
-    date: string;
-    dayLabel: string;
-    shiftType: 'Pagi (07:00-14:00)' | 'Siang (14:00-21:00)' | 'Malam (21:00-07:00)' | 'Reguler (08:00-16:00)' | 'Libur';
-    hours: number;
-    unit: string;
-    status: 'Terjadwal' | 'Sedang Bertugas' | 'Selesai' | 'Tukar Pending';
-  }> = [
-    { id: 'sh-1', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-06', dayLabel: 'Senin', shiftType: 'Pagi (07:00-14:00)', hours: 7, unit: 'Unit Bertugas', status: 'Selesai' },
-    { id: 'sh-2', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-07', dayLabel: 'Selasa', shiftType: 'Pagi (07:00-14:00)', hours: 7, unit: 'Unit Bertugas', status: 'Selesai' },
-    { id: 'sh-3', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-08', dayLabel: 'Rabu', shiftType: 'Siang (14:00-21:00)', hours: 7, unit: 'Unit Bertugas', status: 'Sedang Bertugas' },
-    { id: 'sh-4', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-09', dayLabel: 'Kamis', shiftType: 'Siang (14:00-21:00)', hours: 7, unit: 'Unit Bertugas', status: 'Terjadwal' },
-    { id: 'sh-5', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-10', dayLabel: 'Jumat', shiftType: 'Malam (21:00-07:00)', hours: 10, unit: 'Unit Bertugas', status: 'Terjadwal' },
-    { id: 'sh-6', nip: 'DEFAULT', employeeName: 'Aktif', divisionId: 'ALL', date: '2026-04-11', dayLabel: 'Sabtu', shiftType: 'Libur', hours: 0, unit: 'Istirahat Mingguan', status: 'Terjadwal' }
-  ];
-
-  const shiftSwapsStore: Array<{
-    id: string;
-    requesterName: string;
-    requesterNip: string;
-    divisionId: string;
-    fromDate: string;
-    fromShift: string;
-    targetColleague: string;
-    toDate: string;
-    toShift: string;
-    reason: string;
-    weeklyHoursAfterSwap: number;
-    conflictWarning?: string;
-    status: 'Menunggu Atasan Unit' | 'Disetujui' | 'Ditolak';
-    createdAt: string;
-  }> = [
-    {
-      id: 'swp-1',
-      requesterName: 'Ns. Siti Fatimah, M.Kep',
-      requesterNip: 'NIP-19840920-015',
-      divisionId: 'keperawatan',
-      fromDate: '2026-04-10',
-      fromShift: 'Malam (21:00-07:00)',
-      targetColleague: 'Ns. Raka Pradipta, S.Kep',
-      toDate: '2026-04-11',
-      toShift: 'Pagi (07:00-14:00)',
-      reason: 'Pertukaran jadwal jaga akhir pekan & menjaga kepatuhan batas 40 jam/minggu',
-      weeklyHoursAfterSwap: 35,
-      status: 'Disetujui',
-      createdAt: '2026-04-05 09:15'
-    }
-  ];
-
-  const attendanceLogsStore: Array<{
-    id: string;
-    nip: string;
-    employeeName: string;
-    divisionId: string;
-    timestamp: string;
-    type: 'MASUK' | 'PULANG' | 'LEMBUR' | 'KOREKSI';
-    method: 'Geofencing + Biometrik' | 'Offline Sync (Idempoten)' | 'Koreksi Manual';
-    distanceMeters: number;
-    withinGeofence: boolean;
-    biometricVerified: boolean;
-    note?: string;
-    idempotencyKey?: string;
-  }> = [
-    {
-      id: 'att-1',
-      nip: 'GLOBAL',
-      employeeName: 'Presensi Harian Unit',
-      divisionId: 'ALL',
-      timestamp: '2026-04-08 06:54:12',
-      type: 'MASUK',
-      method: 'Geofencing + Biometrik',
-      distanceMeters: 28,
-      withinGeofence: true,
-      biometricVerified: true,
-      note: 'Lobby Utama Gedung A'
-    },
-    {
-      id: 'att-2',
-      nip: 'GLOBAL',
-      employeeName: 'Presensi Harian Unit',
-      divisionId: 'ALL',
-      timestamp: '2026-04-07 14:12:40',
-      type: 'PULANG',
-      method: 'Geofencing + Biometrik',
-      distanceMeters: 34,
-      withinGeofence: true,
-      biometricVerified: true,
-      note: 'Selesai Handover Shift Pagi'
-    }
-  ];
-
-  const leaveRequestsStore: Array<{
-    id: string;
-    nip: string;
-    employeeName: string;
-    divisionId: string;
-    type: 'Cuti Tahunan' | 'Cuti Sakit' | 'Izin Pelatihan / Seminar' | 'Izin Khusus';
-    startDate: string;
-    endDate: string;
-    days: number;
-    substitute: string;
-    reason: string;
-    status: 'Menunggu Atasan Unit' | 'Menunggu Verifikasi SDM' | 'Disetujui Final' | 'Ditolak';
-    unitApprovedBy?: string;
-    sdmApprovedBy?: string;
-    createdAt: string;
-  }> = [
-    {
-      id: 'lv-101',
-      nip: 'NIP-19900308-110',
-      employeeName: 'Ns. Dewi Anggraini, S.Kep',
-      divisionId: 'rawat-inap',
-      type: 'Cuti Tahunan',
-      startDate: '2026-04-20',
-      endDate: '2026-04-22',
-      days: 3,
-      substitute: 'Ns. Rian Kusuma, S.Kep',
-      reason: 'Keperluan keluarga di luar kota',
-      status: 'Menunggu Verifikasi SDM',
-      unitApprovedBy: 'Karu Bangsal Melati',
-      createdAt: '2026-04-06 11:20'
-    },
-    {
-      id: 'lv-102',
-      nip: 'NIP-19890722-201',
-      employeeName: 'apt. Dewi Lestari, S.Farm',
-      divisionId: 'farmasi',
-      type: 'Izin Pelatihan / Seminar',
-      startDate: '2026-04-18',
-      endDate: '2026-04-18',
-      days: 1,
-      substitute: 'apt. Hendri Gunawan, S.Farm',
-      reason: 'Simposium Farmasi Klinis & Stewardship Antibiotik',
-      status: 'Menunggu Atasan Unit',
-      createdAt: '2026-04-07 09:05'
-    }
-  ];
-
-  const reimbursementsStore: Array<{
-    id: string;
-    nip: string;
-    employeeName: string;
-    title: string;
-    category: 'Diklat / SKP' | 'Perjalanan Dinas' | 'Kesehatan Pegawai' | 'Operasional Unit';
-    amount: number;
-    date: string;
-    status: 'Diajukan' | 'Diverifikasi Keuangan' | 'Dibayarkan';
-  }> = [
-    {
-      id: 'rmb-1',
-      nip: 'NIP-19880512-101',
-      employeeName: 'dr. Bima Sakti, Sp.EM',
-      title: 'Resertifikasi ATLS Ikatan Dokter Indonesia',
-      category: 'Diklat / SKP',
-      amount: 3500000,
-      date: '2026-03-28',
-      status: 'Dibayarkan'
-    },
-    {
-      id: 'rmb-2',
-      nip: 'NIP-19900105-501',
-      employeeName: 'Bagas Setiawan, S.Kom., M.TI',
-      title: 'Workshop Keamanan ISO 27001 Fasilitas Kesehatan',
-      category: 'Diklat / SKP',
-      amount: 2250000,
-      date: '2026-04-02',
-      status: 'Diverifikasi Keuangan'
-    }
-  ];
-
-  const sbarHandoversStore: Array<{
-    id: string;
-    unit: string;
-    divisionId: string;
-    sessionType: 'Nurse Station (Terjadwal)' | 'Bedside Handover';
-    fromShift: string;
-    toShift: string;
-    senderName: string;
-    receiverName: string;
-    patientLabel: string;
-    situation: string;
-    background: string;
-    assessment: string;
-    recommendation: string;
-    karuVerified: boolean;
-    karuName?: string;
-    createdAt: string;
-  }> = [
-    {
-      id: 'sbar-1',
-      unit: 'Ruang Melati Lt. 3 / IGD',
-      divisionId: 'keperawatan',
-      sessionType: 'Bedside Handover',
-      fromShift: 'Shift Pagi (07:00-14:00)',
-      toShift: 'Shift Siang (14:00-21:00)',
-      senderName: 'Ns. Siti Fatimah, M.Kep',
-      receiverName: 'Ns. Dewi Anggraini, S.Kep',
-      patientLabel: 'Tn. Ahmad Subarjo (No. RM: RM-240101-0001) · Bed M-302',
-      situation: 'Post-op apendektomi H+1, nyeri luka operasi VAS 3/10, kesadaran compos mentis.',
-      background: 'Riwayat hipertensi terkontrol, alergi penisilin (tercatat di gelang kuning). Terpasang infus RL 20 tpm.',
-      assessment: 'TD 128/78 mmHg, Nadi 82x/m, Suhu 36.7°C, SpO2 99%, luka kering tanpa rembesan.',
-      recommendation: 'Lanjutkan Ketorolac IV sesuai jadwal pukul 16:00, observasi mobilisasi dini & cek bising usus sore.',
-      karuVerified: true,
-      karuName: 'Karu Unit Rawat Inap',
-      createdAt: '2026-04-08 13:50'
-    },
-    {
-      id: 'sbar-2',
-      unit: 'ICU Dewasa Bed 02',
-      divisionId: 'icu',
-      sessionType: 'Nurse Station (Terjadwal)',
-      fromShift: 'Shift Pagi (07:00-14:00)',
-      toShift: 'Shift Siang (14:00-21:00)',
-      senderName: 'dr. Kevin Wijaya, Sp.An-KIC',
-      receiverName: 'Ns. Pratama, S.Kep',
-      patientLabel: 'Ny. Ratna Kusuma (No. RM: RM-240214-0042) · ICU-02',
-      situation: 'Dalam penyapihan ventilator mode CPAP PEEP 5 FiO2 35%, AGD stabil.',
-      background: 'Pneumonia berat komunitas, terpasang CVC kanan, norepinefrin sudah tap-off sejak 09:00 WIB.',
-      assessment: 'MAP 76 mmHg, SpO2 98%, balans cairan -250 mL/24 jam, skor SOFA turun dari 7 menjadi 4.',
-      recommendation: 'Ulang foto toraks evaluasi pukul 17:00, pertimbangkan ekstubasi bila SBT 2 jam berhasil.',
-      karuVerified: false,
-      createdAt: '2026-04-08 13:58'
-    }
-  ];
-
-  const helpdeskTicketsStore: Array<{
-    id: string;
-    ticketNo: string;
-    requesterName: string;
-    requesterContact: string;
-    divisionName: string;
-    category: 'TI / SIMK & MFA' | 'HR & Absensi / Payroll' | 'Instalasi Aplikasi Mobile' | 'Sarana / Medis';
-    priority: 'P1 - Kritis (15 Menit)' | 'P2 - Tinggi (1 Jam)' | 'P3 - Normal (4 Jam)';
-    subject: string;
-    description: string;
-    source: 'Portal Karyawan' | 'Landing Page App';
-    status: 'Terbuka' | 'Ditangani ITIL L1/L2' | 'Selesai';
-    assignedTeam: string;
-    createdAt: string;
-  }> = [
-    {
-      id: 'tkt-1',
-      ticketNo: 'INC-2026-0408-01',
-      requesterName: 'dr. Budi Santoso, Sp.PD',
-      requesterContact: 'NIP-19830125-105',
-      divisionName: 'Instalasi Rawat Jalan',
-      category: 'TI / SIMK & MFA',
-      priority: 'P2 - Tinggi (1 Jam)',
-      subject: 'Reset device binding aplikasi mobile karyawan di perangkat baru',
-      description: 'Perlu pembaharuan fingerprint perangkat Android baru untuk akses MFA.',
-      source: 'Portal Karyawan',
-      status: 'Ditangani ITIL L1/L2',
-      assignedTeam: 'Service Desk TI (ISO 27001)',
-      createdAt: '2026-04-08 09:10'
-    },
-    {
-      id: 'tkt-2',
-      ticketNo: 'INC-2026-0408-02',
-      requesterName: 'Ns. Dewi Anggraini, S.Kep',
-      requesterContact: 'NIP-19900308-110',
-      divisionName: 'Instalasi Rawat Inap',
-      category: 'HR & Absensi / Payroll',
-      priority: 'P3 - Normal (4 Jam)',
-      subject: 'Verifikasi lembur shift malam ruang Melati',
-      description: 'Mohon validasi 2 jam lembur perpanjangan handover pasien kritis.',
-      source: 'Portal Karyawan',
-      status: 'Selesai',
-      assignedTeam: 'SDM & Payroll Service',
-      createdAt: '2026-04-07 20:45'
-    }
-  ];
-
-  const divisionActionState = new Map<string, Record<string, string>>();
-
-  const siemAuditTrail: SiemAuditEntry[] = [
-    {
-      id: 'siem-1',
-      timestamp: '2026-04-08 07:02:14',
-      actorNip: 'NIP-19900105-501',
-      actorName: 'Bagas Setiawan, S.Kom., M.TI',
-      divisionId: 'simrs-ti',
-      eventType: 'GATEWAY_BOOT',
-      resource: 'API Gateway + RBAC/ABAC Engine',
-      decision: 'ALLOW',
-      detail: 'Inisialisasi kebijakan UU PDP, PMK 24/2022, ISO 27001/27799, dan ITIL 4/COBIT 2019 aktif.',
-      ipAddress: '10.24.1.15',
-      hash: 'sha256:9f4c2b81e7a03d91'
-    }
-  ];
+  // shortcut: in-memory view of the last 200 gateway events for the admin screen; the durable copy goes through deps.createAuditLog.
+  const siemAuditTrail: SiemAuditEntry[] = [];
 
   const configChangeProposals: ConfigChangeProposal[] = [
     {
       id: 'chg-101',
       proposedAt: '2026-04-08 09:30:00',
-      proposedBy: 'Bagas Setiawan, S.Kom., M.TI (Unit SIMK/TI)',
+      proposedBy: 'Unit SIMK/TI',
       category: 'ABAC_POLICY',
       title: 'Aktifkan verifikasi hubungan perawatan (Care Relationship) untuk akses EMR detail',
       targetKey: 'requireCareRelationshipForPatientRecords',
@@ -638,7 +421,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     {
       id: 'chg-102',
       proposedAt: '2026-04-07 15:10:00',
-      proposedBy: 'Dian Puspita, S.Psi., M.M. (SDM & Umum)',
+      proposedBy: 'SDM & Umum',
       category: 'FEATURE_FLAG',
       title: 'Aktifkan mode absensi offline idempoten untuk seluruh unit',
       targetKey: 'offline_attendance',
@@ -646,7 +429,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       justification: 'Menjaga kelancaran presensi di area basement & ambulans saat sinyal lemah.',
       status: 'APPROVED',
       reviewedAt: '2026-04-07 16:00:00',
-      reviewedBy: 'Siti Rahma, S.H., M.H.Kes (DPO / Hukum & Etik)',
+      reviewedBy: 'DPO / Hukum & Etik',
       reviewNote: 'Disetujui dengan syarat enkripsi lokal & Idempotency-Key aktif.'
     }
   ];
@@ -666,7 +449,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       proposalId: 'chg-102',
       category: 'FEATURE_FLAG',
       title: 'Aktivasi Mode Absensi Offline Idempoten',
-      approvedBy: 'Siti Rahma, S.H., M.H.Kes (DPO / Hukum & Etik)',
+      approvedBy: 'DPO / Hukum & Etik',
       summary: 'Feature flag offline_attendance diaktifkan dengan proteksi Idempotency-Key.'
     }
   ];
@@ -727,7 +510,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   };
 
   // =========================================================================
-  // 2. GATEWAY HELPERS (SIEM LOG, RATE LIMIT, IDEMPOTENCY, RBAC+ABAC)
+  // 2. GATEWAY HELPERS (SIEM LOG, RATE LIMIT, IDEMPOTENCY, RBAC+ABAC, SESSIONS)
   // =========================================================================
   function appendSiemLog(params: {
     actorNip: string;
@@ -747,7 +530,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
     const entry: SiemAuditEntry = {
       id: `siem-${Date.now()}-${Math.floor(Math.random() * 999)}`,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      timestamp: nowStamp(),
       actorNip: params.actorNip,
       actorName: params.actorName,
       divisionId: params.divisionId,
@@ -802,7 +585,8 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
     const adminAreaAccess = rolePolicy.canAccessAdminArea || session.isAdminCapable || session.divisionId === 'direktur';
     const oppeAccess = rolePolicy.canViewOppe && featureFlags.doctor_oppe_dashboard.enabled;
-    const sbarAccess = featureFlags.sbar_bedside_handover.enabled;
+    // SBAR holds patient data: clinical staff only.
+    const sbarAccess = featureFlags.sbar_bedside_handover.enabled && session.isClinical;
 
     return {
       emrAccess,
@@ -816,6 +600,17 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     };
   }
 
+  const sessionDivision = (session: GatewaySession) => divisionById(session.divisionId) || HOSPITAL_DIVISIONS[0];
+
+  // Returns why SBAR (patient data) is closed for this session, or null when allowed.
+  function sbarDenyReason(session: GatewaySession): string | null {
+    const access = evaluateAccess(session, sessionDivision(session));
+    if (!featureFlags.sbar_bedside_handover.enabled) return 'Fitur handover SBAR sedang dinonaktifkan.';
+    if (!access.sbarAccess) return 'Handover SBAR hanya dapat diakses tenaga klinis.';
+    if (access.emrAccess === 'LOCKED') return access.emrReasons.join(' ');
+    return null;
+  }
+
   function extractBearerToken(req: express.Request): string | null {
     const auth = req.headers.authorization;
     if (auth && auth.startsWith('Bearer ')) {
@@ -825,9 +620,82 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     return typeof queryToken === 'string' && queryToken ? queryToken : null;
   }
 
-  function requireGatewaySession(req: express.Request, res: express.Response): GatewaySession | null {
+  function defaultAbac(): AbacContext {
+    return { onDuty: true, unitMatch: true, careRelationship: true, breakGlassActive: false, breakGlassReason: '' };
+  }
+
+  async function getEmployee(id: string) {
+    return hr.prepare('SELECT * FROM employee WHERE id = ?').bind(id).first<EmployeeRow>();
+  }
+
+  async function createSession(
+    user: EmployeeUserRecord,
+    opts: { name: string; email: string; authType: 'nip' | 'google'; deviceFingerprint: string }
+  ): Promise<GatewaySession> {
+    const token = 'emp_' + crypto.randomBytes(32).toString('hex');
+    const abac = defaultAbac();
+    await hr
+      .prepare(
+        'INSERT INTO auth_session (session_token_hash, employee_id, name, email, auth_type, mfa_verified, device_fingerprint, abac) VALUES (?, ?, ?, ?, ?, 1, ?, ?)'
+      )
+      .bind(sha256(token), user.id, opts.name, opts.email, opts.authType, opts.deviceFingerprint, JSON.stringify(abac))
+      .run();
+    return {
+      token,
+      userId: user.id,
+      nip: user.nip,
+      name: opts.name,
+      email: opts.email,
+      divisionId: user.divisionId,
+      divisionName: user.divisionName,
+      roleTitle: user.roleTitle,
+      portalRole: user.portalRole,
+      isClinical: user.isClinical,
+      isAdminCapable: user.isAdminCapable,
+      mfaVerified: true,
+      authType: opts.authType,
+      deviceFingerprint: opts.deviceFingerprint,
+      abac,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  // Sessions expire 12 hours after login; deactivated employees lose their sessions immediately.
+  async function loadSession(token: string): Promise<GatewaySession | null> {
+    const r = await hr
+      .prepare(
+        `SELECT s.employee_id, s.name, s.email, s.auth_type, s.mfa_verified, s.device_fingerprint, s.abac, s.created_at,
+                e.nip, e.division_id, e.role_title, e.portal_role, e.is_clinical, e.is_admin_capable
+           FROM auth_session s JOIN employee e ON e.id = s.employee_id
+          WHERE s.session_token_hash = ? AND e.active = 1 AND s.created_at > ${SESSION_TTL_SQL}`
+      )
+      .bind(sha256(token))
+      .first<SessionRow>();
+    if (!r) return null;
+    return {
+      token,
+      userId: r.employee_id,
+      nip: r.nip,
+      name: r.name,
+      email: r.email,
+      divisionId: r.division_id,
+      divisionName: divisionById(r.division_id)?.name || r.division_id,
+      roleTitle: r.role_title,
+      portalRole: r.portal_role,
+      isClinical: Boolean(r.is_clinical),
+      isAdminCapable: Boolean(r.is_admin_capable),
+      mfaVerified: Boolean(r.mfa_verified),
+      authType: r.auth_type,
+      deviceFingerprint: r.device_fingerprint,
+      abac: { ...defaultAbac(), ...JSON.parse(r.abac) },
+      createdAt: r.created_at
+    };
+  }
+
+  async function requireGatewaySession(req: express.Request, res: express.Response): Promise<GatewaySession | null> {
     const token = extractBearerToken(req);
-    if (!token || !sessions.has(token)) {
+    const session = token ? await loadSession(token) : null;
+    if (!session) {
       res.status(401).json({
         success: false,
         code: 'GATEWAY_UNAUTHORIZED',
@@ -835,7 +703,26 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       });
       return null;
     }
-    return sessions.get(token)!;
+    return session;
+  }
+
+  function requireAdminArea(session: GatewaySession, req: express.Request, res: express.Response): boolean {
+    if (evaluateAccess(session, sessionDivision(session)).adminAreaAccess) return true;
+    appendSiemLog({
+      actorNip: session.nip,
+      actorName: session.name,
+      divisionId: session.divisionId,
+      eventType: 'ADMIN_AREA_FORBIDDEN',
+      resource: `Area Admin Portal Karyawan (${req.path})`,
+      decision: 'DENY',
+      detail: 'Pengguna tidak memiliki peran Admin/Direksi/SPI/DPO untuk membuka Area Admin.',
+      ipAddress: req.ip
+    });
+    res.status(403).json({
+      success: false,
+      message: 'Akses ditolak: Area Admin & Tata Kelola hanya untuk Unit SIMK/TI, SDM, Direksi, SPI, atau Hukum & Etik.'
+    });
+    return false;
   }
 
   // Sliding window rate limiter + Idempotency middleware for /api/gateway/*
@@ -859,7 +746,8 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
     const idemKey = req.headers['idempotency-key'];
     if (req.method !== 'GET' && typeof idemKey === 'string' && idemKey.trim()) {
-      const cacheKey = `${req.path}::${idemKey.trim()}`;
+      // Scoped per caller so one user's key never replays another user's response.
+      const cacheKey = `${extractBearerToken(req) || ip}::${req.path}::${idemKey.trim()}`;
       const existing = idempotencyCache.get(cacheKey);
       if (existing) {
         res.setHeader('X-Idempotent-Replay', 'true');
@@ -879,26 +767,38 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
   // =========================================================================
   // 3. AUTHENTICATION & MANDATORY MFA OTP
   // =========================================================================
-  app.post('/api/gateway/auth/login', (req, res) => {
+  // Employees come from db.hr.employee (created via POST /api/gateway/admin/users action CREATE).
+  app.post('/api/gateway/auth/login', asyncRoute(async (req, res) => {
     const { identifier, divisionId, authType, googleEmail, googleName, deviceInfo } = req.body || {};
 
-    let user: EmployeeUserRecord | undefined;
-    if (divisionId) {
-      user = usersStore.find((u) => u.divisionId === divisionId);
-    }
-    if (!user && identifier) {
+    // Housekeeping: drop expired sessions and challenges.
+    await hr.batch([
+      hr.prepare(`DELETE FROM auth_session WHERE created_at <= ${SESSION_TTL_SQL}`),
+      hr.prepare('DELETE FROM auth_otp WHERE expires_at < ?').bind(new Date().toISOString())
+    ]);
+
+    let row: EmployeeRow | null = null;
+    if (identifier) {
       const cleanId = String(identifier).trim().toLowerCase();
-      user = usersStore.find(
-        (u) => u.nip.toLowerCase() === cleanId || u.email.toLowerCase() === cleanId || u.name.toLowerCase().includes(cleanId)
-      );
+      row = await hr
+        .prepare('SELECT * FROM employee WHERE lower(nip) = ? OR lower(email) = ? LIMIT 1')
+        .bind(cleanId, cleanId)
+        .first<EmployeeRow>();
+    } else if (divisionId && process.env.NODE_ENV !== 'production') {
+      // Dev-only quick division picker: first active employee of that division.
+      row = await hr
+        .prepare('SELECT * FROM employee WHERE division_id = ? AND active = 1 ORDER BY id LIMIT 1')
+        .bind(String(divisionId))
+        .first<EmployeeRow>();
     }
 
-    if (!user) {
+    if (!row) {
       return res.status(404).json({
         success: false,
-        message: 'NIP / Email pegawai tidak terdaftar di direktori HRIS. Gunakan pemilih divisi cepat atau hubungi SDM.'
+        message: 'NIP / Email pegawai tidak terdaftar di direktori HRIS. Hubungi SDM.'
       });
     }
+    const user = toUser(row);
 
     if (!user.active) {
       appendSiemLog({
@@ -917,38 +817,44 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       });
     }
 
-    const effectiveName = authType === 'google' && googleName ? `${googleName} (${user.divisionName})` : user.name;
-    const effectiveEmail = authType === 'google' && googleEmail ? googleEmail : user.email;
+    const normAuthType: 'nip' | 'google' = authType === 'google' ? 'google' : 'nip';
+    const effectiveName = normAuthType === 'google' && googleName ? `${str(googleName, '', 120)} (${user.divisionName})` : user.name;
+    const effectiveEmail = normAuthType === 'google' && googleEmail ? str(googleEmail, '', 200) : user.email;
 
     const needsMfa = abacPolicies.mfaRequiredForClinicalAndAdmin && (user.isClinical || user.isAdminCapable);
 
     if (needsMfa) {
-      const challengeId = 'mfa-' + crypto.randomUUID().slice(0, 8);
-      mfaChallenges.set(challengeId, {
-        challengeId,
-        userId: user.id,
-        otp: DEFAULT_DEMO_OTP,
-        authType: authType === 'google' ? 'google' : 'nip',
-        deviceInfo: String(deviceInfo || 'Browser Web Portal MYITARU'),
-        expiresAt: Date.now() + 10 * 60 * 1000
-      });
+      const challengeId = 'mfa-' + crypto.randomUUID();
+      const otp = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+      await hr
+        .prepare('INSERT INTO auth_otp (id, employee_id, otp_hash, auth_type, device_info, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(
+          challengeId,
+          user.id,
+          sha256(`${challengeId}:${otp}`),
+          normAuthType,
+          str(deviceInfo, 'Browser Web Portal MYITARU', 200),
+          new Date(Date.now() + 10 * 60 * 1000).toISOString()
+        )
+        .run();
 
       appendSiemLog({
         actorNip: user.nip,
         actorName: effectiveName,
         divisionId: user.divisionId,
         eventType: 'MFA_CHALLENGE_ISSUED',
-        resource: `MFA (${authType === 'google' ? 'Google SSO' : 'NIP'})`,
+        resource: `MFA (${normAuthType === 'google' ? 'Google SSO' : 'NIP'})`,
         decision: 'CHALLENGE',
         detail: `Tantangan OTP 6-digit diterbitkan untuk role sensitif (${user.divisionName}).`,
         ipAddress: req.ip
       });
 
+      // shortcut: no SMS/email channel yet, so the OTP is only shown outside production; production needs a delivery channel.
       return res.json({
         success: true,
         mfaRequired: true,
         challengeId,
-        demoOtpHint: DEFAULT_DEMO_OTP,
+        ...(process.env.NODE_ENV !== 'production' ? { demoOtpHint: otp } : {}),
         userPreview: {
           nip: user.nip,
           name: effectiveName,
@@ -963,32 +869,12 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
 
     // Standard role direct issue (MFA optional)
-    const token = 'emp_' + crypto.randomBytes(16).toString('hex');
-    const session: GatewaySession = {
-      token,
-      userId: user.id,
-      nip: user.nip,
+    const session = await createSession(user, {
       name: effectiveName,
       email: effectiveEmail,
-      divisionId: user.divisionId,
-      divisionName: user.divisionName,
-      roleTitle: user.roleTitle,
-      portalRole: user.portalRole,
-      isClinical: user.isClinical,
-      isAdminCapable: user.isAdminCapable,
-      mfaVerified: true,
-      authType: authType === 'google' ? 'google' : 'nip',
-      deviceFingerprint: `DEV-${user.nip.slice(-3)}-${String(deviceInfo || 'WEB').slice(0, 12).toUpperCase()}`,
-      abac: {
-        onDuty: true,
-        unitMatch: true,
-        careRelationship: true,
-        breakGlassActive: false,
-        breakGlassReason: ''
-      },
-      createdAt: new Date().toISOString()
-    };
-    sessions.set(token, session);
+      authType: normAuthType,
+      deviceFingerprint: `DEV-${user.nip.slice(-3)}-${String(deviceInfo || 'WEB').slice(0, 12).toUpperCase()}`
+    });
 
     appendSiemLog({
       actorNip: user.nip,
@@ -1004,76 +890,60 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     return res.json({
       success: true,
       mfaRequired: false,
-      token,
+      token: session.token,
       session
     });
-  });
+  }));
 
-  app.post('/api/gateway/auth/verify-mfa', (req, res) => {
+  app.post('/api/gateway/auth/verify-mfa', asyncRoute(async (req, res) => {
     const { challengeId, otp, deviceName } = req.body || {};
-    const challenge = mfaChallenges.get(String(challengeId || ''));
+    const id = String(challengeId || '');
 
-    if (!challenge || challenge.expiresAt < Date.now()) {
+    // Count the attempt first (atomic), so parallel guesses cannot exceed the limit.
+    const bump = await hr
+      .prepare('UPDATE auth_otp SET attempts = attempts + 1 WHERE id = ? AND attempts < ? AND expires_at > ?')
+      .bind(id, MAX_OTP_ATTEMPTS, new Date().toISOString())
+      .run();
+    const challenge = bump.meta.changes ? await hr.prepare('SELECT * FROM auth_otp WHERE id = ?').bind(id).first<OtpRow>() : null;
+
+    if (!challenge) {
       return res.status(400).json({
         success: false,
-        message: 'Sesi tantangan MFA tidak ditemukan atau sudah kedaluwarsa.'
+        message: 'Sesi tantangan MFA tidak ditemukan, kedaluwarsa, atau terlalu banyak percobaan. Silakan login kembali.'
       });
     }
 
-    const cleanOtp = String(otp || '').trim();
-    if (cleanOtp !== challenge.otp && cleanOtp !== DEFAULT_DEMO_OTP) {
-      const user = usersStore.find((u) => u.id === challenge.userId);
+    const expected = Buffer.from(challenge.otp_hash, 'hex');
+    const given = Buffer.from(sha256(`${challenge.id}:${String(otp || '').trim()}`), 'hex');
+    const userRow = await getEmployee(challenge.employee_id);
+
+    if (!crypto.timingSafeEqual(expected, given)) {
       appendSiemLog({
-        actorNip: user?.nip || 'UNKNOWN',
-        actorName: user?.name || 'Unknown User',
-        divisionId: user?.divisionId || 'unknown',
+        actorNip: userRow?.nip || 'UNKNOWN',
+        actorName: userRow?.name || 'Unknown User',
+        divisionId: userRow?.division_id || 'unknown',
         eventType: 'MFA_VERIFY_FAILED',
         resource: 'MFA 6-Digit OTP',
         decision: 'DENY',
         detail: 'Kode OTP MFA tidak valid.',
         ipAddress: req.ip
       });
-      return res.status(401).json({
-        success: false,
-        message: `Kode OTP salah. Gunakan kode demo ${DEFAULT_DEMO_OTP}.`
-      });
+      return res.status(401).json({ success: false, message: 'Kode OTP salah.' });
     }
 
-    const user = usersStore.find((u) => u.id === challenge.userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'Pengguna tidak ditemukan.' });
+    if (!userRow || !userRow.active) {
+      return res.status(404).json({ success: false, message: 'Pengguna tidak ditemukan atau nonaktif.' });
     }
+    const user = toUser(userRow);
 
-    mfaChallenges.delete(challenge.challengeId);
-    const token = 'emp_' + crypto.randomBytes(16).toString('hex');
+    await hr.prepare('DELETE FROM auth_otp WHERE id = ?').bind(challenge.id).run();
     const deviceFingerprint = `BND-${user.nip.slice(-3)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-
-    const session: GatewaySession = {
-      token,
-      userId: user.id,
-      nip: user.nip,
+    const session = await createSession(user, {
       name: user.name,
       email: user.email,
-      divisionId: user.divisionId,
-      divisionName: user.divisionName,
-      roleTitle: user.roleTitle,
-      portalRole: user.portalRole,
-      isClinical: user.isClinical,
-      isAdminCapable: user.isAdminCapable,
-      mfaVerified: true,
-      authType: challenge.authType,
-      deviceFingerprint,
-      abac: {
-        onDuty: true,
-        unitMatch: true,
-        careRelationship: true,
-        breakGlassActive: false,
-        breakGlassReason: ''
-      },
-      createdAt: new Date().toISOString()
-    };
-
-    sessions.set(token, session);
+      authType: challenge.auth_type,
+      deviceFingerprint
+    });
 
     appendSiemLog({
       actorNip: user.nip,
@@ -1082,21 +952,21 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       eventType: 'MFA_VERIFIED_LOGIN',
       resource: 'Portal Karyawan + Device Binding',
       decision: 'ALLOW',
-      detail: `MFA 6-digit terverifikasi (${challenge.authType.toUpperCase()}). Perangkat terikat: ${deviceName || challenge.deviceInfo} [${deviceFingerprint}].`,
+      detail: `MFA 6-digit terverifikasi (${challenge.auth_type.toUpperCase()}). Perangkat terikat: ${str(deviceName, challenge.device_info, 200)} [${deviceFingerprint}].`,
       ipAddress: req.ip
     });
 
     return res.json({
       success: true,
-      token,
+      token: session.token,
       session
     });
-  });
+  }));
 
-  app.post('/api/gateway/auth/logout', (req, res) => {
+  app.post('/api/gateway/auth/logout', asyncRoute(async (req, res) => {
     const token = extractBearerToken(req);
-    if (token && sessions.has(token)) {
-      const s = sessions.get(token)!;
+    const s = token ? await loadSession(token) : null;
+    if (token && s) {
       appendSiemLog({
         actorNip: s.nip,
         actorName: s.name,
@@ -1107,26 +977,27 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         detail: 'Sesi pengguna diakhiri secara aman.',
         ipAddress: req.ip
       });
-      sessions.delete(token);
+      await hr.prepare('DELETE FROM auth_session WHERE session_token_hash = ?').bind(sha256(token)).run();
     }
     res.json({ success: true });
-  });
+  }));
 
   // =========================================================================
   // 4. BOOTSTRAP & LIVE ABAC CONTEXT EVALUATION
   // =========================================================================
-  app.get('/api/gateway/bootstrap', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.get('/api/gateway/bootstrap', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
-    const division = HOSPITAL_DIVISIONS.find((d) => d.id === session.divisionId) || HOSPITAL_DIVISIONS[0];
-    const user = usersStore.find((u) => u.id === session.userId) || usersStore[0];
+    const division = sessionDivision(session);
+    const userRow = await getEmployee(session.userId);
+    if (!userRow) return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
     const access = evaluateAccess(session, division);
 
     res.json({
       success: true,
       session,
-      user,
+      user: toUser(userRow),
       division,
       access,
       abacPolicies,
@@ -1135,10 +1006,10 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       governanceFrameworks: GOVERNANCE_FRAMEWORKS,
       geofence: HOSPITAL_GEOFENCE
     });
-  });
+  }));
 
-  app.post('/api/gateway/abac-context', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/abac-context', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
     const { onDuty, unitMatch, careRelationship, breakGlassActive, breakGlassReason } = req.body || {};
@@ -1155,11 +1026,16 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       }
       session.abac.breakGlassActive = breakGlassActive;
       session.abac.breakGlassReason = breakGlassActive
-        ? String(breakGlassReason || 'Penanganan Kegawatdaruratan Pasien (Kode Biru)')
+        ? str(breakGlassReason, 'Penanganan Kegawatdaruratan Pasien (Kode Biru)')
         : '';
     }
 
-    const division = HOSPITAL_DIVISIONS.find((d) => d.id === session.divisionId) || HOSPITAL_DIVISIONS[0];
+    await hr
+      .prepare('UPDATE auth_session SET abac = ? WHERE session_token_hash = ?')
+      .bind(JSON.stringify(session.abac), sha256(session.token))
+      .run();
+
+    const division = sessionDivision(session);
     const access = evaluateAccess(session, division);
 
     appendSiemLog({
@@ -1178,17 +1054,22 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       abac: session.abac,
       access
     });
-  });
+  }));
 
   // =========================================================================
   // 5. CORE EMPLOYEE MODULES (ALL 9 MANDATORY MODULES)
   // =========================================================================
-  app.get('/api/gateway/profile', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.get('/api/gateway/profile', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
-    const user = usersStore.find((u) => u.id === session.userId) || usersStore[0];
-    const division = HOSPITAL_DIVISIONS.find((d) => d.id === session.divisionId) || HOSPITAL_DIVISIONS[0];
+    const userRow = await getEmployee(session.userId);
+    if (!userRow) return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+    const user = toUser(userRow);
+    const division = sessionDivision(session);
+    const licenseStatus = (expiry?: string) =>
+      !expiry ? 'Belum Terdata' : daysUntil(expiry) < 90 ? 'Segera Perpanjang (<90 Hari)' : 'Aktif';
 
+    // shortcut: contract data and the non-clinical K3 certificate are fixed placeholders until HRIS supplies them.
     res.json({
       success: true,
       user,
@@ -1204,18 +1085,18 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
             {
               id: 'lic-1',
               name: 'Surat Tanda Registrasi (STR)',
-              number: user.strNumber || 'STR-3171-100991',
-              expiry: user.strExpiry || '2026-06-15',
-              daysRemaining: user.strExpiry === '2026-06-15' ? 68 : 940,
-              status: user.strExpiry === '2026-06-15' ? 'Segera Perpanjang (<90 Hari)' : 'Aktif'
+              number: user.strNumber || '-',
+              expiry: user.strExpiry || '-',
+              daysRemaining: daysUntil(user.strExpiry),
+              status: licenseStatus(user.strExpiry)
             },
             {
               id: 'lic-2',
               name: 'Surat Izin Praktik (SIP)',
-              number: user.sipNumber || 'SIP-DKI-2201/2025',
-              expiry: user.sipExpiry || '2027-09-20',
-              daysRemaining: 530,
-              status: 'Aktif'
+              number: user.sipNumber || '-',
+              expiry: user.sipExpiry || '-',
+              daysRemaining: daysUntil(user.sipExpiry),
+              status: licenseStatus(user.sipExpiry)
             }
           ]
         : [
@@ -1224,26 +1105,40 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
               name: 'Sertifikat K3 & PPI Klinik Utama',
               number: `K3-MYITARU-${user.nip.slice(-3)}`,
               expiry: '2027-12-31',
-              daysRemaining: 632,
+              daysRemaining: daysUntil('2027-12-31'),
               status: 'Aktif'
             }
           ]
     });
-  });
+  }));
 
-  app.put('/api/gateway/profile', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.put('/api/gateway/profile', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
-    const user = usersStore.find((u) => u.id === session.userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
 
     const { email, unitLocation } = req.body || {};
-    if (email) {
-      user.email = String(email);
-      session.email = user.email;
+    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+    if (cleanEmail && !isEmail(cleanEmail)) {
+      return res.status(400).json({ success: false, message: 'Format email tidak valid.' });
     }
-    if (unitLocation) user.unitLocation = String(unitLocation);
-    user.lastHrisSync = new Date().toISOString();
+
+    try {
+      await hr.batch([
+        hr
+          .prepare(
+            "UPDATE employee SET email = COALESCE(?, email), unit_location = COALESCE(?, unit_location), last_hris_sync = datetime('now') WHERE id = ?"
+          )
+          .bind(cleanEmail || null, unitLocation ? str(unitLocation, '', 200) : null, session.userId),
+        hr
+          .prepare('UPDATE auth_session SET email = COALESCE(?, email) WHERE session_token_hash = ?')
+          .bind(cleanEmail || null, sha256(session.token))
+      ]);
+    } catch (e) {
+      if (isUniqueViolation(e)) return res.status(409).json({ success: false, message: 'Email sudah dipakai pegawai lain.' });
+      throw e;
+    }
+    const userRow = await getEmployee(session.userId);
+    if (!userRow) return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
 
     appendSiemLog({
       actorNip: session.nip,
@@ -1256,23 +1151,50 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       ipAddress: req.ip
     });
 
-    res.json({ success: true, user });
-  });
+    res.json({ success: true, user: toUser(userRow) });
+  }));
+
+  // Roster of the current week (Monday..Sunday) for one employee.
+  async function weekRoster(employeeId: string) {
+    const now = new Date();
+    const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((now.getUTCDay() + 6) % 7)));
+    const sunday = new Date(monday.getTime() + 6 * 86_400_000);
+    const { results } = await hr
+      .prepare('SELECT * FROM sdm_roster WHERE employee_id = ? AND date BETWEEN ? AND ? ORDER BY date')
+      .bind(employeeId, monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10))
+      .all<{ id: string; date: string; shift_type: string; hours: number; unit: string; status: string }>();
+    return results;
+  }
 
   // Shifts + 40 Hour Weekly Cap + Conflict Detection + Swap Approval
-  app.get('/api/gateway/shifts', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.get('/api/gateway/shifts', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
-    const myShifts = shiftSchedulesStore.map((s) => ({
-      ...s,
+    const myShifts = (await weekRoster(session.userId)).map((s) => ({
+      id: s.id,
       nip: session.nip,
       employeeName: session.name,
-      unit: s.shiftType === 'Libur' ? 'Istirahat Mingguan' : session.divisionName
+      divisionId: session.divisionId,
+      date: s.date,
+      dayLabel: DAY_LABELS[new Date(s.date + 'T00:00:00Z').getUTCDay()],
+      shiftType: s.shift_type,
+      hours: s.hours,
+      unit: s.shift_type === 'Libur' ? 'Istirahat Mingguan' : s.unit,
+      status: s.status
     }));
 
     const totalWeeklyHours = myShifts.reduce((acc, s) => acc + s.hours, 0);
     const exceeds40 = totalWeeklyHours > 40;
+
+    const seeAll = session.isAdminCapable || session.divisionId === 'keperawatan';
+    const { results: swaps } = await hr
+      .prepare(
+        `SELECT w.*, e.name AS requester_name, e.nip AS requester_nip FROM sdm_shift_swap w JOIN employee e ON e.id = w.requester_id
+          WHERE ? OR w.division_id = ? OR w.requester_id = ? ORDER BY w.created_at DESC LIMIT 100`
+      )
+      .bind(seeAll ? 1 : 0, session.divisionId, session.userId)
+      .all<Record<string, unknown>>();
 
     res.json({
       success: true,
@@ -1280,39 +1202,69 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       totalWeeklyHours,
       maxLegalWeeklyHours: 40,
       exceeds40,
-      swaps: shiftSwapsStore.filter((sw) => sw.divisionId === session.divisionId || session.isAdminCapable || session.divisionId === 'keperawatan' || sw.requesterNip === session.nip)
+      swaps: swaps.map(toSwap)
     });
-  });
+  }));
 
-  app.post('/api/gateway/shifts/swap', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  function toSwap(w: Record<string, unknown>) {
+    return {
+      id: w.id,
+      requesterName: w.requester_name,
+      requesterNip: w.requester_nip,
+      divisionId: w.division_id,
+      fromDate: w.from_date,
+      fromShift: w.from_shift,
+      targetColleague: w.target_colleague,
+      toDate: w.to_date,
+      toShift: w.to_shift,
+      reason: w.reason,
+      weeklyHoursAfterSwap: w.weekly_hours_after_swap,
+      conflictWarning: w.conflict_warning ?? undefined,
+      status: w.status,
+      createdAt: w.created_at
+    };
+  }
+
+  app.post('/api/gateway/shifts/swap', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
     const { fromDate, fromShift, targetColleague, toDate, toShift, reason, extraHours } = req.body || {};
-    const projectedHours = 38 + Number(extraHours || 0);
+    const currentHours = (await weekRoster(session.userId)).reduce((acc, s) => acc + s.hours, 0);
+    const projectedHours = currentHours + (Number(extraHours) || 0);
     const conflictWarning =
       abacPolicies.enforce40HourShiftCap && projectedHours > 40
         ? `Peringatan UU Ketenagakerjaan: Total jam kerja menjadi ${projectedHours} jam/minggu (melebihi batas 40 jam). Memerlukan justifikasi & persetujuan Atasan Unit.`
-        : undefined;
+        : null;
 
     const newSwap = {
-      id: 'swp-' + Date.now(),
-      requesterName: session.name,
-      requesterNip: session.nip,
-      divisionId: session.divisionId,
-      fromDate: String(fromDate || '2026-04-09'),
-      fromShift: String(fromShift || 'Siang (14:00-21:00)'),
-      targetColleague: String(targetColleague || 'Rekan Satu Unit'),
-      toDate: String(toDate || '2026-04-11'),
-      toShift: String(toShift || 'Pagi (07:00-14:00)'),
-      reason: String(reason || 'Penyesuaian jadwal jaga unit'),
-      weeklyHoursAfterSwap: projectedHours,
-      conflictWarning,
-      status: 'Menunggu Atasan Unit' as const,
-      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
+      id: 'swp-' + crypto.randomUUID(),
+      requester_name: session.name,
+      requester_nip: session.nip,
+      division_id: session.divisionId,
+      from_date: isDate(fromDate) ? fromDate : today(),
+      from_shift: str(fromShift, 'Siang (14:00-21:00)', 100),
+      target_colleague: str(targetColleague, 'Rekan Satu Unit', 200),
+      to_date: isDate(toDate) ? toDate : today(),
+      to_shift: str(toShift, 'Pagi (07:00-14:00)', 100),
+      reason: str(reason, 'Penyesuaian jadwal jaga unit'),
+      weekly_hours_after_swap: projectedHours,
+      conflict_warning: conflictWarning,
+      status: 'Menunggu Atasan Unit',
+      created_at: nowStamp()
     };
 
-    shiftSwapsStore.unshift(newSwap);
+    await hr
+      .prepare(
+        `INSERT INTO sdm_shift_swap (id, requester_id, division_id, from_date, from_shift, target_colleague, to_date, to_shift, reason, weekly_hours_after_swap, conflict_warning, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        newSwap.id, session.userId, newSwap.division_id, newSwap.from_date, newSwap.from_shift, newSwap.target_colleague,
+        newSwap.to_date, newSwap.to_shift, newSwap.reason, newSwap.weekly_hours_after_swap, newSwap.conflict_warning,
+        newSwap.status, newSwap.created_at
+      )
+      .run();
 
     appendSiemLog({
       actorNip: session.nip,
@@ -1321,48 +1273,102 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       eventType: 'SHIFT_SWAP_REQUEST',
       resource: 'Jadwal & Shift Unit',
       decision: 'ALLOW',
-      detail: `Pengajuan tukar shift ${newSwap.fromDate} <-> ${newSwap.toDate} (${projectedHours} jam/minggu).`,
+      detail: `Pengajuan tukar shift ${newSwap.from_date} <-> ${newSwap.to_date} (${projectedHours} jam/minggu).`,
       ipAddress: req.ip
     });
 
-    res.json({ success: true, swap: newSwap });
-  });
+    res.json({ success: true, swap: toSwap(newSwap) });
+  }));
 
-  app.post('/api/gateway/shifts/approve', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/shifts/approve', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
     const { swapId, decision } = req.body || {};
-    const target = shiftSwapsStore.find((s) => s.id === swapId);
+    const target = await hr
+      .prepare(
+        'SELECT w.*, e.name AS requester_name, e.nip AS requester_nip FROM sdm_shift_swap w JOIN employee e ON e.id = w.requester_id WHERE w.id = ?'
+      )
+      .bind(String(swapId || ''))
+      .first<Record<string, unknown>>();
     if (!target) return res.status(404).json({ success: false, message: 'Pengajuan tukar shift tidak ditemukan.' });
 
+    const canApprove =
+      rbacMatrix[session.portalRole].canApproveUnitLeave &&
+      target.requester_id !== session.userId &&
+      (target.division_id === session.divisionId || session.isAdminCapable);
+    if (!canApprove) {
+      return res.status(403).json({ success: false, message: 'Hanya Atasan Unit terkait yang dapat memutuskan tukar shift ini.' });
+    }
+
     target.status = decision === 'REJECT' ? 'Ditolak' : 'Disetujui';
+    await hr.prepare('UPDATE sdm_shift_swap SET status = ? WHERE id = ?').bind(target.status, target.id).run();
     appendSiemLog({
       actorNip: session.nip,
       actorName: session.name,
       divisionId: session.divisionId,
       eventType: 'SHIFT_SWAP_APPROVAL',
-      resource: target.id,
+      resource: String(target.id),
       decision: 'ALLOW',
-      detail: `Tukar shift oleh ${target.requesterName} status diubah menjadi ${target.status}.`,
+      detail: `Tukar shift oleh ${target.requester_name} status diubah menjadi ${target.status}.`,
       ipAddress: req.ip
     });
-    res.json({ success: true, swap: target });
-  });
+    res.json({ success: true, swap: toSwap(target) });
+  }));
 
   // Attendance Geofencing + Biometric + Offline Sync
-  app.get('/api/gateway/attendance', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  // Idempotency keys are stored as '<employeeId>:<key>' so keys of different employees never collide.
+  const ATTENDANCE_SELECT =
+    'SELECT k.*, e.nip, e.name AS employee_name FROM sdm_kehadiran k JOIN employee e ON e.id = k.employee_id';
+
+  function toAttendance(r: Record<string, unknown>) {
+    const key = r.idempotency_key ? String(r.idempotency_key) : undefined;
+    return {
+      id: r.id,
+      nip: r.nip,
+      employeeName: r.employee_name,
+      divisionId: r.division_id,
+      timestamp: r.recorded_at,
+      type: r.type,
+      method: r.method,
+      distanceMeters: r.distance_meters,
+      withinGeofence: Boolean(r.within_geofence),
+      biometricVerified: Boolean(r.biometric_verified),
+      note: r.note ?? undefined,
+      idempotencyKey: key ? key.slice(key.indexOf(':') + 1) : undefined
+    };
+  }
+
+  // Inserts one attendance row; returns the stored row, or the earlier row when the idempotency key was already used.
+  function insertAttendanceStmt(session: GatewaySession, e: {
+    id: string; recordedAt: string; type: string; method: string; distanceMeters: number;
+    withinGeofence: boolean; biometricVerified: boolean; note: string; idemKey?: string;
+  }) {
+    return hr
+      .prepare(
+        `INSERT INTO sdm_kehadiran (id, employee_id, division_id, recorded_at, type, method, distance_meters, within_geofence, biometric_verified, note, idempotency_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idempotency_key) DO NOTHING`
+      )
+      .bind(
+        e.id, session.userId, session.divisionId, e.recordedAt, e.type, e.method, e.distanceMeters,
+        e.withinGeofence ? 1 : 0, e.biometricVerified ? 1 : 0, e.note, e.idemKey ? `${session.userId}:${e.idemKey}` : null
+      );
+  }
+
+  app.get('/api/gateway/attendance', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
-    const logs = attendanceLogsStore.filter(
-      (l) => l.nip === 'GLOBAL' || l.nip === session.nip || l.divisionId === session.divisionId
-    );
+    const { results } = await hr
+      .prepare(`${ATTENDANCE_SELECT} WHERE k.employee_id = ? OR k.division_id = ? ORDER BY k.recorded_at DESC LIMIT 100`)
+      .bind(session.userId, session.divisionId)
+      .all<Record<string, unknown>>();
 
+    // shortcut: monthlySummary is a fixed placeholder; compute from sdm_kehadiran when payroll rules are defined.
     res.json({
       success: true,
       geofence: HOSPITAL_GEOFENCE,
       offlineModeEnabled: featureFlags.offline_attendance.enabled,
-      logs,
+      logs: results.map(toAttendance),
       monthlySummary: {
         hadirTepatWaktu: 19,
         terlambat: 0,
@@ -1370,10 +1376,10 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         statusRekap: 'Memenuhi Target Kehadiran'
       }
     });
-  });
+  }));
 
-  app.post('/api/gateway/attendance/clock', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/attendance/clock', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
     const { type, lat, lng, biometricVerified, note, isOfflineReplay } = req.body || {};
@@ -1381,8 +1387,9 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     const userLng = typeof lng === 'number' ? lng : HOSPITAL_GEOFENCE.lng;
     const distanceMeters = haversineMeters(userLat, userLng, HOSPITAL_GEOFENCE.lat, HOSPITAL_GEOFENCE.lng);
     const withinGeofence = distanceMeters <= HOSPITAL_GEOFENCE.radiusMeters;
+    const attType = oneOf(ATTENDANCE_TYPES, type, 'MASUK');
 
-    if (!withinGeofence && !isOfflineReplay && type !== 'KOREKSI') {
+    if (!withinGeofence && !isOfflineReplay && attType !== 'KOREKSI') {
       appendSiemLog({
         actorNip: session.nip,
         actorName: session.name,
@@ -1400,38 +1407,48 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       });
     }
 
-    const entry = {
-      id: 'att-' + Date.now() + '-' + Math.floor(Math.random() * 100),
-      nip: session.nip,
-      employeeName: session.name,
-      divisionId: session.divisionId,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      type: (type || 'MASUK') as 'MASUK' | 'PULANG' | 'LEMBUR' | 'KOREKSI',
-      method: isOfflineReplay ? ('Offline Sync (Idempoten)' as const) : ('Geofencing + Biometrik' as const),
+    const header = req.headers['idempotency-key'];
+    const idemKey = typeof header === 'string' && header.trim() ? header.trim().slice(0, 200) : undefined;
+    const id = 'att-' + crypto.randomUUID();
+    await insertAttendanceStmt(session, {
+      id,
+      recordedAt: nowStamp(),
+      type: attType,
+      method: isOfflineReplay ? 'Offline Sync (Idempoten)' : 'Geofencing + Biometrik',
       distanceMeters,
       withinGeofence,
       biometricVerified: Boolean(biometricVerified ?? true),
-      note: String(note || (withinGeofence ? 'Area Kampus Klinik Tarumanagara' : 'Koreksi / Tugas Luar')),
-      idempotencyKey: typeof req.headers['idempotency-key'] === 'string' ? req.headers['idempotency-key'] : undefined
-    };
+      note: str(note, withinGeofence ? 'Area Kampus Klinik Tarumanagara' : 'Koreksi / Tugas Luar'),
+      idemKey
+    }).run();
 
-    attendanceLogsStore.unshift(entry);
+    const stored = idemKey
+      ? await hr.prepare(`${ATTENDANCE_SELECT} WHERE k.idempotency_key = ?`).bind(`${session.userId}:${idemKey}`).first<Record<string, unknown>>()
+      : await hr.prepare(`${ATTENDANCE_SELECT} WHERE k.id = ?`).bind(id).first<Record<string, unknown>>();
+    if (!stored) throw new Error('Presensi gagal disimpan.');
+    const entry = toAttendance(stored);
+
+    if (stored.id !== id) {
+      res.setHeader('X-Idempotent-Replay', 'true');
+      return res.json({ success: true, entry });
+    }
+
     appendSiemLog({
       actorNip: session.nip,
       actorName: session.name,
       divisionId: session.divisionId,
       eventType: `ATTENDANCE_${entry.type}`,
-      resource: entry.method,
+      resource: String(entry.method),
       decision: 'ALLOW',
       detail: `Presensi ${entry.type} tercatat (${entry.distanceMeters} m dari Klinik).`,
       ipAddress: req.ip
     });
 
     res.json({ success: true, entry });
-  });
+  }));
 
-  app.post('/api/gateway/attendance/sync-offline', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/attendance/sync-offline', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
     if (!featureFlags.offline_attendance.enabled) {
@@ -1441,34 +1458,36 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       });
     }
 
-    const items = Array.isArray(req.body?.items) ? req.body.items : [];
-    const synced: typeof attendanceLogsStore = [];
-    let skippedDuplicates = 0;
+    const items: Array<Record<string, unknown>> = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
+    const ids = items.map(() => 'att-off-' + crypto.randomUUID());
+    const results = items.length
+      ? await hr.batch(
+          items.map((item, i) =>
+            insertAttendanceStmt(session, {
+              id: ids[i],
+              recordedAt: str(item.capturedAt, nowStamp(), 30),
+              type: oneOf(ATTENDANCE_TYPES, item.type, 'MASUK'),
+              method: 'Offline Sync (Idempoten)',
+              distanceMeters: Math.round(Number(item.distanceMeters) || 42),
+              withinGeofence: true,
+              biometricVerified: true,
+              note: str(item.note, 'Sinkronisasi antrean offline'),
+              idemKey: item.idempotencyKey ? String(item.idempotencyKey).trim().slice(0, 200) || undefined : undefined
+            })
+          )
+        )
+      : [];
 
-    for (const item of items) {
-      const idem = String(item.idempotencyKey || '');
-      if (idem && attendanceLogsStore.some((existing) => existing.idempotencyKey === idem)) {
-        skippedDuplicates += 1;
-        continue;
-      }
-
-      const entry = {
-        id: 'att-off-' + Date.now() + '-' + Math.floor(Math.random() * 999),
-        nip: session.nip,
-        employeeName: session.name,
-        divisionId: session.divisionId,
-        timestamp: String(item.capturedAt || new Date().toISOString().replace('T', ' ').slice(0, 19)),
-        type: (item.type || 'MASUK') as 'MASUK' | 'PULANG' | 'LEMBUR' | 'KOREKSI',
-        method: 'Offline Sync (Idempoten)' as const,
-        distanceMeters: Number(item.distanceMeters || 42),
-        withinGeofence: true,
-        biometricVerified: true,
-        note: String(item.note || 'Sinkronisasi antrean offline'),
-        idempotencyKey: idem || undefined
-      };
-      attendanceLogsStore.unshift(entry);
-      synced.push(entry);
-    }
+    const insertedIds = ids.filter((_, i) => results[i]?.meta?.changes);
+    const skippedDuplicates = items.length - insertedIds.length;
+    const synced = insertedIds.length
+      ? (
+          await hr
+            .prepare(`${ATTENDANCE_SELECT} WHERE k.id IN (${insertedIds.map(() => '?').join(',')})`)
+            .bind(...insertedIds)
+            .all<Record<string, unknown>>()
+        ).results.map(toAttendance)
+      : [];
 
     appendSiemLog({
       actorNip: session.nip,
@@ -1487,12 +1506,42 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       skippedDuplicates,
       synced
     });
-  });
+  }));
 
   // Leave Requests & Multi-Tier Approval
-  app.get('/api/gateway/leaves', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  const LEAVE_SELECT = `SELECT c.*, e.nip, e.name AS employee_name, e.division_id, u.name AS unit_approver, s.name AS sdm_approver
+      FROM sdm_cuti c JOIN employee e ON e.id = c.employee_id
+      LEFT JOIN employee u ON u.id = c.unit_approved_by LEFT JOIN employee s ON s.id = c.sdm_approved_by`;
+
+  function toLeave(r: Record<string, unknown>) {
+    return {
+      id: r.id,
+      nip: r.nip,
+      employeeName: r.employee_name,
+      divisionId: r.division_id,
+      type: r.type,
+      startDate: r.start_date,
+      endDate: r.end_date,
+      days: r.days,
+      substitute: r.substitute,
+      reason: r.reason,
+      status: r.status,
+      unitApprovedBy: r.unit_approver ?? undefined,
+      sdmApprovedBy: r.sdm_approver ?? undefined,
+      createdAt: r.created_at
+    };
+  }
+
+  app.get('/api/gateway/leaves', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+    // Own requests; unit approvers also see their division, SDM approvers see all.
+    const policy = rbacMatrix[session.portalRole];
+    const { results } = await hr
+      .prepare(`${LEAVE_SELECT} WHERE ? OR c.employee_id = ? OR (? AND e.division_id = ?) ORDER BY c.created_at DESC LIMIT 200`)
+      .bind(policy.canApproveSdmLeave ? 1 : 0, session.userId, policy.canApproveUnitLeave ? 1 : 0, session.divisionId)
+      .all<Record<string, unknown>>();
+    // shortcut: leave balances are a fixed placeholder; compute from sdm_cuti once entitlement rules exist.
     res.json({
       success: true,
       balances: {
@@ -1501,87 +1550,126 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         tahunanSisa: 9,
         izinDiklatTersisa: 5
       },
-      requests: leaveRequestsStore
+      requests: results.map(toLeave)
     });
-  });
+  }));
 
-  app.post('/api/gateway/leaves', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/leaves', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
     const { type, startDate, endDate, days, substitute, reason } = req.body || {};
-    const newLeave = {
-      id: 'lv-' + Date.now(),
-      nip: session.nip,
-      employeeName: session.name,
-      divisionId: session.divisionId,
-      type: (type || 'Cuti Tahunan') as 'Cuti Tahunan' | 'Cuti Sakit' | 'Izin Pelatihan / Seminar' | 'Izin Khusus',
-      startDate: String(startDate || '2026-04-24'),
-      endDate: String(endDate || '2026-04-25'),
-      days: Number(days || 2),
-      substitute: String(substitute || 'Rekan Pengganti Unit'),
-      reason: String(reason || 'Keperluan pribadi'),
-      status: 'Menunggu Atasan Unit' as const,
-      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
-    };
+    if (!isDate(startDate) || !isDate(endDate) || endDate < startDate) {
+      return res.status(400).json({ success: false, message: 'Tanggal mulai/selesai cuti tidak valid (format YYYY-MM-DD).' });
+    }
+    const spanDays = Math.round((Date.parse(endDate) - Date.parse(startDate)) / 86_400_000) + 1;
+    const leaveDays = Math.round(Number(days)) > 0 ? Math.round(Number(days)) : spanDays;
+    const id = 'lv-' + crypto.randomUUID();
 
-    leaveRequestsStore.unshift(newLeave);
+    await hr
+      .prepare(
+        'INSERT INTO sdm_cuti (id, employee_id, type, start_date, end_date, days, substitute, reason, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      )
+      .bind(
+        id, session.userId, oneOf(LEAVE_TYPES, type, 'Cuti Tahunan'), startDate, endDate, leaveDays,
+        str(substitute, 'Rekan Pengganti Unit', 200), str(reason, 'Keperluan pribadi'), 'Menunggu Atasan Unit', nowStamp(16)
+      )
+      .run();
+    const newLeave = toLeave((await hr.prepare(`${LEAVE_SELECT} WHERE c.id = ?`).bind(id).first<Record<string, unknown>>())!);
+
     appendSiemLog({
       actorNip: session.nip,
       actorName: session.name,
       divisionId: session.divisionId,
       eventType: 'LEAVE_SUBMITTED',
-      resource: newLeave.id,
+      resource: id,
       decision: 'ALLOW',
       detail: `Pengajuan ${newLeave.type} (${newLeave.days} hari) menunggu approval Atasan Unit.`,
       ipAddress: req.ip
     });
 
     res.json({ success: true, leave: newLeave });
-  });
+  }));
 
-  app.post('/api/gateway/leaves/approve', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/leaves/approve', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
     const { leaveId, action } = req.body || {};
-    const item = leaveRequestsStore.find((l) => l.id === leaveId);
+    const item = await hr.prepare(`${LEAVE_SELECT} WHERE c.id = ?`).bind(String(leaveId || '')).first<Record<string, unknown>>();
     if (!item) return res.status(404).json({ success: false, message: 'Pengajuan cuti tidak ditemukan.' });
 
-    if (action === 'REJECT') {
-      item.status = 'Ditolak';
-    } else if (item.status === 'Menunggu Atasan Unit') {
-      item.unitApprovedBy = session.name;
-      item.status = 'Menunggu Verifikasi SDM';
-    } else if (item.status === 'Menunggu Verifikasi SDM') {
-      item.sdmApprovedBy = session.name;
-      item.status = 'Disetujui Final';
+    const policy = rbacMatrix[session.portalRole];
+    const unitApprover = policy.canApproveUnitLeave && (item.division_id === session.divisionId || policy.canApproveSdmLeave);
+    const status = String(item.status);
+    let next: { status: string; column?: 'unit_approved_by' | 'sdm_approved_by' } | null = null;
+    if (item.employee_id === session.userId) {
+      next = null;
+    } else if (action === 'REJECT' && (status === 'Menunggu Atasan Unit' ? unitApprover : status === 'Menunggu Verifikasi SDM' && policy.canApproveSdmLeave)) {
+      next = { status: 'Ditolak' };
+    } else if (action !== 'REJECT' && status === 'Menunggu Atasan Unit' && unitApprover) {
+      next = { status: 'Menunggu Verifikasi SDM', column: 'unit_approved_by' };
+    } else if (action !== 'REJECT' && status === 'Menunggu Verifikasi SDM' && policy.canApproveSdmLeave) {
+      next = { status: 'Disetujui Final', column: 'sdm_approved_by' };
+    }
+    if (!next) {
+      return res.status(403).json({ success: false, message: 'Anda tidak berwenang memproses pengajuan cuti ini pada tahap saat ini.' });
     }
 
+    // Compare-and-set on the current status so two approvers cannot both act on the same step.
+    const upd = await hr
+      .prepare(
+        `UPDATE sdm_cuti SET status = ?${next.column ? `, ${next.column} = ?` : ''} WHERE id = ? AND status = ?`
+      )
+      .bind(...(next.column ? [next.status, session.userId] : [next.status]), item.id, status)
+      .run();
+    if (!upd.meta.changes) return res.status(409).json({ success: false, message: 'Status pengajuan sudah berubah. Muat ulang data.' });
+
+    const updated = toLeave((await hr.prepare(`${LEAVE_SELECT} WHERE c.id = ?`).bind(item.id).first<Record<string, unknown>>())!);
     appendSiemLog({
       actorNip: session.nip,
       actorName: session.name,
       divisionId: session.divisionId,
       eventType: 'LEAVE_WORKFLOW_STEP',
-      resource: item.id,
+      resource: String(item.id),
       decision: 'ALLOW',
-      detail: `Status pengajuan cuti ${item.employeeName} diperbarui menjadi ${item.status}.`,
+      detail: `Status pengajuan cuti ${updated.employeeName} diperbarui menjadi ${updated.status}.`,
       ipAddress: req.ip
     });
 
-    res.json({ success: true, leave: item });
-  });
+    res.json({ success: true, leave: updated });
+  }));
 
   // Payroll & Reimbursement
-  app.get('/api/gateway/payroll', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  function toReimbursement(r: Record<string, unknown>) {
+    return {
+      id: r.id,
+      nip: r.nip,
+      employeeName: r.employee_name,
+      title: r.title,
+      category: r.category,
+      amount: r.amount,
+      date: r.date,
+      status: r.status
+    };
+  }
+  const REIMBURSE_SELECT = 'SELECT r.*, e.nip, e.name AS employee_name FROM sdm_reimbursement r JOIN employee e ON e.id = r.employee_id';
+
+  app.get('/api/gateway/payroll', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
+    // shortcut: salary slip is computed from fixed figures per role; replace with real payroll data when available.
     const baseSalary = session.isClinical ? 12500000 : session.isAdminCapable ? 10500000 : 7800000;
     const jasaMedis = session.isClinical ? 6400000 : 1850000;
     const tunjanganShift = 1150000;
     const bpjsKesehatanPot = 180000;
     const pph21 = Math.round((baseSalary + jasaMedis) * 0.04);
     const takeHomePay = baseSalary + jasaMedis + tunjanganShift - bpjsKesehatanPot - pph21;
+
+    const { results } = await hr
+      .prepare(`${REIMBURSE_SELECT} WHERE r.employee_id = ? ORDER BY r.date DESC, r.id DESC LIMIT 100`)
+      .bind(session.userId)
+      .all<Record<string, unknown>>();
 
     res.json({
       success: true,
@@ -1598,68 +1686,87 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         takeHomePay,
         statusPembayaran: 'Sudah Ditransfer (Mandiri Payroll)'
       },
-      reimbursements: reimbursementsStore
+      reimbursements: results.map(toReimbursement)
     });
-  });
+  }));
 
-  app.post('/api/gateway/payroll/reimburse', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/payroll/reimburse', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
     const { title, category, amount } = req.body || {};
-    const newItem = {
-      id: 'rmb-' + Date.now(),
-      nip: session.nip,
-      employeeName: session.name,
-      title: String(title || 'Klaim Pelatihan / Operasional'),
-      category: (category || 'Diklat / SKP') as 'Diklat / SKP' | 'Perjalanan Dinas' | 'Kesehatan Pegawai' | 'Operasional Unit',
-      amount: Number(amount || 500000),
-      date: new Date().toISOString().split('T')[0],
-      status: 'Diajukan' as const
-    };
-    reimbursementsStore.unshift(newItem);
-    res.json({ success: true, reimbursement: newItem });
-  });
+    const cleanAmount = Math.round(Number(amount ?? 500000));
+    if (!Number.isFinite(cleanAmount) || cleanAmount <= 0 || cleanAmount > 1_000_000_000) {
+      return res.status(400).json({ success: false, message: 'Nominal reimbursement tidak valid.' });
+    }
+    const id = 'rmb-' + crypto.randomUUID();
+    await hr
+      .prepare('INSERT INTO sdm_reimbursement (id, employee_id, title, category, amount, date, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, session.userId, str(title, 'Klaim Pelatihan / Operasional', 200), oneOf(REIMBURSE_CATEGORIES, category, 'Diklat / SKP'), cleanAmount, today(), 'Diajukan')
+      .run();
+    const newItem = await hr.prepare(`${REIMBURSE_SELECT} WHERE r.id = ?`).bind(id).first<Record<string, unknown>>();
+    res.json({ success: true, reimbursement: toReimbursement(newItem!) });
+  }));
 
-  // Training & SOP
-  const trainingCatalog = [
-    { id: 'trn-1', code: 'SOP-PPI-01', type: 'SOP Wajib', title: 'Kepatuhan Kebersihan Tangan 6 Langkah & 5 Momen WHO', unit: 'Komite PPI', status: 'Dibaca & Disetujui', enrolled: true, skp: 2 },
-    { id: 'trn-2', code: 'DIKLAT-BHD-26', type: 'Pelatihan Wajib', title: 'Bantuan Hidup Dasar (BHD) & Code Blue Response 2026', unit: 'Instalasi Diklat', status: 'Terjadwal 19 Apr 2026', enrolled: false, skp: 4 },
-    { id: 'trn-3', code: 'SEC-UUPDP-26', type: 'Pelatihan Kepatuhan', title: 'Pelindungan Data Pribadi Pasien (UU PDP & PMK 24/2022)', unit: 'Hukum & SIMK/TI', status: 'Sertifikat Aktif', enrolled: true, skp: 3 },
-    { id: 'trn-4', code: 'SOP-SBAR-04', type: 'SOP Klinis', title: 'Komunikasi Efektif SBAR Saat Serah Terima Shift & Konsul DPJP', unit: 'Komite Mutu & Keperawatan', status: 'Wajib Tahunan', enrolled: false, skp: 2 }
-  ];
+  // Training & SOP: catalog in sdm_training, enrollment per employee in sdm_training_record.
+  async function trainingCourses(employeeId: string, courseId?: string) {
+    const { results } = await hr
+      .prepare(
+        `SELECT t.*, r.status AS record_status FROM sdm_training t
+           LEFT JOIN sdm_training_record r ON r.training_id = t.id AND r.employee_id = ?
+          WHERE ? IS NULL OR t.id = ? ORDER BY t.id`
+      )
+      .bind(employeeId, courseId ?? null, courseId ?? null)
+      .all<{ id: string; code: string; type: string; title: string; unit: string; skp: number; record_status: string | null }>();
+    return results.map((t) => ({
+      id: t.id,
+      code: t.code,
+      type: t.type,
+      title: t.title,
+      unit: t.unit,
+      status: t.record_status || 'Belum Terdaftar',
+      enrolled: t.record_status !== null,
+      skp: t.skp
+    }));
+  }
 
-  app.get('/api/gateway/training', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.get('/api/gateway/training', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+    // shortcut: certificates are fixed placeholders until a certificate table exists.
     res.json({
       success: true,
-      courses: trainingCatalog,
+      courses: await trainingCourses(session.userId),
       certificates: [
         { name: 'Bantuan Hidup Dasar (BHD)', validUntil: '2027-01-15', status: 'Aktif' },
         { name: 'Keamanan Informasi Kesehatan (PMK 24/2022)', validUntil: '2026-06-30', status: 'Perlu Resertifikasi' }
       ]
     });
-  });
+  }));
 
-  app.post('/api/gateway/training/enroll', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/training/enroll', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
-    const { courseId } = req.body || {};
-    const course = trainingCatalog.find((c) => c.id === courseId);
-    if (!course) return res.status(404).json({ success: false, message: 'Pelatihan tidak ditemukan.' });
-    course.enrolled = true;
-    course.status = 'Terdaftar (Menunggu Jadwal)';
+    const courseId = String(req.body?.courseId || '');
+    const exists = await hr.prepare('SELECT id FROM sdm_training WHERE id = ?').bind(courseId).first();
+    if (!exists) return res.status(404).json({ success: false, message: 'Pelatihan tidak ditemukan.' });
+    await hr
+      .prepare(
+        'INSERT INTO sdm_training_record (employee_id, training_id, status) VALUES (?, ?, ?) ON CONFLICT(employee_id, training_id) DO NOTHING'
+      )
+      .bind(session.userId, courseId, 'Terdaftar (Menunggu Jadwal)')
+      .run();
+    const [course] = await trainingCourses(session.userId, courseId);
     res.json({ success: true, course });
-  });
+  }));
 
   // Performance KPI & Doctor OPPE
-  app.get('/api/gateway/performance', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.get('/api/gateway/performance', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
-    const division = HOSPITAL_DIVISIONS.find((d) => d.id === session.divisionId) || HOSPITAL_DIVISIONS[0];
-    const access = evaluateAccess(session, division);
+    const access = evaluateAccess(session, sessionDivision(session));
 
+    // shortcut: KPI and OPPE figures are fixed placeholders until a performance data source exists.
     res.json({
       success: true,
       individualKpi: {
@@ -1682,83 +1789,185 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
           ]
         : []
     });
-  });
+  }));
 
-  // SBAR Handover + Internal Directory + Announcements
-  app.get('/api/gateway/sbar', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  // SBAR Handover (db.core, clinical staff only) + Internal Directory + Announcements
+  function toSbar(r: { id: string; division_id: string; karu_verified: number; data: string; created_at: string }) {
+    return { id: r.id, divisionId: r.division_id, ...JSON.parse(r.data), karuVerified: Boolean(r.karu_verified), createdAt: r.created_at };
+  }
+
+  function denySbar(session: GatewaySession, reason: string, req: express.Request, res: express.Response) {
+    appendSiemLog({
+      actorNip: session.nip,
+      actorName: session.name,
+      divisionId: session.divisionId,
+      eventType: 'SBAR_ACCESS_DENIED',
+      resource: 'Handover SBAR',
+      decision: 'DENY',
+      detail: reason,
+      ipAddress: req.ip
+    });
+    return res.status(403).json({ success: false, message: `Akses SBAR ditolak: ${reason}` });
+  }
+
+  app.get('/api/gateway/sbar', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+
+    const denied = sbarDenyReason(session);
+    let handovers: ReturnType<typeof toSbar>[] = [];
+    if (!denied) {
+      const { results } = await core
+        .prepare('SELECT * FROM sbar_handover ORDER BY created_at DESC LIMIT 100')
+        .all<{ id: string; division_id: string; karu_verified: number; data: string; created_at: string }>();
+      handovers = results.map(toSbar);
+      if (evaluateAccess(session, sessionDivision(session)).emrAccess === 'BREAK_GLASS') {
+        appendSiemLog({
+          actorNip: session.nip,
+          actorName: session.name,
+          divisionId: session.divisionId,
+          eventType: 'BREAK_GLASS_SBAR_READ',
+          resource: 'Handover SBAR',
+          decision: 'BREAK_GLASS',
+          detail: `${handovers.length} catatan SBAR dibuka dalam mode Break-Glass.`,
+          ipAddress: req.ip
+        });
+      }
+    }
+
+    const { results: directory } = await hr
+      .prepare('SELECT nip, name, division_id, role_title, email, shift_pattern FROM employee WHERE active = 1 ORDER BY name LIMIT 18')
+      .all<{ nip: string; name: string; division_id: string; role_title: string; email: string; shift_pattern: string }>();
+
+    // Non-clinical staff still get announcements and the directory, but no patient handovers.
     res.json({
       success: true,
-      handovers: sbarHandoversStore,
+      sbarAccess: !denied,
+      sbarDeniedReason: denied || undefined,
+      handovers,
       announcements: portalAnnouncements,
-      directory: usersStore.slice(0, 18).map((u) => ({
+      directory: directory.map((u) => ({
         nip: u.nip,
         name: u.name,
-        divisionName: u.divisionName,
-        roleTitle: u.roleTitle,
+        divisionName: divisionById(u.division_id)?.name || u.division_id,
+        roleTitle: u.role_title,
         email: u.email,
-        shiftPattern: u.shiftPattern
+        shiftPattern: u.shift_pattern
       }))
     });
-  });
+  }));
 
-  app.post('/api/gateway/sbar', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/sbar', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+    const denied = sbarDenyReason(session);
+    if (denied) return denySbar(session, denied, req, res);
 
     const { unit, sessionType, fromShift, toShift, receiverName, patientLabel, situation, background, assessment, recommendation } = req.body || {};
-    const entry = {
-      id: 'sbar-' + Date.now(),
-      unit: String(unit || session.divisionName),
-      divisionId: session.divisionId,
-      sessionType: (sessionType === 'Nurse Station (Terjadwal)' ? 'Nurse Station (Terjadwal)' : 'Bedside Handover') as
-        | 'Nurse Station (Terjadwal)'
-        | 'Bedside Handover',
-      fromShift: String(fromShift || session.divisionName),
-      toShift: String(toShift || 'Shift Berikutnya'),
+    const data = {
+      unit: str(unit, session.divisionName, 200),
+      sessionType: sessionType === 'Nurse Station (Terjadwal)' ? 'Nurse Station (Terjadwal)' : 'Bedside Handover',
+      fromShift: str(fromShift, session.divisionName, 100),
+      toShift: str(toShift, 'Shift Berikutnya', 100),
       senderName: session.name,
-      receiverName: String(receiverName || 'Petugas Shift Pengganti'),
-      patientLabel: String(patientLabel || 'Pasien Unit'),
-      situation: String(situation || ''),
-      background: String(background || ''),
-      assessment: String(assessment || ''),
-      recommendation: String(recommendation || ''),
-      karuVerified: false,
-      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
+      receiverName: str(receiverName, 'Petugas Shift Pengganti', 200),
+      patientLabel: str(patientLabel, 'Pasien Unit', 300),
+      situation: str(situation, '', 4000),
+      background: str(background, '', 4000),
+      assessment: str(assessment, '', 4000),
+      recommendation: str(recommendation, '', 4000)
     };
+    const id = 'sbar-' + crypto.randomUUID();
+    const createdAt = nowStamp(16);
+    await core
+      .prepare('INSERT INTO sbar_handover (id, division_id, created_by, karu_verified, data, created_at) VALUES (?, ?, ?, 0, ?, ?)')
+      .bind(id, session.divisionId, session.userId, JSON.stringify(data), createdAt)
+      .run();
+    const entry = { id, divisionId: session.divisionId, ...data, karuVerified: false, createdAt };
 
-    sbarHandoversStore.unshift(entry);
     appendSiemLog({
       actorNip: session.nip,
       actorName: session.name,
       divisionId: session.divisionId,
       eventType: 'SBAR_HANDOVER_CREATED',
-      resource: entry.patientLabel,
+      resource: entry.id,
       decision: 'ALLOW',
       detail: `Handover ${entry.sessionType} diserahkan ke ${entry.receiverName}.`,
       ipAddress: req.ip
     });
 
     res.json({ success: true, handover: entry });
-  });
+  }));
 
-  app.post('/api/gateway/sbar/verify', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/sbar/verify', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
-    const { sbarId } = req.body || {};
-    const item = sbarHandoversStore.find((h) => h.id === sbarId);
+    const denied = sbarDenyReason(session);
+    if (denied) return denySbar(session, denied, req, res);
+
+    const sbarId = String(req.body?.sbarId || '');
+    const item = await core.prepare('SELECT created_by FROM sbar_handover WHERE id = ?').bind(sbarId).first<{ created_by: string }>();
     if (!item) return res.status(404).json({ success: false, message: 'Catatan SBAR tidak ditemukan.' });
-    item.karuVerified = true;
-    item.karuName = session.name;
-    res.json({ success: true, handover: item });
-  });
+    if (item.created_by === session.userId) {
+      return res.status(403).json({ success: false, message: 'Handover tidak dapat diverifikasi oleh pengirimnya sendiri.' });
+    }
+
+    await core
+      .prepare(
+        "UPDATE sbar_handover SET karu_verified = 1, karu_verified_by = ?, data = json_set(data, '$.karuName', ?), updated_at = datetime('now') WHERE id = ?"
+      )
+      .bind(session.userId, session.name, sbarId)
+      .run();
+    const row = await core.prepare('SELECT * FROM sbar_handover WHERE id = ?').bind(sbarId).first<{ id: string; division_id: string; karu_verified: number; data: string; created_at: string }>();
+
+    appendSiemLog({
+      actorNip: session.nip,
+      actorName: session.name,
+      divisionId: session.divisionId,
+      eventType: 'SBAR_HANDOVER_VERIFIED',
+      resource: sbarId,
+      decision: 'ALLOW',
+      detail: 'Handover SBAR diverifikasi Karu.',
+      ipAddress: req.ip
+    });
+    res.json({ success: true, handover: toSbar(row!) });
+  }));
 
   // Helpdesk TI & HR (accessible both authenticated & from landing page support form)
-  app.get('/api/gateway/helpdesk', (req, res) => {
+  function toTicket(t: Record<string, unknown>) {
+    return {
+      id: t.id,
+      ticketNo: t.ticket_no,
+      requesterName: t.requester_name,
+      requesterContact: t.requester_contact,
+      divisionName: t.division_name,
+      category: t.category,
+      priority: t.priority,
+      subject: t.subject,
+      description: t.description,
+      source: t.source,
+      status: t.status,
+      assignedTeam: t.assigned_team,
+      createdAt: t.created_at
+    };
+  }
+
+  app.get('/api/gateway/helpdesk', asyncRoute(async (req, res) => {
+    // Tickets hold names and contacts: anonymous callers get none, staff their own, admins all.
+    const token = extractBearerToken(req);
+    const session = token ? await loadSession(token) : null;
+    let tickets: ReturnType<typeof toTicket>[] = [];
+    if (session) {
+      const isAdmin = evaluateAccess(session, sessionDivision(session)).adminAreaAccess;
+      const { results } = await hr
+        .prepare('SELECT * FROM helpdesk_ticket WHERE ? OR requester_contact = ? ORDER BY created_at DESC LIMIT 100')
+        .bind(isAdmin ? 1 : 0, session.nip)
+        .all<Record<string, unknown>>();
+      tickets = results.map(toTicket);
+    }
     res.json({
       success: true,
-      tickets: helpdeskTicketsStore,
+      tickets,
       emergencyContacts: [
         { label: 'Service Desk TI / SIMK (24 Jam)', phone: 'Ext. 1100 / 0811-900-1100', sla: 'Respon < 15 Menit (P1)' },
         { label: 'HR Helpdesk & Payroll', phone: 'Ext. 1205', sla: 'Hari Kerja 08:00 - 16:30' },
@@ -1766,77 +1975,92 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         { label: 'Data Protection Officer (UU PDP)', phone: 'dpo@tarumanagara-klinik.id', sla: 'Eskalasi Keamanan Data' }
       ],
       faqs: [
-        { q: 'Bagaimana jika kode OTP MFA tidak diterima saat login?', a: 'Pada lingkungan demo gunakan kode 123456, atau klik "Buat Tiket TI" bila perangkat baru belum terikat.' },
+        { q: 'Bagaimana jika kode OTP MFA tidak diterima saat login?', a: 'Ulangi login untuk menerbitkan kode baru, atau klik "Buat Tiket TI" bila perangkat baru belum terikat.' },
         { q: 'Apakah absensi tetap tercatat di area basement / ambulans tanpa sinyal?', a: 'Ya. Aktifkan Mode Offline di aplikasi mobile karyawan. Data disimpan terenkripsi dan otomatis disinkronkan menggunakan Idempotency-Key.' },
         { q: 'Mengapa tombol Rekam Medis terkunci saat Off-Duty?', a: 'Kebijakan ABAC (Attribute-Based Access Control) sesuai PMK 24/2022 membatasi akses EMR di luar jadwal jaga, kecuali menggunakan protokol darurat Break-Glass yang diaudit.' }
       ]
     });
-  });
+  }));
 
-  app.post('/api/gateway/helpdesk', (req, res) => {
+  app.post('/api/gateway/helpdesk', asyncRoute(async (req, res) => {
     const token = extractBearerToken(req);
-    const session = token ? sessions.get(token) : undefined;
+    const session = token ? await loadSession(token) : null;
     const { requesterName, requesterContact, divisionName, category, priority, subject, description, source } = req.body || {};
+    const cleanCategory = oneOf(HELPDESK_CATEGORIES, category, 'TI / SIMK & MFA');
 
-    const ticket = {
-      id: 'tkt-' + Date.now(),
-      ticketNo: `INC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      requesterName: String(requesterName || session?.name || 'Karyawan RS'),
-      requesterContact: String(requesterContact || session?.nip || 'Eksternal'),
-      divisionName: String(divisionName || session?.divisionName || 'Umum / Pengunjung Landing Page'),
-      category: (category || 'TI / SIMK & MFA') as
-        | 'TI / SIMK & MFA'
-        | 'HR & Absensi / Payroll'
-        | 'Instalasi Aplikasi Mobile'
-        | 'Sarana / Medis',
-      priority: (priority || 'P2 - Tinggi (1 Jam)') as 'P1 - Kritis (15 Menit)' | 'P2 - Tinggi (1 Jam)' | 'P3 - Normal (4 Jam)',
-      subject: String(subject || 'Permintaan Bantuan Layanan'),
-      description: String(description || '-'),
-      source: (source === 'Landing Page App' ? 'Landing Page App' : 'Portal Karyawan') as 'Portal Karyawan' | 'Landing Page App',
-      status: 'Terbuka' as const,
-      assignedTeam: category === 'HR & Absensi / Payroll' ? 'SDM & Payroll Service' : 'Service Desk TI (ITIL 4)',
-      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
+    const row = {
+      id: 'tkt-' + crypto.randomUUID(),
+      ticket_no: `INC-${new Date().getUTCFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
+      // Logged-in staff cannot file tickets under someone else's identity.
+      requester_name: session ? session.name : str(requesterName, 'Karyawan RS', 200),
+      requester_contact: session ? session.nip : str(requesterContact, 'Eksternal', 200),
+      division_name: session ? session.divisionName : str(divisionName, 'Umum / Pengunjung Landing Page', 200),
+      category: cleanCategory,
+      priority: oneOf(HELPDESK_PRIORITIES, priority, 'P2 - Tinggi (1 Jam)'),
+      subject: str(subject, 'Permintaan Bantuan Layanan', 300),
+      description: str(description, '-', 4000),
+      source: source === 'Landing Page App' ? 'Landing Page App' : 'Portal Karyawan',
+      status: 'Terbuka',
+      assigned_team: cleanCategory === 'HR & Absensi / Payroll' ? 'SDM & Payroll Service' : 'Service Desk TI (ITIL 4)',
+      created_at: nowStamp(16)
     };
 
-    helpdeskTicketsStore.unshift(ticket);
+    await hr
+      .prepare(
+        `INSERT INTO helpdesk_ticket (id, ticket_no, requester_name, requester_contact, division_name, category, priority, subject, description, source, status, assigned_team, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        row.id, row.ticket_no, row.requester_name, row.requester_contact, row.division_name, row.category, row.priority,
+        row.subject, row.description, row.source, row.status, row.assigned_team, row.created_at
+      )
+      .run();
+    const ticket = toTicket(row);
+
     appendSiemLog({
-      actorNip: session?.nip || ticket.requesterContact,
-      actorName: ticket.requesterName,
+      actorNip: session?.nip || row.requester_contact,
+      actorName: row.requester_name,
       divisionId: session?.divisionId || 'landing',
       eventType: 'HELPDESK_TICKET_CREATED',
-      resource: ticket.ticketNo,
+      resource: row.ticket_no,
       decision: 'ALLOW',
-      detail: `[${ticket.priority}] ${ticket.subject}`,
+      detail: `[${row.priority}] ${row.subject}`,
       ipAddress: req.ip
     });
 
     res.json({ success: true, ticket });
-  });
+  }));
 
-  app.post('/api/gateway/helpdesk/resolve', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/helpdesk/resolve', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+    if (!requireAdminArea(session, req, res)) return;
     const { ticketId, status } = req.body || {};
-    const t = helpdeskTicketsStore.find((item) => item.id === ticketId);
-    if (!t) return res.status(404).json({ success: false, message: 'Tiket tidak ditemukan.' });
-    t.status = status === 'Selesai' ? 'Selesai' : 'Ditangani ITIL L1/L2';
-    res.json({ success: true, ticket: t });
-  });
+    const newStatus = status === 'Selesai' ? 'Selesai' : 'Ditangani ITIL L1/L2';
+    const upd = await hr.prepare('UPDATE helpdesk_ticket SET status = ? WHERE id = ?').bind(newStatus, String(ticketId || '')).run();
+    if (!upd.meta.changes) return res.status(404).json({ success: false, message: 'Tiket tidak ditemukan.' });
+    const t = await hr.prepare('SELECT * FROM helpdesk_ticket WHERE id = ?').bind(String(ticketId)).first<Record<string, unknown>>();
+    res.json({ success: true, ticket: toTicket(t!) });
+  }));
 
   // =========================================================================
   // 6. ALL 34 DIVISION-SPECIFIC WORKSPACES (RBAC + ABAC PROTECTED)
   // =========================================================================
-  app.get('/api/gateway/divisions/:divisionId/workspace', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.get('/api/gateway/divisions/:divisionId/workspace', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
-    const div = HOSPITAL_DIVISIONS.find((d) => d.id === req.params.divisionId);
+    const div = divisionById(req.params.divisionId);
     if (!div) {
       return res.status(404).json({ success: false, message: 'Divisi rumah sakit tidak ditemukan.' });
     }
 
     const access = evaluateAccess(session, div);
-    const divisionActions = divisionActionState.get(div.id) || {};
+    const { results: saved } = await hr
+      .prepare('SELECT task_id, status FROM division_task_status WHERE division_id = ?')
+      .bind(div.id)
+      .all<{ task_id: string; status: string }>();
+    const divisionActions = Object.fromEntries(saved.map((s) => [s.task_id, s.status]));
 
     const worklist = div.specificModules.map((modName, idx) => {
       const itemId = `${div.id}-task-${idx + 1}`;
@@ -1866,6 +2090,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       };
     });
 
+    // shortcut: workspace KPIs are fixed placeholders derived from the catalog.
     res.json({
       success: true,
       division: div,
@@ -1877,13 +2102,13 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       ],
       worklist
     });
-  });
+  }));
 
-  app.post('/api/gateway/divisions/:divisionId/action', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/divisions/:divisionId/action', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
 
-    const div = HOSPITAL_DIVISIONS.find((d) => d.id === req.params.divisionId);
+    const div = divisionById(req.params.divisionId);
     if (!div) return res.status(404).json({ success: false, message: 'Divisi tidak ditemukan.' });
 
     const access = evaluateAccess(session, div);
@@ -1903,11 +2128,20 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         message: `Aksi ditolak kebijakan ABAC: ${access.emrReasons.join(' ')}`
       });
     }
+    if (session.divisionId !== div.id && !access.adminAreaAccess) {
+      return res.status(403).json({ success: false, message: 'Hanya anggota divisi ini yang dapat memperbarui item kerjanya.' });
+    }
 
-    const { taskId, newStatus } = req.body || {};
-    const state = divisionActionState.get(div.id) || {};
-    state[String(taskId)] = String(newStatus || 'Selesai Diverifikasi');
-    divisionActionState.set(div.id, state);
+    const taskId = String(req.body?.taskId || '');
+    const validTask = div.specificModules.some((_, idx) => taskId === `${div.id}-task-${idx + 1}`);
+    if (!validTask) return res.status(400).json({ success: false, message: 'Item kerja divisi tidak dikenal.' });
+    const newStatus = str(req.body?.newStatus, 'Selesai Diverifikasi', 100);
+    await hr
+      .prepare(
+        'INSERT INTO division_task_status (division_id, task_id, status) VALUES (?, ?, ?) ON CONFLICT(division_id, task_id) DO UPDATE SET status = excluded.status'
+      )
+      .bind(div.id, taskId, newStatus)
+      .run();
 
     appendSiemLog({
       actorNip: session.nip,
@@ -1916,42 +2150,37 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       eventType: access.emrAccess === 'BREAK_GLASS' ? 'BREAK_GLASS_CLINICAL_ACTION' : 'DIVISION_TASK_UPDATED',
       resource: `${div.name} :: ${taskId}`,
       decision: access.emrAccess === 'BREAK_GLASS' ? 'BREAK_GLASS' : 'ALLOW',
-      detail: `Status item diperbarui menjadi "${state[String(taskId)]}".`,
+      detail: `Status item diperbarui menjadi "${newStatus}".`,
       ipAddress: req.ip
     });
 
-    res.json({ success: true, taskId, status: state[String(taskId)] });
-  });
+    res.json({ success: true, taskId, status: newStatus });
+  }));
 
   // =========================================================================
   // 7. AREA ADMIN & GOVERNANCE (CHANGE APPROVAL, SIEM, INTEGRATIONS)
   // =========================================================================
-  app.get('/api/gateway/admin/state', (req, res) => {
-    const session = requireGatewaySession(req, res);
-    if (!session) return;
+  async function allUsers() {
+    const { results } = await hr.prepare('SELECT * FROM employee ORDER BY division_id, name').all<EmployeeRow>();
+    return results.map(toUser);
+  }
 
-    const division = HOSPITAL_DIVISIONS.find((d) => d.id === session.divisionId) || HOSPITAL_DIVISIONS[0];
-    const access = evaluateAccess(session, division);
-    if (!access.adminAreaAccess) {
-      appendSiemLog({
-        actorNip: session.nip,
-        actorName: session.name,
-        divisionId: session.divisionId,
-        eventType: 'ADMIN_AREA_FORBIDDEN',
-        resource: 'Area Admin Portal Karyawan',
-        decision: 'DENY',
-        detail: 'Pengguna tidak memiliki peran Admin/Direksi/SPI/DPO untuk membuka Area Admin.',
-        ipAddress: req.ip
-      });
-      return res.status(403).json({
-        success: false,
-        message: 'Akses ditolak: Area Admin & Tata Kelola hanya untuk Unit SIMK/TI, SDM, Direksi, SPI, atau Hukum & Etik.'
-      });
-    }
+  app.get('/api/gateway/admin/state', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
+    if (!session) return;
+    if (!requireAdminArea(session, req, res)) return;
+
+    const users = await allUsers();
+    const counts = await hr
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM auth_session WHERE created_at > ${SESSION_TTL_SQL}) AS sessions,
+                (SELECT COUNT(*) FROM sdm_cuti WHERE status NOT IN ('Disetujui Final', 'Ditolak')) AS pending_leaves`
+      )
+      .first<{ sessions: number; pending_leaves: number }>();
 
     res.json({
       success: true,
-      users: usersStore,
+      users,
       rbacMatrix,
       abacPolicies,
       featureFlags,
@@ -1961,25 +2190,25 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       siemAuditTrail: siemAuditTrail.slice(0, 60),
       integrations: integrationHealthStore,
       analyticsSummary: {
-        totalActiveEmployees: usersStore.filter((u) => u.active).length,
+        totalActiveEmployees: users.filter((u) => u.active).length,
         divisionsCovered: HOSPITAL_DIVISIONS.length,
-        activeSessions: sessions.size,
-        pendingApprovals: configChangeProposals.filter((p) => p.status === 'PENDING_REVIEW').length + leaveRequestsStore.filter((l) => l.status !== 'Disetujui Final' && l.status !== 'Ditolak').length,
+        activeSessions: counts?.sessions ?? 0,
+        pendingApprovals: configChangeProposals.filter((p) => p.status === 'PENDING_REVIEW').length + (counts?.pending_leaves ?? 0),
         complianceScore: '99.4%'
       }
     });
-  });
+  }));
 
-  app.post('/api/gateway/admin/users', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  // The only way to add employees: action CREATE writes db.hr.employee (role/flags derived from the division catalog).
+  app.post('/api/gateway/admin/users', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+    if (!requireAdminArea(session, req, res)) return;
 
-    const { action, userId, name, nip, divisionId } = req.body || {};
+    const { action, userId, name, nip, divisionId, email } = req.body || {};
     if (action === 'HRIS_SYNC') {
-      const now = new Date().toISOString();
-      usersStore.forEach((u) => {
-        u.lastHrisSync = now;
-      });
+      await hr.prepare("UPDATE employee SET last_hris_sync = datetime('now')").run();
+      const users = await allUsers();
       appendSiemLog({
         actorNip: session.nip,
         actorName: session.name,
@@ -1987,16 +2216,22 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         eventType: 'HRIS_DIRECTORY_SYNC',
         resource: 'HRIS -> Portal Karyawan',
         decision: 'ALLOW',
-        detail: `Sinkronisasi ${usersStore.length} akun pegawai dari sumber kebenaran HRIS selesai.`,
+        detail: `Sinkronisasi ${users.length} akun pegawai dari sumber kebenaran HRIS selesai.`,
         ipAddress: req.ip
       });
-      return res.json({ success: true, users: usersStore, message: 'Sinkronisasi HRIS selesai.' });
+      return res.json({ success: true, users, message: 'Sinkronisasi HRIS selesai.' });
     }
 
     if (action === 'TOGGLE_ACTIVE' && userId) {
-      const u = usersStore.find((item) => item.id === userId);
-      if (u) {
-        u.active = !u.active;
+      if (userId === session.userId) {
+        return res.status(400).json({ success: false, message: 'Tidak dapat menonaktifkan akun sendiri.' });
+      }
+      const upd = await hr.prepare('UPDATE employee SET active = 1 - active WHERE id = ?').bind(String(userId)).run();
+      const row = upd.meta.changes ? await getEmployee(String(userId)) : null;
+      if (row) {
+        // Deactivated accounts lose their sessions at once.
+        if (!row.active) await hr.prepare('DELETE FROM auth_session WHERE employee_id = ?').bind(row.id).run();
+        const u = toUser(row);
         appendSiemLog({
           actorNip: session.nip,
           actorName: session.name,
@@ -2012,45 +2247,60 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     }
 
     if (action === 'CREATE' && name && nip) {
-      const div = HOSPITAL_DIVISIONS.find((d) => d.id === divisionId) || HOSPITAL_DIVISIONS[0];
-      const newUser: EmployeeUserRecord = {
-        id: 'emp-' + Date.now(),
-        nip: String(nip),
-        email: `${String(nip).toLowerCase().replace(/[^a-z0-9]/g, '')}@tarumanagara-klinik.id`,
-        name: String(name),
-        divisionId: div.id,
-        divisionName: div.name,
-        roleTitle: div.sampleRoles[0] || div.name,
-        portalRole: mapPortalRole(div),
-        isClinical: div.isClinical,
-        isAdminCapable: div.isAdminCapable,
-        active: true,
-        unitLocation: div.name,
-        shiftPattern: div.defaultShift,
-        lastHrisSync: new Date().toISOString()
-      };
-      usersStore.unshift(newUser);
+      const div = divisionById(String(divisionId || ''));
+      if (!div) return res.status(400).json({ success: false, message: 'Divisi pegawai tidak dikenal.' });
+      const cleanNip = str(nip, '', 50);
+      const cleanEmail = email ? String(email).trim().toLowerCase() : `${cleanNip.toLowerCase().replace(/[^a-z0-9]/g, '')}@tarumanagara-klinik.id`;
+      if (!isEmail(cleanEmail)) return res.status(400).json({ success: false, message: 'Format email tidak valid.' });
+      const id = 'emp-' + crypto.randomUUID();
+      try {
+        await hr
+          .prepare(
+            `INSERT INTO employee (id, nip, email, name, division_id, role_title, portal_role, is_clinical, is_admin_capable, active, unit_location, shift_pattern)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+          )
+          .bind(
+            id, cleanNip, cleanEmail, str(name, '', 200), div.id, div.sampleRoles[0] || div.name, mapPortalRole(div),
+            div.isClinical ? 1 : 0, div.isAdminCapable ? 1 : 0, div.name, div.defaultShift
+          )
+          .run();
+      } catch (e) {
+        if (isUniqueViolation(e)) return res.status(409).json({ success: false, message: 'NIP atau email sudah terdaftar.' });
+        throw e;
+      }
+      const newUser = toUser((await getEmployee(id))!);
+      appendSiemLog({
+        actorNip: session.nip,
+        actorName: session.name,
+        divisionId: session.divisionId,
+        eventType: 'USER_CREATED',
+        resource: newUser.nip,
+        decision: 'ALLOW',
+        detail: `Akun pegawai ${newUser.name} (${div.name}) dibuat.`,
+        ipAddress: req.ip
+      });
       return res.json({ success: true, user: newUser });
     }
 
     res.status(400).json({ success: false, message: 'Aksi user tidak valid.' });
-  });
+  }));
 
   // Segregation-of-duties Change Proposal & Reviewer Approval
-  app.post('/api/gateway/admin/propose-change', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/admin/propose-change', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+    if (!requireAdminArea(session, req, res)) return;
 
     const { category, title, targetKey, proposedValue, justification } = req.body || {};
     const proposal: ConfigChangeProposal = {
       id: 'chg-' + Date.now(),
-      proposedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      proposedAt: nowStamp(),
       proposedBy: `${session.name} (${session.divisionName})`,
-      category: category || 'FEATURE_FLAG',
-      title: String(title || 'Usulan Perubahan Konfigurasi'),
-      targetKey: String(targetKey || 'offline_attendance'),
+      category: oneOf(['FEATURE_FLAG', 'ABAC_POLICY', 'RBAC_MATRIX', 'PORTAL_CONTENT'] as const, category, 'FEATURE_FLAG'),
+      title: str(title, 'Usulan Perubahan Konfigurasi', 300),
+      targetKey: str(targetKey, 'offline_attendance', 100),
       proposedValue,
-      justification: String(justification || 'Peningkatan tata kelola ITIL 4 & COBIT 2019'),
+      justification: str(justification, 'Peningkatan tata kelola ITIL 4 & COBIT 2019'),
       status: 'PENDING_REVIEW'
     };
 
@@ -2067,19 +2317,23 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     });
 
     res.json({ success: true, proposal });
-  });
+  }));
 
-  app.post('/api/gateway/admin/review-change', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/admin/review-change', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+    if (!requireAdminArea(session, req, res)) return;
+    if (!rbacMatrix[session.portalRole].canReviewConfigChanges) {
+      return res.status(403).json({ success: false, message: 'Peran Anda tidak berwenang meninjau perubahan konfigurasi.' });
+    }
 
     const { proposalId, decision, reviewNote } = req.body || {};
     const proposal = configChangeProposals.find((p) => p.id === proposalId);
     if (!proposal) return res.status(404).json({ success: false, message: 'Usulan perubahan tidak ditemukan.' });
 
-    proposal.reviewedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    proposal.reviewedAt = nowStamp();
     proposal.reviewedBy = `${session.name} (Reviewer Keamanan/Kepatuhan)`;
-    proposal.reviewNote = String(reviewNote || (decision === 'APPROVE' ? 'Memenuhi syarat ISO 27001 & UU PDP' : 'Perlu kajian ulang risiko'));
+    proposal.reviewNote = str(reviewNote, decision === 'APPROVE' ? 'Memenuhi syarat ISO 27001 & UU PDP' : 'Perlu kajian ulang risiko');
 
     if (decision === 'REJECT') {
       proposal.status = 'REJECTED';
@@ -2110,7 +2364,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
         title: val.title || proposal.title,
         category: val.category || 'Pengumuman Resmi',
         priority: 'Penting',
-        publishedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        publishedAt: nowStamp(16),
         author: proposal.proposedBy,
         summary: val.summary || proposal.justification
       });
@@ -2145,11 +2399,12 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       announcements: portalAnnouncements,
       changelog: governanceChangelog
     });
-  });
+  }));
 
-  app.post('/api/gateway/admin/integrations/test', (req, res) => {
-    const session = requireGatewaySession(req, res);
+  app.post('/api/gateway/admin/integrations/test', asyncRoute(async (req, res) => {
+    const session = await requireGatewaySession(req, res);
     if (!session) return;
+    if (!requireAdminArea(session, req, res)) return;
 
     const { integrationId } = req.body || {};
     const target = integrationHealthStore.find((i) => i.id === integrationId);
@@ -2157,7 +2412,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
 
     target.latencyMs = Math.max(14, Math.round(target.latencyMs * 0.75));
     target.queueDepth = 0;
-    target.lastSync = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    target.lastSync = nowStamp();
 
     appendSiemLog({
       actorNip: session.nip,
@@ -2171,7 +2426,7 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
     });
 
     res.json({ success: true, integration: target });
-  });
+  }));
 
   // =========================================================================
   // 8. PUBLIC LANDING PAGE ANALYTICS (/app-karyawan)
@@ -2207,8 +2462,8 @@ export function registerEmployeePortalGateway(app: express.Application, deps: Ga
       landingAnalyticsStore.recentEvents.unshift({
         timestamp: new Date().toISOString().replace('T', ' ').slice(11, 16),
         device: cleanDevice,
-        cta: String(cta),
-        utmSource: cleanUtm
+        cta: String(cta).slice(0, 50),
+        utmSource: cleanUtm.slice(0, 50)
       });
       if (landingAnalyticsStore.recentEvents.length > 10) {
         landingAnalyticsStore.recentEvents.pop();
