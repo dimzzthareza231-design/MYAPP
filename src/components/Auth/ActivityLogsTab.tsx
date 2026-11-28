@@ -14,7 +14,6 @@ import {
   exportLogsToCsv, 
   simulateActivityEvent 
 } from '../../lib/activityLogger';
-import { isFirebaseConfigured } from '../../lib/firebase';
 import { Modal } from '../Modal';
 import toast from 'react-hot-toast';
 

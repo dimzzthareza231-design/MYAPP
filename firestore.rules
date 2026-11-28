@@ -256,16 +256,18 @@ service cloud.firestore {
 
     // --- 2. PASIEN COLLECTION ---
     match /pasien/{pasienId} {
-      allow get: if isValidId(pasienId) && (isClinicalOrAdmin() || (isVerifiedUser() && existing().no_rm is string));
-      allow list: if isVerifiedUser() && resource.data.no_rm is string;
+      // PHI: clinical roles + admin only (not every verified user).
+      allow get: if isValidId(pasienId) && isClinicalOrAdmin();
+      allow list: if isClinicalOrAdmin();
       allow create, update: if isValidId(pasienId) && isClinicalOrAdmin() && isValidPasien(incoming());
       allow delete: if isValidId(pasienId) && isAdmin();
     }
 
     // --- 3. KUNJUNGAN COLLECTION ---
     match /kunjungan/{kunjunganId} {
-      allow get: if isValidId(kunjunganId) && isVerifiedUser();
-      allow list: if isVerifiedUser() && resource.data.pasien_id is string;
+      // PHI: clinical roles + admin only (not every verified user).
+      allow get: if isValidId(kunjunganId) && isClinicalOrAdmin();
+      allow list: if isClinicalOrAdmin();
       allow create, update: if isValidId(kunjunganId) && isClinicalOrAdmin() && isValidKunjungan(incoming());
       allow delete: if isValidId(kunjunganId) && isAdmin();
     }

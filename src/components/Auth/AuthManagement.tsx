@@ -428,7 +428,7 @@ function RolesTab() {
 }
 
 function SessionsTab() {
-  const { currentUser, firebaseUser, logout } = useAuth();
+  const { currentUser, logout } = useAuth();
   const currentRole = currentUser ? getRoleById(currentUser.roleId) : null;
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'Browser Client';
 
@@ -493,7 +493,7 @@ function SessionsTab() {
                       {currentUser?.isGoogleAuth ? 'Google OAuth 2.0 (Firebase)' : 'Kredensial Petugas (DB Internal)'}
                     </p>
                     <p className="text-[11px] text-slate-400">
-                      UID: {currentUser?.id || firebaseUser?.uid || 'local-session'}
+                      UID: {currentUser?.id || 'local-session'}
                     </p>
                   </div>
                 </td>

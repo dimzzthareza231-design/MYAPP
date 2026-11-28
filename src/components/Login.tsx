@@ -22,7 +22,6 @@ import toast from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { useHospital } from '../contexts/HospitalContext';
-import { isFirebaseConfigured, isLocalAuthMode } from '../lib/firebase';
 import { BrandLogo } from './Common/BrandLogo';
 
 const ROLE_CARDS: {
@@ -95,7 +94,6 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
   const {
     login,
     requestPasswordReset,
-    signInWithGoogle,
     loading,
     mfaFlow,
     completeMfa,
@@ -157,22 +155,6 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
         : 'Login Google gagal atau belum diaktifkan.');
     window.history.replaceState(null, '', window.location.pathname);
   }, []);
-
-  const handleGoogleSignIn = async () => {
-    setErrorMessage('');
-    setIsLoading(true);
-    try {
-      const result = await signInWithGoogle();
-      if (result.success) {
-        toast.success(result.message);
-      } else if (!result.isCancelled) {
-        setErrorMessage(result.message);
-        toast.error(result.message);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleMfaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -376,19 +358,19 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="login-username" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
-              {isLocalAuthMode ? 'Username / Email Pegawai' : 'Email Pegawai'}
+              Username / Email Pegawai
             </label>
             <div className="relative">
               <UserIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
               ref={usernameInputRef}
               id="login-username"
-              type={isLocalAuthMode ? 'text' : 'email'}
+              type="text"
               autoComplete="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full p-3 pl-10 border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-              placeholder={isLocalAuthMode ? 'username atau email staf' : 'nama@klinik.id'}
+              placeholder="username atau email staf"
                 required
               />
             </div>
@@ -396,7 +378,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
 
           <div>
             <label htmlFor="login-password" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider">
-              {isLocalAuthMode ? 'Kata Sandi Lokal' : 'Kata Sandi Akun Staf'}
+              Kata Sandi Lokal
             </label>
             <div className="relative">
               <Lock className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -441,53 +423,14 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
             disabled={isLoading || loading}
             className="mt-3 w-full text-sm font-semibold text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200 disabled:opacity-50"
           >
-            {isLocalAuthMode ? 'Lupa sandi? Hubungi administrator' : 'Lupa kata sandi? Kirim tautan reset'}
+            Lupa sandi? Hubungi administrator
           </button>
 
-          {isFirebaseConfigured && !isLocalAuthMode && <div className="relative my-5">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200 dark:border-slate-700" />
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="bg-white px-2.5 font-medium text-slate-400 dark:bg-slate-900">
-                atau gunakan akun Google institusi
-              </span>
-            </div>
-          </div>}
-
-          {isFirebaseConfigured && !isLocalAuthMode && <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={isLoading || loading}
-            className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                fill="#4285F4"
-                d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
-              />
-            </svg>
-            Masuk dengan Akun Google
-          </button>}
           </>
         )}
 
         <p className="mt-5 text-center text-xs text-slate-500 dark:text-slate-400">
-          {isLocalAuthMode
-            ? 'Akun dan sesi diverifikasi oleh server lokal. Kata sandi dikelola administrator fasilitas kesehatan.'
-            : 'Akses memerlukan akun Firebase aktif dan verifikasi dua langkah melalui aplikasi autentikator.'}
+          Akun dan sesi diverifikasi oleh server lokal. Kata sandi dikelola administrator fasilitas kesehatan.
         </p>
 
         <p className="text-center text-[10px] text-slate-500 dark:text-slate-400 mt-5 font-semibold tracking-widest uppercase">
@@ -546,7 +489,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
                     aria-pressed={isSelected}
                     onClick={() => {
                       setSelectedRoleId(item.roleId);
-                      if (isLocalAuthMode && import.meta.env.DEV) setUsername(item.loginIdentifier);
+                      if (import.meta.env.DEV) setUsername(item.loginIdentifier);
                       usernameInputRef.current?.focus();
                     }}
                     className={`group flex items-start gap-3 rounded-xl border p-3.5 text-left transition-all ${
@@ -578,7 +521,7 @@ export function Login({ embedded = false }: { embedded?: boolean }) {
               <ShieldCheck className="mr-1.5 inline h-4 w-4 align-text-bottom" />
               {selectedRoleId
                 ? `Peran dipilih: ${ROLE_CARDS.find((role) => role.roleId === selectedRoleId)?.title}. Hak akses akhir tetap mengikuti profil akun yang diverifikasi server.`
-                : `Kartu peran hanya membantu memilih konteks kerja. Kartu ini tidak melewati login atau memberikan akses tanpa akun staf aktif${isLocalAuthMode ? '.' : ' dan verifikasi MFA.'}`}
+                : `Kartu peran hanya membantu memilih konteks kerja. Kartu ini tidak melewati login atau memberikan akses tanpa akun staf aktif.`}
             </div>
           </section>}
         </div>

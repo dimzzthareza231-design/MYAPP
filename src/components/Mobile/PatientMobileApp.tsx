@@ -31,8 +31,8 @@ import {
   Sparkles
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuth } from '../../contexts/AuthContext';
-import { auth } from '../../lib/firebase';
+import { signInWithPopup, signOut } from 'firebase/auth';
+import { auth, googleProvider, isFirebaseConfigured } from '../../lib/firebase';
 import {
   checkFcmCapability,
   getCachedFcmPrefs,
@@ -98,7 +98,6 @@ const PATIENT_CACHE_KEY = 'myitaru_patient_cached_dossier';
 
 export const PatientMobileApp: React.FC = () => {
   const navigate = useNavigate();
-  const { signInWithGoogle, logout: authLogout, loading: authLoading } = useAuth();
 
   const poliklinikList = useMemo(() => getPublicPoliklinik(), []);
   const fallbackDoctors = useMemo(() => getPublicDoctors(), []);
@@ -600,17 +599,21 @@ export const PatientMobileApp: React.FC = () => {
   const handleGooglePatientLogin = async () => {
     setIsVerifying(true);
     try {
-      const authRes = await signInWithGoogle();
-      if (!authRes.success) {
-        if (authRes.isCancelled) {
-          toast(authRes.message, { icon: 'ℹ️' });
-        } else {
-          toast.error(authRes.message);
-        }
+      // Patient portal only: staff never sign in through Firebase.
+      if (!isFirebaseConfigured) {
+        toast.error('Login Google belum dikonfigurasi.');
         return;
       }
-
-      const fUser = auth?.currentUser;
+      let fUser;
+      try {
+        fUser = (await signInWithPopup(auth, googleProvider)).user;
+      } catch (error: any) {
+        if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+          toast('Login dengan Google dibatalkan.', { icon: 'ℹ️' });
+          return;
+        }
+        throw error;
+      }
       const email = fUser?.email;
       if (!email) {
         toast.error('Email akun Google tidak ditemukan.');
@@ -696,7 +699,7 @@ export const PatientMobileApp: React.FC = () => {
     try {
       sessionStorage.removeItem(PATIENT_TOKEN_KEY);
       localStorage.removeItem(PATIENT_CACHE_KEY);
-      await authLogout();
+      if (auth?.currentUser) await signOut(auth);
     } catch {}
     toast.success('Anda telah keluar dari sesi pasien.');
   };
@@ -957,7 +960,7 @@ export const PatientMobileApp: React.FC = () => {
                     </p>
                     <button
                       type="button"
-                      disabled={isVerifying || authLoading}
+                      disabled={isVerifying}
                       onClick={handleGooglePatientLogin}
                       className="w-full py-3.5 px-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-bold text-sm shadow-xs flex items-center justify-center gap-3 cursor-pointer min-h-[48px]"
                     >
