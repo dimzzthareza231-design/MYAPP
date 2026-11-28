@@ -8,23 +8,23 @@
     "url": "https://github.com/dimzzthareza231-design/MYAPP.git"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "scripts": {
     "dev": "tsx server.ts",
     "check:deploy": "node scripts/check-deployment.mjs",
-    "build": "node scripts/check-deployment.mjs && vite build && vite build -c vite.public.config.ts && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "node scripts/check-deployment.mjs && vite build --outDir dist && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "NODE_ENV=production node dist/server.cjs",
     "preview": "vite preview",
     "build:core": "vite build",
     "build:public": "vite build -c vite.public.config.ts",
     "vercel-build:core": "vite build",
-    "vercel-build:public": "vite build -c vite.public.config.ts && node -e \"require('fs').copyFileSync('dist/public/public.html','dist/public/index.html')\"",
+    "vercel-build:public": "vite build -c vite.public.config.ts",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "cf:build": "vite build --mode cloudflare && vite build -c vite.public.config.ts --mode cloudflare && node -e \"require('fs').copyFileSync('dist/public/public.html','dist/public/index.html')\"",
+    "cf:build": "vite build --mode cloudflare && vite build -c vite.public.config.ts --mode cloudflare",
     "cf:migrate:local": "wrangler d1 migrations apply myitaru-core --local && wrangler d1 migrations apply myitaru-hr --local && wrangler d1 migrations apply myitaru-public --local",
     "cf:migrate": "wrangler d1 migrations apply myitaru-core --remote && wrangler d1 migrations apply myitaru-hr --remote && wrangler d1 migrations apply myitaru-public --remote",
     "cf:dev:public": "wrangler dev --env public --port 8787",
