@@ -85,8 +85,10 @@ saling terkait; A membuat keterkaitan itu gagal di-build, bukan sekadar peringat
 │  └─ inti/                # aplikasi inti
 │     └─ (struktur sama, name: @myitaru/inti; isi hampir semua src/ lama)
 ├─ packages/
-│  └─ shared/              # name: @myitaru/shared
-│     └─ src/ (ui/, lib/, utils/, types/)
+│  ├─ shared/              # name: @myitaru/shared
+│  │  └─ src/ (ui/, lib/, utils/, types/)
+│  └─ katalog/             # name: @myitaru/katalog — data master statis
+│     └─ src/ (poliklinik, dokter, divisi karyawan, governance)
 ├─ scripts/check-boundaries.mjs
 └─ database/               # tidak berubah
 ```
@@ -134,11 +136,23 @@ yang tetap untuk `server.ts`).
 - `ui/ErrorBoundary`, `ui/pwa/*` (`OfflineIndicator`, `PWAInstallButton`) dan
   `hooks/usePWAInstall`.
 - `utils/storage`.
-- `lib/firebaseClient`: inisialisasi Firebase dari variabel `VITE_FIREBASE_*`
-  (tidak lagi meng-import `firebase-applet-config.json`). Tiap app memanggilnya
-  hanya bila perlu.
+- `lib/firebaseClient`: inisialisasi Firebase. Di langkah 1 **tetap membaca
+  `firebase-applet-config.json`** (termasuk `firestoreDatabaseId`) seperti sekarang,
+  agar login Google dan FCM tidak putus. Pindah ke `VITE_FIREBASE_*` dan pemisahan
+  project Firebase adalah langkah berikutnya. Tiap app memanggilnya hanya bila perlu.
+  *(Keputusan Claude, dari review.)*
 - `brand`: identitas klinik statis (nama, logo, alamat, kontak) + URL antar-app.
 - `types` yang dipakai lintas app.
+
+**packages/katalog** *(keputusan Claude, dari review)*
+
+- Data master statis yang dipakai server dan app: `MASTER_POLIKLINIK`, `SEMUA_DOKTER`
+  (dipisah dari generator pasien di `seedData`), isi `employeePortalCatalog`
+  (`HOSPITAL_DIVISIONS`, `GOVERNANCE_FRAMEWORKS`).
+- Dipakai oleh `src/server/*`, publik, karyawan, dan inti. Satu sumber, sehingga ID
+  dokter/poli di app publik sama dengan yang diperiksa server saat booking.
+- Tanpa React, tanpa data pasien. Generator pasien tiruan tetap di `apps/inti`.
+- `src/server/*` meng-import `@myitaru/katalog`, tidak pernah `apps/*`.
 
 Aturan: shared **tidak boleh** meng-import apa pun dari `apps/*`, dan tidak boleh berisi
 context React yang menyimpan data domain (pasien, kunjungan, pegawai).
@@ -149,6 +163,20 @@ Tiap app tahu URL app lain hanya lewat env:
 `VITE_PUBLIK_URL`, `VITE_KARYAWAN_URL`, `VITE_INTI_URL`. Default dev:
 `http://localhost:5173`, `:5174`, `:5175`. Helper di `@myitaru/shared/brand`.
 Contoh: tombol "Login Staf" di publik → `${VITE_INTI_URL}/staff/login`.
+
+### 5.3a Rute lama dan PWA *(keputusan Claude, dari review)*
+
+- App publik memuat stub redirect untuk rute lama: `/portal-karyawan*`, `/app`,
+  `/app-karyawan`, `/karyawan/mobile*` → `${VITE_KARYAWAN_URL}` (path setara), dan
+  `/staff/login`, `/dashboard`, `/modul/*` → `${VITE_INTI_URL}` (path sama). Query string
+  dipertahankan. QR lama dan tautan hardcode tetap jalan.
+- Tautan hardcode (`ClinicBrand`: `https://myitaru.ai.studio/portal-karyawan`, QR di
+  `EmployeeAppLanding`) diganti dengan helper URL dari 5.3.
+- PWA:
+  - publik: manifest "App Pasien", `start_url: /mobile`, scope `/`, cache hanya bundle
+    publik + runtime cache `/api/public`. `firebase-messaging-sw.js` ikut ke publik.
+  - karyawan: manifest sendiri, perilaku install dan sinkron absensi offline dipertahankan.
+  - inti: tanpa service worker.
 
 ### 5.4 Dev dan build
 
