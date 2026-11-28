@@ -114,8 +114,7 @@ pertama. Bila gagal, `staf.myitaru.my.id` dipakai sebagai domain utama dan
 │  └─ inti/                # @myitaru/inti (struktur sama)
 ├─ packages/
 │  ├─ shared/              # @myitaru/shared: ui, lib, utils, types (frontend)
-│  ├─ katalog/             # @myitaru/katalog: data master statis
-│  └─ api-kit/             # @myitaru/api-kit: helper Express/Worker bersama
+│  └─ katalog/             # @myitaru/katalog: data master statis
 ├─ scripts/check-boundaries.mjs
 ├─ database/               # DDL MySQL lama, referensi saja, tidak berubah
 └─ docs/
