@@ -1,8 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, doc } from 'firebase/firestore';
-import { auth, db, isFirebaseConfigured } from '../lib/firebase';
-import { PASIEN, MASTER_POLIKLINIK, SEMUA_DOKTER, SEMUA_PERAWAT } from "../data/seedData";
+import { MASTER_POLIKLINIK, SEMUA_DOKTER, SEMUA_PERAWAT } from "../data/seedData";
+import { useAuth } from './AuthContext';
 import { Pasien, Kunjungan, MasterDokter, MasterPoli, MasterPenjamin, MasterPerawat, BantuanArtikel, User } from '../types';
 import { HospitalInfo, DEFAULT_HOSPITAL_INFO } from '../types/document';
 import { storage } from '../utils/storage';
@@ -20,7 +18,13 @@ import {
   savePerawatCloud,
   batchSeedPerawatCloud,
   saveHospitalSettingsCloud,
-  saveSystemDataCloud
+  saveSystemDataCloud,
+  SystemDataConflictError,
+  ApiError,
+  fetchRecords,
+  getSystemDataCloud,
+  startPolling,
+  RecordCollection
 } from '../lib/firestoreService';
 
 interface HospitalContextType {
@@ -104,35 +108,6 @@ const dummyPenjamin: MasterPenjamin[] = [
   { id: 'PJ-07', nama: 'PT PLN Indonesia', tipe: 'Perusahaan' },
 ];
 
-const today = new Date().toISOString().split('T')[0];
-
-const dummyKunjungan: Kunjungan[] = [];
-MASTER_POLI_LIST.forEach((targetPoli, pIdx) => {
-  const targetDokter = MASTER_DOKTER_LIST.find(d => d.poli_id === targetPoli.id) || MASTER_DOKTER_LIST[pIdx % MASTER_DOKTER_LIST.length] || MASTER_DOKTER_LIST[0];
-  const queueCode = targetPoli.kode || targetPoli.nama.substring(0, 3).toUpperCase();
-  const statuses: ('Menunggu' | 'Panggil' | 'Diperiksa' | 'Selesai')[] = ['Menunggu', 'Menunggu', 'Panggil', 'Diperiksa', 'Selesai'];
-  
-  for (let q = 0; q < 5; q++) {
-    const patientIndex = (pIdx * 4 + q) % PASIEN.length;
-    const p = PASIEN[patientIndex];
-    const penjaminItem = dummyPenjamin[(pIdx + q) % dummyPenjamin.length];
-    const queueNum = String(q + 1).padStart(3, '0');
-
-    dummyKunjungan.push({
-      id: `K-${targetPoli.kode || 'POL'}-${queueNum}`,
-      pasien_id: String(p.id),
-      tanggal: today,
-      poli_id: targetPoli.id,
-      dokter_id: targetDokter.id,
-      penjamin_id: penjaminItem.id,
-      status: statuses[q % statuses.length],
-      tipe: targetPoli.kode === 'IGD' ? ('IGD' as const) : ('Rawat Jalan' as const),
-      nomor_antrian: `${queueCode}-${queueNum}`,
-      keluhan_utama: p.keluhan_utama || `Konsultasi & pemeriksaan klinis di ${targetPoli.nama}`
-    });
-  }
-});
-
 const dummyArtikel: BantuanArtikel[] = [
   { id: 'H1', kategori: 'Poliklinik', judul: 'Panduan Penggunaan AI Scribe Talk-to-Text', konten: 'Tekan tombol "Mulai Rekaman" pada form SOAP, dokter berbicara secara alami, dan AI otomatis mengekstrak Subjective, Objective, Diagnosis ICD-10, dan Resep Obat.', tags: ['talk-to-text', 'ai', 'soap', 'poliklinik'] },
   { id: 'H2', kategori: 'Pendaftaran', judul: 'Cara Mendaftarkan Pasien ke Poliklinik Spesialis', konten: 'Pilih poli tujuan spesialis yang dituju (misalnya Obgyn, Jantung, Anak, Saraf, Bedah, MCU) lalu pilih dokter penanggung jawab spesialis.', tags: ['pendaftaran', 'poli', 'spesialis'] },
@@ -202,14 +177,22 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
     const updated = { ...hospitalSettings, ...settings };
     setHospitalSettings(updated);
     storage.set('hospital_settings', updated);
-    await saveHospitalSettingsCloud(updated);
+    try {
+      await saveHospitalSettingsCloud(updated);
+    } catch (err) {
+      if (err instanceof SystemDataConflictError) {
+        const latest = normalizeClinicSettings(err.latestValue);
+        setHospitalSettings(latest);
+        storage.set('hospital_settings', latest);
+      }
+      throw err;
+    }
   };
 
   // 1. PASIEN STATE
   const [pasien, setPasien] = useState<Pasien[]>(() => {
     const saved = storage.get('hospital_pasien', null);
-    if (Array.isArray(saved) && saved.length > 0) return saved;
-    return PASIEN as any;
+    return Array.isArray(saved) ? saved : [];
   });
 
   // 2. DOKTER STATE
@@ -235,8 +218,7 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
   // 6. KUNJUNGAN STATE
   const [kunjungan, setKunjungan] = useState<Kunjungan[]>(() => {
     const saved = storage.get('hospital_kunjungan', null);
-    if (Array.isArray(saved) && saved.length >= 24) return saved;
-    return dummyKunjungan;
+    return Array.isArray(saved) ? saved : [];
   });
 
   // 7. DARK MODE
@@ -279,146 +261,81 @@ export function HospitalProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('simrs-interline-sync', handleInterlineSync);
   }, []);
 
-  // Track Firebase Auth UID so Firestore listeners only attach when authenticated
-  const [firebaseUid, setFirebaseUid] = useState<string | null>(() => auth?.currentUser?.uid || null);
+  // Pull core collections from the Core REST API while a staff session is active.
+  const { currentUser } = useAuth();
+  const sessionUserId = currentUser?.id || null;
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !auth) return;
-    const unsub = onAuthStateChanged(auth, (fUser) => {
-      setFirebaseUid(fUser?.uid || null);
-    });
-    return () => unsub();
-  }, []);
+    if (!sessionUserId) return;
+    const since: Partial<Record<RecordCollection, string>> = {};
+    const forbidden = new Set<string>();
+    let stopped = false;
 
-  // Real-time Firestore listeners for core hospital collections (authenticated Firebase sessions only)
-  useEffect(() => {
-    if (!isFirebaseConfigured || !db || !firebaseUid) return;
-    let seededPasien = false;
-    let seededKunjungan = false;
-    let seededDokter = false;
-    let seededPerawat = false;
-
-    // 1. Listen to Pasien collection
-    const unsubPasien = onSnapshot(collection(db, 'pasien'), (snapshot) => {
-      if (!snapshot.empty) {
-        const list: Pasien[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          list.push({
-            id: docSnap.id,
-            no_rm: data.no_rm || '',
-            nik: data.nik || '',
-            nama: data.nama || '',
-            tanggal_lahir: data.tanggal_lahir || '',
-            tgl_lahir: data.tgl_lahir || data.tanggal_lahir || '',
-            jenis_kelamin: data.jenis_kelamin || 'L',
-            alamat: data.alamat || '',
-            telepon: data.telepon || data.no_hp || '',
-            no_hp: data.no_hp || data.telepon || '',
-            penjamin: data.penjamin || 'Umum',
-            golongan_darah: data.golongan_darah || 'O',
-            status: data.status || 'Aktif',
-            keluhan_utama: data.keluhan_utama || '',
-            diagnosa_primer: data.diagnosa_primer || '',
-            resume_medis: data.resume_medis || undefined
-          });
+    const pull = async <T extends { id: string | number }>(
+      col: RecordCollection,
+      setter: React.Dispatch<React.SetStateAction<T[]>>,
+      cacheKey: string
+    ) => {
+      if (forbidden.has(col)) return;
+      try {
+        const cursor = since[col];
+        const rows = await fetchRecords<T & { updated_at?: string; updatedAt?: string }>(col, cursor);
+        if (stopped) return;
+        const newest = rows.reduce<string | undefined>((max, r) => {
+          const ts = r.updated_at || r.updatedAt;
+          return ts && (!max || ts > max) ? ts : max;
+        }, cursor);
+        if (newest) since[col] = newest;
+        if (cursor && rows.length === 0) return;
+        // shortcut: ?since only returns upserts, so deletions show up after a reload; add tombstones if deletes become common.
+        setter(prev => {
+          let next: T[];
+          if (!cursor) {
+            next = rows;
+          } else {
+            const byId = new Map(prev.map(p => [String(p.id), p]));
+            rows.forEach(r => byId.set(String(r.id), r));
+            next = Array.from(byId.values());
+          }
+          storage.set(cacheKey, next);
+          return next;
         });
-        setPasien(list);
-        storage.set('hospital_pasien', list);
-      } else if (!seededPasien) {
-        // If Firestore is fresh/empty, automatically seed the 100+ master patients to Firestore
-        seededPasien = true;
-        batchSeedPasienCloud(PASIEN as any);
+      } catch (err) {
+        // Roles without read access (e.g. pasien for non-clinical staff) stop polling that collection.
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) forbidden.add(col);
+        else console.warn(`[Sync] ${col} pull failed:`, err);
       }
-    }, (error) => {
-      console.warn('Firestore Pasien sync notice:', error.message);
-    });
+    };
 
-    // 2. Listen to Kunjungan collection
-    const unsubKunjungan = onSnapshot(collection(db, 'kunjungan'), (snapshot) => {
-      if (!snapshot.empty) {
-        const list: Kunjungan[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          list.push({
-            id: docSnap.id,
-            pasien_id: data.pasien_id || '',
-            tanggal: data.tanggal || today,
-            poli_id: data.poli_id || 'POL-01',
-            dokter_id: data.dokter_id || 'D-1',
-            penjamin_id: data.penjamin_id || 'PJ-01',
-            status: data.status || 'Menunggu',
-            tipe: data.tipe || 'Rawat Jalan',
-            nomor_antrian: data.nomor_antrian || 'UMM-001',
-            keluhan_utama: data.keluhan_utama || ''
-          });
-        });
-        setKunjungan(list);
-        storage.set('hospital_kunjungan', list);
-      } else if (!seededKunjungan) {
-        seededKunjungan = true;
-        batchSeedKunjunganCloud(dummyKunjungan);
-      }
-    }, (error) => {
-      console.warn('Firestore Kunjungan sync notice:', error.message);
-    });
-
-    // 3. Listen to Dokter collection
-    const unsubDokter = onSnapshot(collection(db, 'dokter'), (snapshot) => {
-      if (!snapshot.empty) {
-        const list: MasterDokter[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push(docSnap.data() as MasterDokter);
-        });
-        setDokter(list);
-        storage.set('hospital_dokter', list);
-      } else if (!seededDokter) {
-        seededDokter = true;
-        batchSeedDokterCloud(MASTER_DOKTER_LIST);
-      }
-    }, (error) => {
-      console.warn('Firestore Dokter sync notice:', error.message);
-    });
-
-    // 4. Listen to Perawat collection
-    const unsubPerawat = onSnapshot(collection(db, 'perawat'), (snapshot) => {
-      if (!snapshot.empty) {
-        const list: MasterPerawat[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push(docSnap.data() as MasterPerawat);
-        });
-        setPerawat(list);
-        storage.set('hospital_perawat', list);
-      } else if (!seededPerawat) {
-        seededPerawat = true;
-        batchSeedPerawatCloud(MASTER_PERAWAT_LIST);
-      }
-    }, (error) => {
-      console.warn('Firestore Perawat sync notice:', error.message);
-    });
-
-    // 5. Listen to Hospital Settings
-    const unsubSettings = onSnapshot(doc(db, 'hospital_settings', 'main'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
+    const pullSettings = async () => {
+      try {
+        const value = await getSystemDataCloud('hospital_settings');
+        if (stopped || !value) return;
         setHospitalSettings(prev => {
-          const merged = normalizeClinicSettings({ ...prev, ...data });
+          const merged = normalizeClinicSettings({ ...prev, ...value });
           storage.set('hospital_settings', merged);
           return merged;
         });
+      } catch (err) {
+        console.warn('[Sync] hospital_settings pull failed:', err);
       }
-    }, (error) => {
-      console.warn('Firestore Settings sync notice:', error.message);
+    };
+
+    const stopPolling = startPolling(async () => {
+      await Promise.all([
+        pull<Pasien>('pasien', setPasien, 'hospital_pasien'),
+        pull<Kunjungan>('kunjungan', setKunjungan, 'hospital_kunjungan'),
+        pull<MasterDokter>('dokter', setDokter, 'hospital_dokter'),
+        pull<MasterPerawat>('perawat', setPerawat, 'hospital_perawat'),
+        pullSettings()
+      ]);
     });
 
     return () => {
-      unsubPasien();
-      unsubKunjungan();
-      unsubDokter();
-      unsubPerawat();
-      unsubSettings();
+      stopped = true;
+      stopPolling();
     };
-  }, [firebaseUid]);
+  }, [sessionUserId]);
 
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 

@@ -1,6 +1,4 @@
-import { collection, doc, setDoc, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
-import { db, isFirebaseConfigured, auth } from './firebase';
+// Activity log: kept in memory for the UI and appended to the server audit log via the Core REST API.
 
 export type ActivityCategory = 'auth' | 'database' | 'security' | 'ai';
 export type ActivityStatus = 'SUCCESS' | 'FAILED' | 'DENIED' | 'WARNING';
@@ -65,144 +63,55 @@ function hashString(str: string): number {
   return hash;
 }
 
-// Generate realistic default logs for immediate inspection
-function getInitialSeedLogs(): ActivityLogEntry[] {
-  const now = Date.now();
-  return [
-    {
-      id: 'log_seed_1',
-      timestamp: new Date(now - 1000 * 60 * 3).toISOString(),
-      category: 'auth',
-      action: 'FIREBASE_AUTH_VERIFY',
-      target: 'firebase.auth.currentUser',
-      status: 'SUCCESS',
-      user: {
-        email: auth?.currentUser?.email || 'dimzzthareza231@gmail.com',
-        nama: auth?.currentUser?.displayName || 'Super Admin (Owner)',
-        roleId: 'super_admin',
-        authProvider: 'google.com'
-      },
-      details: {
-        message: 'Firebase Authentication session verified and token validated.',
-        operationType: 'AUTH',
-        latencyMs: 42,
-        ipAddress: '192.168.1.101',
-        userAgent: 'Chrome/126.0 (Macintosh; Intel Mac OS X)'
-      }
-    },
-    {
-      id: 'log_seed_2',
-      timestamp: new Date(now - 1000 * 60 * 2).toISOString(),
-      category: 'database',
-      action: 'FIRESTORE_SNAPSHOT_LISTEN',
-      target: 'firestore/pasien',
-      status: 'SUCCESS',
-      user: {
-        email: auth?.currentUser?.email || 'dimzzthareza231@gmail.com',
-        nama: 'Super Admin',
-        roleId: 'super_admin'
-      },
-      details: {
-        message: 'Real-time WebSocket snapshot listener attached to /pasien collection.',
-        collectionName: 'pasien',
-        operationType: 'SUBSCRIBE',
-        latencyMs: 18,
-        ipAddress: '192.168.1.101'
-      }
-    },
-    {
-      id: 'log_seed_3',
-      timestamp: new Date(now - 1000 * 45).toISOString(),
-      category: 'database',
-      action: 'FIRESTORE_HEALTH_PING',
-      target: 'firestore/test/connection',
-      status: 'SUCCESS',
-      user: {
-        email: 'system@myitaru.internal',
-        nama: 'Firebase Health Probe',
-        roleId: 'system'
-      },
-      details: {
-        message: 'Cloud Firestore round-trip connection validated successfully.',
-        collectionName: 'test',
-        docId: 'connection',
-        operationType: 'READ',
-        latencyMs: 25,
-        ipAddress: '127.0.0.1'
-      }
-    }
-  ];
-}
+// Simulated demo events stay in the local buffer only; they must never reach the real audit log.
+let simulating = false;
 
-// Initialize initial seed
-if (localLogsBuffer.length === 0) {
-  localLogsBuffer.push(...getInitialSeedLogs());
-}
-
-// Real-time Firestore synchronization listener
-let firestoreUnsubscribe: (() => void) | null = null;
-let authWatchInitialized = false;
-
-function stopFirestoreListener() {
-  if (firestoreUnsubscribe) {
-    firestoreUnsubscribe();
-    firestoreUnsubscribe = null;
-  }
-}
-
-function initFirestoreListener() {
-  if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
-  if (firestoreUnsubscribe) return;
-
+// Server copy of the audit log (admin only). Polled while someone is subscribed.
+async function pullServerLogs(): Promise<boolean> {
   try {
-    const q = query(collection(db, 'activity_logs'), orderBy('timestamp', 'desc'), limit(100));
-    firestoreUnsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const cloudLogs: ActivityLogEntry[] = [];
-        snapshot.forEach((docSnap) => {
-          cloudLogs.push(docSnap.data() as ActivityLogEntry);
-        });
-
-        if (cloudLogs.length > 0) {
-          const mergedMap = new Map<string, ActivityLogEntry>();
-          localLogsBuffer.forEach(l => mergedMap.set(l.id, l));
-          cloudLogs.forEach(l => mergedMap.set(l.id, l));
-
-          const sorted = Array.from(mergedMap.values()).sort(
-            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-          );
-
-          localLogsBuffer.length = 0;
-          localLogsBuffer.push(...sorted.slice(0, 200));
-          notifyListeners();
-        }
-      },
-      (error) => {
-        console.warn('[ActivityLogger] Firestore onSnapshot warning:', error.message);
-      }
+    const res = await fetch('/api/v1/activity-logs?limit=100', { credentials: 'include' });
+    if (res.status === 401 || res.status === 403) return false;
+    if (!res.ok) return true;
+    const cloudLogs = await res.json() as ActivityLogEntry[];
+    if (!Array.isArray(cloudLogs) || cloudLogs.length === 0) return true;
+    const mergedMap = new Map<string, ActivityLogEntry>();
+    localLogsBuffer.forEach(l => mergedMap.set(l.id, l));
+    cloudLogs.forEach(l => { if (l && l.id) mergedMap.set(l.id, l); });
+    const sorted = Array.from(mergedMap.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
+    localLogsBuffer.length = 0;
+    localLogsBuffer.push(...sorted.slice(0, 200));
+    notifyListeners();
   } catch (err) {
-    console.warn('[ActivityLogger] Listener init skipped:', err);
+    console.warn('[ActivityLogger] Server log fetch skipped:', err);
   }
+  return true;
 }
 
-// Watch Firebase Auth state before attaching cloud activity listener
-if (typeof window !== 'undefined' && isFirebaseConfigured && auth && !authWatchInitialized) {
-  authWatchInitialized = true;
-  onAuthStateChanged(auth, (fUser) => {
-    if (fUser) {
-      initFirestoreListener();
-    } else {
-      stopFirestoreListener();
-    }
-  });
+let serverPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function startServerPolling() {
+  if (serverPollTimer) return;
+  // shortcut: polling every 15s instead of server push; switch to SSE if the live audit view must be instant.
+  const tick = async () => {
+    if (document.hidden) return;
+    if (!(await pullServerLogs())) stopServerPolling();
+  };
+  serverPollTimer = setInterval(tick, 15000);
+  void tick();
+}
+
+function stopServerPolling() {
+  if (serverPollTimer) clearInterval(serverPollTimer);
+  serverPollTimer = null;
 }
 
 /**
  * Record a new Activity Log
  */
 export async function logActivity(entry: Omit<ActivityLogEntry, 'id' | 'timestamp'> & { timestamp?: string }): Promise<ActivityLogEntry> {
+  const persist = !simulating;
   const meta = getClientMeta();
   const id = 'act_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
   const fullEntry: ActivityLogEntry = {
@@ -213,11 +122,11 @@ export async function logActivity(entry: Omit<ActivityLogEntry, 'id' | 'timestam
     target: entry.target,
     status: entry.status,
     user: {
-      uid: entry.user?.uid || auth?.currentUser?.uid,
-      email: entry.user?.email || auth?.currentUser?.email || 'unauthenticated',
-      nama: entry.user?.nama || auth?.currentUser?.displayName || 'User',
+      uid: entry.user?.uid,
+      email: entry.user?.email || 'unauthenticated',
+      nama: entry.user?.nama || 'User',
       roleId: entry.user?.roleId || 'staff',
-      authProvider: entry.user?.authProvider || (auth?.currentUser ? 'firebase' : 'local')
+      authProvider: entry.user?.authProvider || 'local'
     },
     details: {
       ipAddress: meta.ipAddress,
@@ -233,22 +142,28 @@ export async function logActivity(entry: Omit<ActivityLogEntry, 'id' | 'timestam
   }
   notifyListeners();
 
-  // Asynchronously commit to Cloud Firestore only when Firebase Auth session is active
-  if (isFirebaseConfigured && db && auth?.currentUser) {
+  // Append to the server audit log (the server attributes it to the session user).
+  if (persist) {
     try {
       const sanitizedEntry: ActivityLogEntry = {
         ...fullEntry,
         user: {
-          uid: fullEntry.user.uid || auth.currentUser.uid,
+          uid: fullEntry.user.uid,
           email: (fullEntry.user.email || '').slice(0, 160),
           nama: (fullEntry.user.nama || '').slice(0, 120),
           roleId: (fullEntry.user.roleId || 'staff').slice(0, 40),
-          authProvider: (fullEntry.user.authProvider || 'firebase').slice(0, 40)
+          authProvider: (fullEntry.user.authProvider || 'local').slice(0, 40)
         }
       };
-      await setDoc(doc(db, 'activity_logs', fullEntry.id), sanitizedEntry);
+      const res = await fetch('/api/v1/activity-logs', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sanitizedEntry)
+      });
+      if (!res.ok && res.status !== 401) console.warn(`[ActivityLogger] Server persist failed (HTTP ${res.status}).`);
     } catch (err) {
-      console.warn('[ActivityLogger] Cloud persist skipped:', err);
+      console.warn('[ActivityLogger] Server persist skipped:', err);
     }
   }
 
@@ -272,7 +187,7 @@ export function logAuthAttempt(params: {
   return logActivity({
     category: 'auth',
     action: params.action,
-    target: 'firebase.auth',
+    target: 'auth.session',
     status: params.status,
     user: {
       email: params.email,
@@ -306,12 +221,10 @@ export function logDatabaseAccess(params: {
   return logActivity({
     category: 'database',
     action: params.action,
-    target: `firestore/${params.collectionName}${params.docId ? '/' + params.docId : ''}`,
+    target: `db/${params.collectionName}${params.docId ? '/' + params.docId : ''}`,
     status: params.status,
     user: {
-      uid: auth?.currentUser?.uid,
-      email: auth?.currentUser?.email,
-      nama: auth?.currentUser?.displayName || 'Active User'
+      nama: 'Active User'
     },
     details: {
       collectionName: params.collectionName,
@@ -344,9 +257,7 @@ export function logAIAttempt(params: {
     target: `gemini-4-hydrogen/${params.module}`,
     status: params.status,
     user: {
-      uid: auth?.currentUser?.uid,
-      email: auth?.currentUser?.email,
-      nama: params.userName || auth?.currentUser?.displayName || 'Clinical User',
+      nama: params.userName || 'Clinical User',
       roleId: params.userRole || 'dokter'
     },
     details: {
@@ -366,10 +277,11 @@ export function logAIAttempt(params: {
 export function subscribeActivityLogs(listener: LogListener): () => void {
   listeners.add(listener);
   listener([...localLogsBuffer]);
-  initFirestoreListener();
+  startServerPolling();
 
   return () => {
     listeners.delete(listener);
+    if (listeners.size === 0) stopServerPolling();
   };
 }
 
@@ -385,6 +297,15 @@ export function clearActivityLogs() {
  * Trigger simulated events for demo / real-time monitoring testing
  */
 export async function simulateActivityEvent(type: 'auth_success' | 'auth_failed' | 'db_read' | 'db_write' | 'security_alert') {
+  simulating = true;
+  try {
+    return simulateEvent(type);
+  } finally {
+    simulating = false;
+  }
+}
+
+function simulateEvent(type: 'auth_success' | 'auth_failed' | 'db_read' | 'db_write' | 'security_alert') {
   const start = performance.now();
 
   switch (type) {

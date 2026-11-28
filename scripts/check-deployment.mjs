@@ -53,7 +53,10 @@ const criticalFiles = [
   'index.html',
   'src/App.tsx',
   'src/main.tsx',
-  'Dockerfile'
+  'Dockerfile',
+  'wrangler.jsonc',
+  'worker/core.ts',
+  'worker/public.ts'
 ];
 
 logInfo('Verifying critical project files...');

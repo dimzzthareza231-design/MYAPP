@@ -6,75 +6,8 @@ import {
   type Messaging,
   type MessagePayload
 } from 'firebase/messaging';
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  query,
-  setDoc,
-  updateDoc,
-  where,
-  type Unsubscribe
-} from 'firebase/firestore';
-import type { UserInfo } from 'firebase/auth';
-import app, { auth, db, isFirebaseConfigured } from './firebase';
-
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write'
-}
-
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: Array<{
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }>;
-  };
-}
-
-export function handleFirestoreError(
-  error: unknown,
-  operationType: OperationType,
-  path: string | null
-): FirestoreErrorInfo {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth?.currentUser?.uid,
-      email: auth?.currentUser?.email,
-      emailVerified: auth?.currentUser?.emailVerified,
-      isAnonymous: auth?.currentUser?.isAnonymous,
-      tenantId: auth?.currentUser?.tenantId,
-      providerInfo:
-        auth?.currentUser?.providerData?.map((provider: UserInfo) => ({
-          providerId: provider.providerId,
-          displayName: provider.displayName,
-          email: provider.email,
-          photoUrl: provider.photoURL
-        })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('[Firestore Error]', JSON.stringify(errInfo));
-  return errInfo;
-}
+import app, { auth, isFirebaseConfigured } from './firebase';
+import { startPolling } from './firestoreService';
 
 export type NotificationType = 'queue_call' | 'lab_ready' | 'system';
 
@@ -116,11 +49,6 @@ function detectPlatform(): 'web' | 'pwa' | 'android' | 'ios' {
   if (/iphone|ipad|ipod/.test(ua)) return 'ios';
   if (/android/.test(ua)) return 'android';
   return 'web';
-}
-
-function buildSafeDocId(prefix: string, raw: string): string {
-  const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96);
-  return `${prefix}_${sanitized || 'default'}`;
 }
 
 export async function checkFcmCapability(): Promise<FcmCapabilityStatus> {
@@ -219,6 +147,7 @@ async function registerFcmServiceWorker(): Promise<ServiceWorkerRegistration | u
   }
 }
 
+// Name kept for callers; the token now goes to the Core REST API (PUT /api/v1/fcm-tokens).
 export async function syncFcmTokenToFirestore(params: {
   no_rm: string;
   token: string;
@@ -226,47 +155,24 @@ export async function syncFcmTokenToFirestore(params: {
   labAlertsEnabled: boolean;
   active?: boolean;
 }): Promise<void> {
-  const currentUser = auth?.currentUser;
-  if (!isFirebaseConfigured || !db || !currentUser || !currentUser.emailVerified) {
-    return;
-  }
-
-  const docId = buildSafeDocId(`fcm_${currentUser.uid.slice(0, 24)}`, params.no_rm);
-  const path = `fcm_tokens/${docId}`;
-  const docRef = doc(db, 'fcm_tokens', docId);
-  const nowIso = new Date().toISOString().slice(0, 64);
-
   try {
-    const existingSnap = await getDoc(docRef);
-    const platform = detectPlatform();
-    const userAgent = (typeof navigator !== 'undefined' ? navigator.userAgent : 'web').slice(0, 290);
-
-    if (existingSnap.exists()) {
-      await updateDoc(docRef, {
-        token: params.token.slice(0, 510),
-        platform,
-        userAgent,
-        queueAlertsEnabled: params.queueAlertsEnabled,
-        labAlertsEnabled: params.labAlertsEnabled,
-        active: params.active !== false,
-        updatedAt: nowIso
-      });
-    } else {
-      await setDoc(docRef, {
-        id: docId,
-        uid: currentUser.uid,
+    const res = await fetch('/api/v1/fcm-tokens', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         no_rm: params.no_rm.slice(0, 40),
         token: params.token.slice(0, 510),
-        platform,
-        userAgent,
+        platform: detectPlatform(),
+        userAgent: (typeof navigator !== 'undefined' ? navigator.userAgent : 'web').slice(0, 290),
         queueAlertsEnabled: params.queueAlertsEnabled,
         labAlertsEnabled: params.labAlertsEnabled,
-        active: params.active !== false,
-        updatedAt: nowIso
-      });
-    }
+        active: params.active !== false
+      })
+    });
+    if (!res.ok) console.warn(`[FCM] Token sync failed (HTTP ${res.status}).`);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('[FCM] Token sync skipped:', error);
   }
 }
 
@@ -358,8 +264,8 @@ export async function registerFcmForPatient(params: {
     console.warn('[FCM] Backend token sync skipped:', err);
   }
 
-  // Sync to Cloud Firestore when patient is signed in with Google Auth
-  await syncFcmTokenToFirestore({
+  // Sync to the core API when the patient is signed in with Google
+  if (auth?.currentUser?.emailVerified) await syncFcmTokenToFirestore({
     no_rm: params.no_rm,
     token: resolvedToken,
     queueAlertsEnabled: params.queueAlertsEnabled,
@@ -426,88 +332,94 @@ export async function subscribeForegroundFcm(
   return unsubscribe;
 }
 
+function toNotificationItem(data: any, recipientUid: string): PatientNotificationItem {
+  return {
+    id: String(data.id),
+    no_rm: String(data.no_rm || ''),
+    recipientUid: String(data.recipientUid || recipientUid),
+    type: (data.type as NotificationType) || 'system',
+    title: String(data.title || 'Notifikasi Klinik'),
+    body: String(data.body || ''),
+    poli: data.poli ? String(data.poli) : undefined,
+    nomor_antrian: data.nomor_antrian ? String(data.nomor_antrian) : undefined,
+    lab_order_id: data.lab_order_id ? String(data.lab_order_id) : undefined,
+    channel: data.channel || 'firestore_realtime',
+    read: Boolean(data.read),
+    createdAt: String(data.createdAt || new Date().toISOString())
+  };
+}
+
+// Name kept for callers; polls GET /api/v1/patient-notifications instead of a Firestore listener.
 export function subscribeFirestorePatientNotifications(
   recipientUid: string,
   onNotifications: (items: PatientNotificationItem[]) => void
-): Unsubscribe {
-  if (!isFirebaseConfigured || !db || !recipientUid) {
+): () => void {
+  if (!recipientUid) {
     return () => {};
   }
-  const q = query(
-    collection(db, 'patient_notifications'),
-    where('recipientUid', '==', recipientUid)
-  );
-
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const items: PatientNotificationItem[] = snapshot.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: String(data.id || d.id),
-          no_rm: String(data.no_rm || ''),
-          recipientUid: String(data.recipientUid || recipientUid),
-          type: (data.type as NotificationType) || 'system',
-          title: String(data.title || 'Notifikasi Klinik'),
-          body: String(data.body || ''),
-          poli: data.poli ? String(data.poli) : undefined,
-          nomor_antrian: data.nomor_antrian ? String(data.nomor_antrian) : undefined,
-          lab_order_id: data.lab_order_id ? String(data.lab_order_id) : undefined,
-          channel: data.channel || 'firestore_realtime',
-          read: Boolean(data.read),
-          createdAt: String(data.createdAt || new Date().toISOString())
-        };
-      });
-      items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      onNotifications(items);
-    },
-    (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'patient_notifications');
+  let stop: () => void = () => {};
+  stop = startPolling(async () => {
+    const res = await fetch(`/api/v1/patient-notifications?recipient=${encodeURIComponent(recipientUid)}`, {
+      credentials: 'include'
+    });
+    if (res.status === 401 || res.status === 403) {
+      stop();
+      return;
     }
-  );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
+    if (!Array.isArray(rows)) return;
+    const items = rows.filter((d: any) => d && d.id).map((d: any) => toNotificationItem(d, recipientUid));
+    items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    onNotifications(items);
+  });
+  return () => stop();
 }
 
 export async function syncNotificationToFirestoreIfSignedIn(
   item: PatientNotificationItem
 ): Promise<void> {
   const currentUser = auth?.currentUser;
-  if (!isFirebaseConfigured || !db || !currentUser || !currentUser.emailVerified) {
+  if (!currentUser || !currentUser.emailVerified) {
     return;
   }
-  const docId = buildSafeDocId('notif', item.id);
-  const path = `patient_notifications/${docId}`;
   try {
-    await setDoc(doc(db, 'patient_notifications', docId), {
-      id: docId,
-      no_rm: item.no_rm.slice(0, 40),
-      recipientUid: currentUser.uid,
-      type: item.type,
-      title: item.title.slice(0, 160),
-      body: item.body.slice(0, 500),
-      ...(item.poli ? { poli: item.poli.slice(0, 120) } : {}),
-      ...(item.nomor_antrian ? { nomor_antrian: item.nomor_antrian.slice(0, 32) } : {}),
-      ...(item.lab_order_id ? { lab_order_id: item.lab_order_id.slice(0, 64) } : {}),
-      channel: item.channel,
-      read: Boolean(item.read),
-      createdAt: item.createdAt.slice(0, 64)
+    const res = await fetch('/api/v1/patient-notifications', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: item.id.slice(0, 128),
+        no_rm: item.no_rm.slice(0, 40),
+        recipientUid: currentUser.uid,
+        type: item.type,
+        title: item.title.slice(0, 160),
+        body: item.body.slice(0, 500),
+        ...(item.poli ? { poli: item.poli.slice(0, 120) } : {}),
+        ...(item.nomor_antrian ? { nomor_antrian: item.nomor_antrian.slice(0, 32) } : {}),
+        ...(item.lab_order_id ? { lab_order_id: item.lab_order_id.slice(0, 64) } : {}),
+        channel: item.channel,
+        read: Boolean(item.read),
+        createdAt: item.createdAt.slice(0, 64)
+      })
     });
+    if (!res.ok) console.warn(`[Notifications] Sync failed (HTTP ${res.status}).`);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('[Notifications] Sync skipped:', error);
   }
 }
 
 export async function markFirestoreNotificationRead(notifId: string): Promise<void> {
-  const currentUser = auth?.currentUser;
-  if (!isFirebaseConfigured || !db || !currentUser || !currentUser.emailVerified) {
-    return;
-  }
-  const docId = notifId.startsWith('notif_') ? notifId : buildSafeDocId('notif', notifId);
-  const path = `patient_notifications/${docId}`;
   try {
-    await updateDoc(doc(db, 'patient_notifications', docId), { read: true });
+    const res = await fetch(`/api/v1/patient-notifications/${encodeURIComponent(notifId)}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ read: true })
+    });
+    if (!res.ok) console.warn(`[Notifications] Mark read failed (HTTP ${res.status}).`);
   } catch (error) {
-    // Only log cleanly if document wasn't a purely SSE notification
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn('[Notifications] Mark read skipped:', error);
   }
 }
 

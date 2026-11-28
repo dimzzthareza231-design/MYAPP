@@ -98,6 +98,10 @@ export default defineConfig(() => {
         },
       }),
     ],
+    build: {
+      // Dua build dari satu entry: inti -> dist/core, web publik (vite.public.config.ts) -> dist/public.
+      outDir: process.env.VITE_APP_TARGET === 'public' ? 'dist/public' : 'dist/core',
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
