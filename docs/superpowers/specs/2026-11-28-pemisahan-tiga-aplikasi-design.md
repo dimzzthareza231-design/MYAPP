@@ -31,10 +31,10 @@ sendiri-sendiri, dan secara struktur **tidak mungkin** saling meng-import.
 
 **Bukan tujuan langkah 1 (dikerjakan langkah berikutnya):**
 
-- Memecah `server.ts` / API menjadi layanan terpisah.
-- Menambah autentikasi di API, memperbaiki login karyawan (OTP tetap `123456`),
-  memperketat `firestore.rules`, memisah project Firebase.
-- Pipeline CI/CD dan konfigurasi domain produksi.
+- Menambah autentikasi di level aplikasi, memperbaiki login karyawan (OTP tetap
+  `123456`), memperketat `firestore.rules`, memisah project Firebase.
+- Pindah data dari Durable Object ke D1 (dua database: portal dan inti).
+- Pipeline CI/CD.
 - Perubahan tampilan atau fitur.
 
 **Anti-tujuan (gagal walau secara teknis jalan):**
@@ -50,7 +50,10 @@ sendiri-sendiri, dan secara struktur **tidak mungkin** saling meng-import.
 - Stack tetap: React 19, Vite, TypeScript, Tailwind, react-router-dom, Express (`server.ts`).
 - Repo memakai `package-lock.json`; workspaces memakai **npm**. `bun.lock` dihapus agar
   satu sumber kebenaran lockfile.
-- API tetap satu proses `server.ts` di langkah ini; ketiga aplikasi memanggilnya lewat `/api`.
+- Hosting **full Cloudflare** (keputusan pemilik): Workers + Static Assets, service
+  binding, Durable Objects, Cloudflare Access. Lihat 5.5.
+- Kode API (Express, `server.ts` + `src/server/*`) tetap satu basis kode di langkah ini;
+  ketiga aplikasi memanggilnya lewat `/api` pada domain masing-masing.
 - Bahasa UI dan nama domain bisnis tetap Indonesia.
 
 ## 4. Pendekatan yang dipertimbangkan
@@ -72,8 +75,9 @@ saling terkait; A membuat keterkaitan itu gagal di-build, bukan sekadar peringat
 /
 ├─ package.json            # root: "workspaces": ["apps/*", "packages/*"], skrip agregat
 ├─ tsconfig.base.json      # opsi TS bersama
-├─ server.ts               # API (tetap di root pada langkah 1)
+├─ server.ts               # API: createApi() + listen untuk Node lokal
 ├─ src/server/*            # layanan API yang sudah ada, tidak dipindah
+├─ api/                    # Worker myitaru-api (worker.ts, ApiState DO, wrangler.jsonc)
 ├─ apps/
 │  ├─ publik/              # web publik pasien
 │  │  ├─ package.json      # name: @myitaru/publik
@@ -191,13 +195,62 @@ Contoh: tombol "Login Staf" di publik → `${VITE_INTI_URL}/staff/login`.
 - Skrip per app: `npm run dev -w @myitaru/publik`, `npm run build -w @myitaru/inti`, dst.
 - `typecheck` root menjalankan `tsc --noEmit` per workspace.
 
-### 5.5 Deploy (minimal, agar tidak rusak)
+### 5.5 Deploy: full Cloudflare
 
-- `vercel.json` root dihapus. Ditulis catatan di README: buat 3 project Vercel dengan
-  *Root Directory* `apps/publik`, `apps/karyawan`, `apps/inti`, masing-masing berisi
-  `vercel.json` sendiri (SPA rewrite ke `index.html`).
-- `Dockerfile` hanya membangun dan menjalankan API (`dist/server.cjs`).
-- Domain dan CI menyusul di langkah berikutnya.
+**Domain** (keputusan pemilik):
+
+| Aplikasi | Domain | Status zona Cloudflare (dicek 2026-11-28) |
+|---|---|---|
+| Web publik | `www.myitaru.com` | **belum ada** di akun; pemilik perlu menambahkan zona `myitaru.com` |
+| Aplikasi karyawan | `staff.myitaru.my.id` | zona `myitaru.my.id` aktif (Free) |
+| Aplikasi inti | `myitaru.my.id` | zona `myitaru.my.id` aktif (Free) |
+
+**Worker:**
+
+- `myitaru-publik`, `myitaru-karyawan`, `myitaru-inti`: Worker dengan Static Assets
+  (`apps/<app>/dist`, SPA fallback ke `index.html`), custom domain sesuai tabel.
+  Tiap app punya `apps/<app>/wrangler.jsonc` dan `apps/<app>/worker/index.ts`.
+- `myitaru-api`: Worker yang menjalankan Express (`nodejs_compat`). **Tanpa domain
+  publik dan tanpa `workers.dev`**; hanya bisa dipanggil lewat service binding.
+  Konfigurasi di `api/wrangler.jsonc`, entry `api/worker.ts` yang memakai `server.ts`
+  (dipecah jadi `createApi()` tanpa `listen`, sehingga bisa dipakai Node dan Worker).
+- Tiap Worker frontend meneruskan **hanya** prefix API miliknya ke `myitaru-api`;
+  prefix lain dijawab 404 di Worker frontend:
+
+  | Worker | Prefix yang diteruskan |
+  |---|---|
+  | publik | `/api/public/*`, `/api/patient/*` |
+  | karyawan | `/api/gateway/*` |
+  | inti | `/api/v1/*`, `/api/ai/*`, `/api/cloudflare/*` |
+
+  Worker frontend menambahkan header `X-Myitaru-App: publik|karyawan|inti`; `myitaru-api`
+  menolak request ke prefix yang bukan milik app di header itu (pertahanan kedua).
+
+**State:** data in-memory di `server.ts` (`patientsStore`, `appointmentsStore`, sesi
+`pat_`, state gateway) dipindah ke **satu Durable Object** `ApiState` milik
+`myitaru-api`, agar bertahan antar-request seperti perilaku proses Node sekarang.
+Stream notifikasi (`patientPortalService.ts` heartbeat `setInterval`) dijalankan di
+Durable Object. Pemisahan data portal vs inti ke D1 adalah langkah 2.
+
+**Secret** (via `wrangler secret`, tidak di repo): `GEMINI_API_KEY`, `FCM_SERVER_KEY`,
+`CLOUDFLARE_TURNSTILE_SECRET_KEY`. Fallback Turnstile ke secret uji dan token
+`CF_TURNSTILE_DEMO` dihapus; tanpa secret, verifikasi gagal.
+
+**Cloudflare Access:** aplikasi Access (Zero Trust) di depan `myitaru.my.id` (inti),
+termasuk `/api/*`, dengan kebijakan email staf. Dibuat di langkah 1 karena paling cepat
+menutup API inti yang sekarang terbuka. *(Usulan Claude; pemilik bisa menunda.)*
+`staff.myitaru.my.id` tidak dipasang Access karena dipakai dari aplikasi mobile karyawan.
+
+**Dev lokal:** `npm run dev` tetap memakai Node (`server.ts` di port 3000 + tiga Vite dev
+server). `npm run cf:dev` menjalankan keempat Worker dengan `wrangler dev` untuk uji
+service binding.
+
+**Dihapus:** `vercel.json`, `Dockerfile`, `.dockerignore`, `.env.cloudflare` (tidak
+dibaca kode mana pun).
+
+**Lokasi data:** sebelum data pasien sungguhan masuk, pemilik perlu memastikan
+kewajiban lokasi penyimpanan rekam medis (UU PDP, regulasi RME Kemenkes). Bukan
+penghambat langkah 1 karena data masih data demo.
 
 ### 5.6 Perbaikan build yang rusak
 
@@ -226,6 +279,9 @@ langkah pertama `npm run build`:
 ## 6. Kriteria selesai
 
 - `npm install` dan `npm run build` sukses dari repo bersih.
+- `wrangler deploy --dry-run` lulus untuk keempat Worker.
+- Lewat `wrangler dev`: `/api/v1/patients` dari domain publik menghasilkan 404;
+  `/api/public/hospital-catalog` dari domain publik berhasil.
 - `npm run dev` membuka tiga app di tiga port; tiap rute yang tercantum di 5.2 tampil
   seperti sebelumnya (diperiksa dengan Playwright, screenshot per rute utama).
 - `npm run check:boundaries` lulus, dan gagal bila sengaja ditambah import lintas app.
